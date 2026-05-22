@@ -1,0 +1,41 @@
+name: Deploy to Cloudflare Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      deployments: write
+    env:
+      VITE_SUPABASE_URL: https://ejzjrvazegaxrhqizgaa.supabase.co
+      VITE_SUPABASE_PROJECT_ID: ejzjrvazegaxrhqizgaa
+      VITE_SUPABASE_PUBLISHABLE_KEY: sb_publishable_bB5cSAOdBubagFFtt9L7eQ_oobfO1JK
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: d58b54ae5a23bd00df9ff399e1e34c0e
+          command: pages deploy dist --project-name=globalcrm-sync --branch=main --commit-dirty=true
