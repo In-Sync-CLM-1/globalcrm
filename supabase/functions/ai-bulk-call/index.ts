@@ -48,11 +48,29 @@ serve(async (req) => {
     } catch (_e) { /* no body */ }
   }
 
+  // 0. Stale-call sweep: any AI call sitting in_progress >10 min is treated as a lost-webhook ghost
+  //    and force-closed. Runs every invocation (window-independent) so an overnight stuck row
+  //    clears itself before next morning's window opens. Chain unjams within one cron tick.
+  const staleCutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  const { data: staleRows } = await supabase
+    .from("call_logs")
+    .update({
+      status: "failed",
+      ended_at: new Date().toISOString(),
+      notes: "Auto-closed: in_progress >10min without webhook close (lost-webhook safety sweep).",
+    })
+    .eq("org_id", INSYNC_DEMO_ORG_ID)
+    .eq("caller_type", "ai")
+    .eq("status", "in_progress")
+    .lt("started_at", staleCutoff)
+    .select("id");
+  const staleClosed = (staleRows || []).length;
+
   // 1. Working window check (function-side time gate so the cron can fire every 5 min unconditionally)
   const workWindow = isInsideWorkingWindow();
   if (!testCall) {
     if (!workWindow.inside) {
-      return done(200, { ok: true, acted: false, reason: workWindow.reason });
+      return done(200, { ok: true, acted: false, reason: workWindow.reason, stale_closed: staleClosed });
     }
   }
 
@@ -252,6 +270,7 @@ serve(async (req) => {
     queued_before: queued,
     queued_now: queuedNow,
     dispatched_new_chain: dispatched,
+    stale_closed: staleClosed,
   });
 });
 
