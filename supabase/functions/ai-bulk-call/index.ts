@@ -34,7 +34,9 @@ serve(async (req) => {
   }
 
   // Optional one-off test call — bypasses window + untouched-contact filter
-  let testCall: { phone?: string; first_name?: string; last_name?: string; company?: string } | null = null;
+  let testCall:
+    | { phone?: string; first_name?: string; last_name?: string; company?: string; script_id?: string }
+    | null = null;
   if (req.method === "POST") {
     try {
       const body = await req.json();
@@ -44,6 +46,7 @@ serve(async (req) => {
           first_name: body.first_name || "there",
           last_name: body.last_name || "",
           company: body.company || "your company",
+          script_id: body.script_id,
         };
       }
     } catch (_e) { /* no body */ }
@@ -67,53 +70,39 @@ serve(async (req) => {
     .select("id");
   const staleClosed = (staleRows || []).length;
 
-  // 1. Working window check (function-side time gate so the cron can fire every 5 min unconditionally)
+  // 1. Working window check
   const workWindow = isInsideWorkingWindow();
-  if (!testCall) {
-    if (!workWindow.inside) {
-      return done(200, { ok: true, acted: false, reason: workWindow.reason, stale_closed: staleClosed });
-    }
+  if (!testCall && !workWindow.inside) {
+    return done(200, { ok: true, acted: false, reason: workWindow.reason, stale_closed: staleClosed });
   }
 
-  // 2. Pull active script
-  const { data: script } = await supabase
+  // 2. Pull every active script for this org. Each represents a product-specific AI dialer
+  //    (Riya/Worksync, Anushree/Vendor Verification, etc.). They run in parallel, each with
+  //    its own contact pool (filtered by contacts.product = script.product_name) and queue.
+  const { data: activeScripts } = await supabase
     .from("ai_call_scripts")
     .select("*")
     .eq("org_id", INSYNC_DEMO_ORG_ID)
-    .eq("is_active", true)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .eq("is_active", true);
 
-  if (!script) {
-    return done(200, { ok: true, acted: false, reason: "no active script" });
+  if (!activeScripts || activeScripts.length === 0) {
+    return done(200, { ok: true, acted: false, reason: "no active scripts", stale_closed: staleClosed });
   }
 
-  // 3. Provision Bolna agent if not yet cached
-  let agentId = (script as ScriptRow).bolna_agent_id;
-  if (!agentId) {
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const webhookUrl = `${supabaseUrl}/functions/v1/ai-bolna-webhook`;
-    try {
-      agentId = await createBolnaAgent(bolnaKey, { script: script as ScriptRow, webhookUrl });
-      await supabase
-        .from("ai_call_scripts")
-        .update({ bolna_agent_id: agentId, updated_at: new Date().toISOString() })
-        .eq("id", (script as ScriptRow).id);
-    } catch (e: any) {
-      return done(500, { ok: false, error: `Bolna agent provision failed: ${e?.message || String(e)}` });
-    }
-  }
-
-  // 3b. One-off test call branch — skip queue logic, dial once
+  // 3a. Test call branch — needs an explicit script (caller picks which product to test)
   if (testCall) {
+    const script = (activeScripts as ScriptRow[]).find((s) => s.id === testCall!.script_id)
+      ?? (activeScripts[0] as ScriptRow);
+    const agentId = await ensureBolnaAgent(supabase, bolnaKey, script);
+    if (!agentId) return done(500, { ok: false, error: "Bolna agent provision failed" });
+
     const toNumber = normalizePhone(testCall.phone!) || testCall.phone!;
     const { data: inserted, error: insertErr } = await supabase
       .from("call_logs")
       .insert({
         org_id: INSYNC_DEMO_ORG_ID,
         caller_type: "ai",
-        ai_script_id: (script as ScriptRow).id,
+        ai_script_id: script.id,
         status: "queued",
         call_type: "outbound",
         direction: "outbound",
@@ -161,11 +150,12 @@ serve(async (req) => {
       bolna_execution_id: result.execution_id,
       to_number: toNumber,
       agent_id: agentId,
-      voice: (script as ScriptRow).voice_name,
+      script: script.name,
+      voice: script.voice_name,
     });
   }
 
-  // 4. Daily target check — stop if we've hit it
+  // 4. Global daily-target check (sum across all products)
   const todayStart = new Date();
   todayStart.setUTCHours(0, 0, 0, 0);
   const { count: connectedTodayCount } = await supabase
@@ -183,91 +173,107 @@ serve(async (req) => {
       acted: false,
       reason: `daily target met (${connectedToday}/${DAILY_CONNECTED_TARGET})`,
       connected_today: connectedToday,
+      stale_closed: staleClosed,
     });
   }
 
-  // 5. Is there already an in-flight AI call? Then the webhook chain is alive — top up queue, do not dispatch.
-  const { count: inFlightCount } = await supabase
-    .from("call_logs")
-    .select("id", { count: "exact", head: true })
-    .eq("org_id", INSYNC_DEMO_ORG_ID)
-    .eq("caller_type", "ai")
-    .eq("status", "in_progress");
-
-  const { count: queuedCount } = await supabase
-    .from("call_logs")
-    .select("id", { count: "exact", head: true })
-    .eq("org_id", INSYNC_DEMO_ORG_ID)
-    .eq("caller_type", "ai")
-    .eq("status", "queued");
-
-  const inFlight = inFlightCount || 0;
-  const queued = queuedCount || 0;
-  const needToQueue = Math.max(0, QUEUE_DEPTH - queued);
-
-  // 6. Refill the queue if depth is low — pick fresh, untouched contacts
-  let queuedNow = 0;
-  if (needToQueue > 0) {
-    const queuedRows = await queueUntouchedContacts(supabase, {
-      script: script as ScriptRow,
-      agentId,
-      limit: needToQueue,
-    });
-    queuedNow = queuedRows.length;
-  }
-
-  // 7. Top up in-flight calls to the configured concurrency.
-  //    Each cron tick fires the gap; the webhook also chains within a batch as calls end.
   const concurrency = getConcurrency();
-  const slotsToFill = Math.max(0, concurrency - inFlight);
-  let dispatched = 0;
-  for (let i = 0; i < slotsToFill; i++) {
-    // Pick the oldest queued row so older batches drain before newer ones.
-    const { data: nextRow } = await supabase
+
+  // 5. Per-script loop: top up queue and dispatch up to `concurrency` in-flight, scoped to this script
+  const perScript: any[] = [];
+  for (const s of activeScripts as ScriptRow[]) {
+    const agentId = await ensureBolnaAgent(supabase, bolnaKey, s);
+    if (!agentId) {
+      perScript.push({ script: s.name, product: s.product_name, error: "agent provision failed" });
+      continue;
+    }
+
+    // Count in-flight + queued FOR THIS SCRIPT
+    const { count: inFlightCount } = await supabase
       .from("call_logs")
-      .select("id, contact_id, to_number")
+      .select("id", { count: "exact", head: true })
       .eq("org_id", INSYNC_DEMO_ORG_ID)
       .eq("caller_type", "ai")
-      .eq("status", "queued")
-      .order("created_at", { ascending: true })
-      .order("bolna_queue_position", { ascending: true })
-      .limit(1)
-      .maybeSingle();
+      .eq("ai_script_id", s.id)
+      .eq("status", "in_progress");
 
-    if (!nextRow) break;
-
-    const { data: contact } = await supabase
-      .from("contacts")
-      .select("id, first_name, last_name, company, job_title")
-      .eq("id", nextRow.contact_id)
-      .maybeSingle();
-
-    if (!contact) {
-      await supabase.from("call_logs").update({ status: "error" }).eq("id", nextRow.id);
-      continue;
-    }
-
-    const result = await triggerBolnaCall(bolnaKey, {
-      agentId,
-      toNumber: nextRow.to_number,
-      callLogId: nextRow.id,
-      contact,
-    });
-
-    if (result.error) {
-      await supabase.from("call_logs").update({ status: "error" }).eq("id", nextRow.id);
-      continue;
-    }
-
-    await supabase
+    const { count: queuedCount } = await supabase
       .from("call_logs")
-      .update({
-        status: "in_progress",
-        bolna_execution_id: result.execution_id,
-        started_at: new Date().toISOString(),
-      })
-      .eq("id", nextRow.id);
-    dispatched++;
+      .select("id", { count: "exact", head: true })
+      .eq("org_id", INSYNC_DEMO_ORG_ID)
+      .eq("caller_type", "ai")
+      .eq("ai_script_id", s.id)
+      .eq("status", "queued");
+
+    const inFlight = inFlightCount || 0;
+    const queued = queuedCount || 0;
+    const needToQueue = Math.max(0, QUEUE_DEPTH - queued);
+
+    let queuedNow = 0;
+    if (needToQueue > 0) {
+      const queuedRows = await queueUntouchedContacts(supabase, { script: s, limit: needToQueue });
+      queuedNow = queuedRows.length;
+    }
+
+    const slotsToFill = Math.max(0, concurrency - inFlight);
+    let dispatched = 0;
+    for (let i = 0; i < slotsToFill; i++) {
+      const { data: nextRow } = await supabase
+        .from("call_logs")
+        .select("id, contact_id, to_number")
+        .eq("org_id", INSYNC_DEMO_ORG_ID)
+        .eq("caller_type", "ai")
+        .eq("ai_script_id", s.id)
+        .eq("status", "queued")
+        .order("created_at", { ascending: true })
+        .order("bolna_queue_position", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      if (!nextRow) break;
+
+      const { data: contact } = await supabase
+        .from("contacts")
+        .select("id, first_name, last_name, company, job_title")
+        .eq("id", nextRow.contact_id)
+        .maybeSingle();
+
+      if (!contact) {
+        await supabase.from("call_logs").update({ status: "error" }).eq("id", nextRow.id);
+        continue;
+      }
+
+      const result = await triggerBolnaCall(bolnaKey, {
+        agentId,
+        toNumber: nextRow.to_number,
+        callLogId: nextRow.id,
+        contact,
+      });
+
+      if (result.error) {
+        await supabase.from("call_logs").update({ status: "error" }).eq("id", nextRow.id);
+        continue;
+      }
+
+      await supabase
+        .from("call_logs")
+        .update({
+          status: "in_progress",
+          bolna_execution_id: result.execution_id,
+          started_at: new Date().toISOString(),
+        })
+        .eq("id", nextRow.id);
+      dispatched++;
+    }
+
+    perScript.push({
+      script: s.name,
+      product: s.product_name,
+      in_flight_before: inFlight,
+      queued_before: queued,
+      queued_now: queuedNow,
+      dispatched,
+    });
   }
 
   return done(200, {
@@ -277,51 +283,68 @@ serve(async (req) => {
     connected_today: connectedToday,
     target: DAILY_CONNECTED_TARGET,
     concurrency,
-    in_flight_before: inFlight,
-    queued_before: queued,
-    queued_now: queuedNow,
-    dispatched,
     stale_closed: staleClosed,
+    scripts: perScript,
   });
 });
 
+async function ensureBolnaAgent(
+  supabase: any,
+  bolnaKey: string,
+  script: ScriptRow,
+): Promise<string | null> {
+  if (script.bolna_agent_id) return script.bolna_agent_id;
+
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const webhookUrl = `${supabaseUrl}/functions/v1/ai-bolna-webhook`;
+  try {
+    const agentId = await createBolnaAgent(bolnaKey, { script, webhookUrl });
+    await supabase
+      .from("ai_call_scripts")
+      .update({ bolna_agent_id: agentId, updated_at: new Date().toISOString() })
+      .eq("id", script.id);
+    script.bolna_agent_id = agentId;
+    return agentId;
+  } catch (e: any) {
+    console.error("Bolna agent provision failed:", e?.message || e);
+    return null;
+  }
+}
+
 async function queueUntouchedContacts(
   supabase: any,
-  args: { script: ScriptRow; agentId: string; limit: number },
+  args: { script: ScriptRow; limit: number },
 ): Promise<Array<{ id: string }>> {
   const { script, limit } = args;
 
-  // Candidate selection runs server-side via RPC. Applies these rules:
+  // Server-side candidate selection (RPC). Rules:
   //   - has phone, not in Won/Lost, not do_not_call
-  //   - phone/name does not match any profile in the same org (don't call colleagues)
+  //   - phone/name does not match a profile in the same org (don't call colleagues)
   //   - fewer than 3 actually-dialed AI attempts ever
   //   - last attempt was on an earlier IST calendar day (no same-day retry)
-  // Previously this was a client-side .in() filter on the top-600 contacts which silently
-  // failed with HeadersOverflowError once the URL exceeded ~16KB, causing the same contact
-  // to be re-queued every cron tick. The RPC avoids that entire failure mode.
+  //   - contacts.product matches the script's product_name (case-insensitive)
   const { data: untouched, error: rpcErr } = await supabase.rpc("get_ai_call_candidates", {
     p_org: INSYNC_DEMO_ORG_ID,
     p_limit: limit,
+    p_product: script.product_name,
   });
   if (rpcErr || !untouched || untouched.length === 0) {
     if (rpcErr) console.error("get_ai_call_candidates rpc error:", rpcErr);
     return [];
   }
 
-  // Get current queue tail position
   const { data: maxRow } = await supabase
     .from("call_logs")
     .select("bolna_queue_position")
     .eq("org_id", INSYNC_DEMO_ORG_ID)
     .eq("caller_type", "ai")
+    .eq("ai_script_id", script.id)
     .order("bolna_queue_position", { ascending: false })
     .limit(1)
     .maybeSingle();
   const startPos = ((maxRow?.bolna_queue_position as number) || 0) + 1;
 
-  // Reuse a single batch_id for this dispatch cycle
   const batchId = crypto.randomUUID();
-
   const rows = untouched.map((c: any, idx: number) => ({
     org_id: INSYNC_DEMO_ORG_ID,
     contact_id: c.id,
