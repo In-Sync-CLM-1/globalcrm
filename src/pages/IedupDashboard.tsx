@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import DashboardLayout from "@/components/Layout/DashboardLayout";
@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
+import { TopUpWalletDialog } from "@/components/Subscription/TopUpWalletDialog";
 import {
   Users as UsersIcon,
   PhoneCall,
@@ -22,6 +23,7 @@ const REFRESH_MS = 30_000;
 
 export default function IedupDashboard() {
   const { isLoading: orgLoading } = useIsIedup();
+  const [topUpOpen, setTopUpOpen] = useState(false);
 
   // Data counts
   const { data: dataCounts, refetch: refetchData } = useQuery({
@@ -212,10 +214,18 @@ export default function IedupDashboard() {
               <Button asChild variant="outline" size="sm">
                 <Link to="/pipeline">Manage queue</Link>
               </Button>
-              <Button size="sm" disabled>Top up wallet</Button>
+              <Button size="sm" onClick={() => setTopUpOpen(true)}>
+                Top up wallet
+              </Button>
             </div>
           </CardContent>
         </Card>
+
+        <TopUpWalletDialog
+          open={topUpOpen}
+          onOpenChange={setTopUpOpen}
+          orgId={IEDUP_ORG_ID}
+        />
       </div>
     </DashboardLayout>
   );

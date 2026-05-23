@@ -232,11 +232,31 @@ async function processOrg(
 
   const { data: sub } = await supabase
     .from("organization_subscriptions")
-    .select("subscription_status")
+    .select("subscription_status, wallet_balance, wallet_minimum_balance, last_payment_date, next_billing_date")
     .eq("org_id", orgId)
     .maybeSingle();
   if (sub && (sub.subscription_status === "suspended_locked" || sub.subscription_status === "cancelled")) {
     return { org_id: orgId, acted: false, reason: `subscription ${sub.subscription_status}`, stale_closed: staleClosed };
+  }
+
+  // Wallet enforcement: outside of the free trial, halt dialing when the wallet
+  // has dropped below its minimum. Trial = no payment yet AND next billing date
+  // is still in the future.
+  if (sub) {
+    const today = new Date().toISOString().slice(0, 10);
+    const inTrial = !sub.last_payment_date
+      && typeof sub.next_billing_date === "string"
+      && sub.next_billing_date >= today;
+    const balance = Number(sub.wallet_balance ?? 0);
+    const minBalance = Number(sub.wallet_minimum_balance ?? 0);
+    if (!inTrial && balance <= minBalance) {
+      return {
+        org_id: orgId,
+        acted: false,
+        reason: `wallet exhausted (balance ${balance.toFixed(2)} <= min ${minBalance.toFixed(2)})`,
+        stale_closed: staleClosed,
+      };
+    }
   }
 
   if (ORGS_WITH_DAILY_TARGET.has(orgId)) {
