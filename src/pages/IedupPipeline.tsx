@@ -35,6 +35,7 @@ import {
   X,
   Clock,
   Loader2,
+  UserPlus,
 } from "lucide-react";
 import { IEDUP_ORG_ID } from "@/hooks/useIsIedup";
 import { useNotification } from "@/hooks/useNotification";
@@ -101,6 +102,14 @@ export default function IedupPipeline() {
   const [transliterating, setTransliterating] = useState(false);
   const [importing, setImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Manual-add state
+  const [manualOpen, setManualOpen] = useState(false);
+  const [manualNameEn, setManualNameEn] = useState("");
+  const [manualNameHi, setManualNameHi] = useState("");
+  const [manualNumber, setManualNumber] = useState("");
+  const [manualTransliterating, setManualTransliterating] = useState(false);
+  const [manualSaving, setManualSaving] = useState(false);
 
   // Calling window editor state
   const [windowsDraft, setWindowsDraft] = useState<WindowSlot[]>([]);
@@ -237,6 +246,61 @@ export default function IedupPipeline() {
     }
   }
 
+  function openManualDialog() {
+    setManualNameEn("");
+    setManualNameHi("");
+    setManualNumber("");
+    setManualOpen(true);
+  }
+
+  async function transliterateManualName() {
+    const name = manualNameEn.trim();
+    if (!name) return;
+    setManualTransliterating(true);
+    try {
+      const { data } = await supabase.functions.invoke("transliterate-names", {
+        body: { names: [name] },
+      });
+      const hi = (data?.names_hi?.[0] as string) || name;
+      setManualNameHi(hi);
+    } catch {
+      setManualNameHi(name);
+    } finally {
+      setManualTransliterating(false);
+    }
+  }
+
+  async function saveManualBeneficiary() {
+    const name = manualNameEn.trim();
+    const num = normalizePhone(manualNumber);
+    if (!name || !num) {
+      notify.error("Missing details", "Both name and number are required.");
+      return;
+    }
+    setManualSaving(true);
+    try {
+      const parts = name.split(/\s+/);
+      const { error } = await supabase.from("contacts").insert({
+        org_id: IEDUP_ORG_ID,
+        first_name: parts[0] || name,
+        last_name: parts.slice(1).join(" ") || null,
+        name_hi: (manualNameHi || name).trim(),
+        phone: num,
+        product: "CM YUVA",
+        source: "iedup_manual_add",
+      });
+      if (error) throw error;
+      notify.success("Beneficiary added", `${name} is in the pipeline.`);
+      setManualOpen(false);
+      refetchList();
+      qc.invalidateQueries({ queryKey: ["iedup-data-counts"] });
+    } catch (err: any) {
+      notify.error("Could not add", err.message || "Save failed.");
+    } finally {
+      setManualSaving(false);
+    }
+  }
+
   async function deleteRow(row: BeneficiaryRow) {
     if (!confirm(`Delete ${row.first_name || row.phone}? This cannot be undone.`)) return;
     try {
@@ -310,6 +374,10 @@ export default function IedupPipeline() {
             <p className="text-sm text-muted-foreground">{statusReason}</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" size="sm" onClick={openManualDialog}>
+              <UserPlus className="mr-2 h-4 w-4" />
+              Add beneficiary
+            </Button>
             <Button
               variant="outline"
               size="sm"
@@ -327,7 +395,7 @@ export default function IedupPipeline() {
             />
             <Button variant="ghost" size="sm" onClick={handleDownloadTemplate}>
               <Download className="mr-2 h-4 w-4" />
-              Sample
+              CSV template
             </Button>
             {dialingActive ? (
               <Button variant="destructive" size="sm" onClick={() => toggleDialing(false)}>
@@ -456,6 +524,77 @@ export default function IedupPipeline() {
             )}
           </CardContent>
         </Card>
+
+        {/* Manual add dialog */}
+        <Dialog open={manualOpen} onOpenChange={setManualOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Add a beneficiary</DialogTitle>
+              <DialogDescription>
+                Enter name and number. The Hindi spelling is auto-generated so the AI agent pronounces it correctly — you can edit it before saving.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3 py-2">
+              <div>
+                <Label htmlFor="manual-name">Name (English)</Label>
+                <Input
+                  id="manual-name"
+                  value={manualNameEn}
+                  onChange={(e) => setManualNameEn(e.target.value)}
+                  onBlur={() => {
+                    if (manualNameEn.trim() && !manualNameHi.trim()) transliterateManualName();
+                  }}
+                  placeholder="Vibhu Dixit"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <Label htmlFor="manual-name-hi" className="flex items-center gap-2">
+                  Name (Hindi){" "}
+                  {manualTransliterating && <Loader2 className="h-3 w-3 animate-spin" />}
+                  <Button
+                    type="button"
+                    variant="link"
+                    className="h-auto p-0 text-xs"
+                    onClick={transliterateManualName}
+                    disabled={!manualNameEn.trim() || manualTransliterating}
+                  >
+                    Regenerate
+                  </Button>
+                </Label>
+                <Input
+                  id="manual-name-hi"
+                  value={manualNameHi}
+                  onChange={(e) => setManualNameHi(e.target.value)}
+                  placeholder="विभु दीक्षित"
+                />
+              </div>
+              <div>
+                <Label htmlFor="manual-number">Number</Label>
+                <Input
+                  id="manual-number"
+                  value={manualNumber}
+                  onChange={(e) => setManualNumber(e.target.value)}
+                  placeholder="+91 9876543210"
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setManualOpen(false)} disabled={manualSaving}>
+                Cancel
+              </Button>
+              <Button onClick={saveManualBeneficiary} disabled={manualSaving || manualTransliterating}>
+                {manualSaving ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Saving…
+                  </>
+                ) : (
+                  <>Save</>
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* Upload preview dialog */}
         <Dialog open={uploadOpen} onOpenChange={setUploadOpen}>
