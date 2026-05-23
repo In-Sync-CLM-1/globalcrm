@@ -88,8 +88,23 @@ serve(async (req) => {
       .select("id, phone, do_not_call")
       .eq("org_id", orgId)
       .in("id", contactIds);
-    const valid = (contacts || []).filter((c: any) => c.phone && !c.do_not_call);
-    if (valid.length === 0) return done(200, { ok: true, queued: 0, reason: "no valid contacts" });
+    let valid = (contacts || []).filter((c: any) => c.phone && !c.do_not_call);
+
+    // Enforce per-contact cap: skip anyone already connected, or already attempted 3+ times.
+    if (valid.length > 0) {
+      const ids = valid.map((c: any) => c.id);
+      const { data: stats } = await supabase.rpc("contact_ai_call_stats", { p_contact_ids: ids });
+      const byId = new Map<string, { attempts: number; connected: number }>();
+      for (const s of (stats || []) as Array<{ contact_id: string; attempts: number; connected: number }>) {
+        byId.set(s.contact_id, { attempts: s.attempts, connected: s.connected });
+      }
+      valid = valid.filter((c: any) => {
+        const st = byId.get(c.id) || { attempts: 0, connected: 0 };
+        return st.connected === 0 && st.attempts < 3;
+      });
+    }
+
+    if (valid.length === 0) return done(200, { ok: true, queued: 0, reason: "no valid contacts (already connected or 3-attempt cap)" });
 
     const { data: maxRow } = await supabase
       .from("call_logs")
@@ -172,6 +187,20 @@ serve(async (req) => {
         ok: false,
         error: `An AI call to ${toNumber} is already in progress (call ${liveCall.id}, started ${liveCall.started_at}).`,
       });
+    }
+
+    // Per-contact cap: never call again once connected, otherwise max 3 attempts.
+    if (body?.contact_id) {
+      const { data: stats } = await supabase.rpc("contact_ai_call_stats", {
+        p_contact_ids: [body.contact_id as string],
+      });
+      const st = (Array.isArray(stats) && stats[0]) || { attempts: 0, connected: 0 };
+      if (Number(st.connected) > 0) {
+        return done(409, { ok: false, error: "This contact has already been connected — no further calls allowed." });
+      }
+      if (Number(st.attempts) >= 3) {
+        return done(409, { ok: false, error: "This contact has reached the 3-attempt cap." });
+      }
     }
 
     let nameHi: string | null = null;

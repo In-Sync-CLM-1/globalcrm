@@ -56,6 +56,15 @@ interface BeneficiaryRow {
   status: string | null;
   created_at: string | null;
   last_call_at?: string | null;
+  attempts?: number;
+  connected?: number;
+}
+
+function callCapExhausted(b: BeneficiaryRow): boolean {
+  if (b.do_not_call) return true;
+  if ((b.connected || 0) > 0) return true;
+  if ((b.attempts || 0) >= 3) return true;
+  return false;
 }
 
 interface UploadRow {
@@ -97,20 +106,32 @@ export default function IedupPipeline() {
       if (rows.length === 0) return rows;
 
       const ids = rows.map((r) => r.id);
-      const { data: calls } = await supabase
-        .from("call_logs")
-        .select("contact_id, started_at")
-        .eq("org_id", IEDUP_ORG_ID)
-        .in("contact_id", ids)
-        .not("started_at", "is", null)
-        .order("started_at", { ascending: false });
+      const [callsRes, statsRes] = await Promise.all([
+        supabase
+          .from("call_logs")
+          .select("contact_id, started_at")
+          .eq("org_id", IEDUP_ORG_ID)
+          .in("contact_id", ids)
+          .not("started_at", "is", null)
+          .order("started_at", { ascending: false }),
+        supabase.rpc("contact_ai_call_stats", { p_contact_ids: ids }),
+      ]);
 
       const latest = new Map<string, string>();
-      for (const c of calls || []) {
+      for (const c of callsRes.data || []) {
         const cid = (c as any).contact_id as string;
         if (cid && !latest.has(cid)) latest.set(cid, (c as any).started_at as string);
       }
-      return rows.map((r) => ({ ...r, last_call_at: latest.get(r.id) ?? null }));
+      const stats = new Map<string, { attempts: number; connected: number }>();
+      for (const s of (statsRes.data || []) as Array<{ contact_id: string; attempts: number; connected: number }>) {
+        stats.set(s.contact_id, { attempts: Number(s.attempts), connected: Number(s.connected) });
+      }
+      return rows.map((r) => ({
+        ...r,
+        last_call_at: latest.get(r.id) ?? null,
+        attempts: stats.get(r.id)?.attempts || 0,
+        connected: stats.get(r.id)?.connected || 0,
+      }));
     },
     refetchInterval: 30_000,
   });
@@ -333,7 +354,7 @@ export default function IedupPipeline() {
     return all.filter((b) => {
       if (filterFrom && b.created_at && b.created_at.slice(0, 10) < filterFrom) return false;
       if (filterTo && b.created_at && b.created_at.slice(0, 10) > filterTo) return false;
-      if (hideCalled && b.last_call_at) return false;
+      if (hideCalled && callCapExhausted(b)) return false;
       return true;
     });
   }, [beneficiaries, filterFrom, filterTo, hideCalled]);
@@ -348,16 +369,17 @@ export default function IedupPipeline() {
     });
   }, [filteredBeneficiaries]);
 
+  const selectableFiltered = filteredBeneficiaries.filter((b) => b.phone && !callCapExhausted(b));
   const allFilteredSelected =
-    filteredBeneficiaries.length > 0 && filteredBeneficiaries.every((b) => selectedIds.has(b.id));
+    selectableFiltered.length > 0 && selectableFiltered.every((b) => selectedIds.has(b.id));
   const someFilteredSelected =
-    !allFilteredSelected && filteredBeneficiaries.some((b) => selectedIds.has(b.id));
+    !allFilteredSelected && selectableFiltered.some((b) => selectedIds.has(b.id));
 
   function toggleAll() {
     if (allFilteredSelected) {
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(filteredBeneficiaries.map((b) => b.id)));
+      setSelectedIds(new Set(selectableFiltered.map((b) => b.id)));
     }
   }
   function toggleOne(id: string) {
@@ -595,7 +617,7 @@ export default function IedupPipeline() {
                   checked={hideCalled}
                   onCheckedChange={(v) => setHideCalled(!!v)}
                 />
-                Hide already-called
+                Hide ineligible (connected or capped)
               </label>
               {(filterFrom || filterTo || hideCalled) && (
                 <Button variant="ghost" size="sm" onClick={clearFilters}>
@@ -660,51 +682,67 @@ export default function IedupPipeline() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredBeneficiaries.map((b) => (
-                      <TableRow key={b.id} data-state={selectedIds.has(b.id) ? "selected" : undefined}>
-                        <TableCell>
-                          <Checkbox
-                            checked={selectedIds.has(b.id)}
-                            onCheckedChange={() => toggleOne(b.id)}
-                            disabled={!b.phone || b.do_not_call === true}
-                            aria-label={`Select ${b.first_name || b.phone}`}
-                          />
-                        </TableCell>
-                        <TableCell>{[b.first_name, b.last_name].filter(Boolean).join(" ")}</TableCell>
-                        <TableCell className="font-medium">{b.name_hi || "—"}</TableCell>
-                        <TableCell className="font-mono text-sm">{b.phone}</TableCell>
-                        <TableCell className="text-xs text-muted-foreground">
-                          {b.created_at ? new Date(b.created_at).toLocaleDateString() : "—"}
-                        </TableCell>
-                        <TableCell>
-                          {b.do_not_call ? (
-                            <Badge variant="destructive">Do not call</Badge>
-                          ) : b.last_call_at ? (
-                            <Badge variant="secondary">Called</Badge>
-                          ) : (
-                            <Badge variant="outline">Pending</Badge>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-xs text-muted-foreground">
-                          {b.last_call_at ? new Date(b.last_call_at).toLocaleString() : "—"}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-1">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              disabled={!b.phone || b.do_not_call === true}
-                              onClick={() => dialNow(b)}
-                            >
-                              <Phone className="h-4 w-4" />
-                            </Button>
-                            <Button variant="ghost" size="sm" onClick={() => deleteRow(b)}>
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                    {filteredBeneficiaries.map((b) => {
+                      const capDone = callCapExhausted(b);
+                      const attempts = b.attempts || 0;
+                      const connected = (b.connected || 0) > 0;
+                      return (
+                        <TableRow key={b.id} data-state={selectedIds.has(b.id) ? "selected" : undefined}>
+                          <TableCell>
+                            <Checkbox
+                              checked={selectedIds.has(b.id)}
+                              onCheckedChange={() => toggleOne(b.id)}
+                              disabled={!b.phone || capDone}
+                              aria-label={`Select ${b.first_name || b.phone}`}
+                            />
+                          </TableCell>
+                          <TableCell>{[b.first_name, b.last_name].filter(Boolean).join(" ")}</TableCell>
+                          <TableCell className="font-medium">{b.name_hi || "—"}</TableCell>
+                          <TableCell className="font-mono text-sm">{b.phone}</TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            {b.created_at ? new Date(b.created_at).toLocaleDateString() : "—"}
+                          </TableCell>
+                          <TableCell>
+                            {b.do_not_call ? (
+                              <Badge variant="destructive">Do not call</Badge>
+                            ) : connected ? (
+                              <Badge variant="default">Connected</Badge>
+                            ) : attempts >= 3 ? (
+                              <Badge variant="destructive">Max attempts</Badge>
+                            ) : attempts > 0 ? (
+                              <Badge variant="secondary">{attempts}/3 tried</Badge>
+                            ) : (
+                              <Badge variant="outline">Pending</Badge>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            {b.last_call_at ? new Date(b.last_call_at).toLocaleString() : "—"}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex justify-end gap-1">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                disabled={!b.phone || capDone}
+                                title={
+                                  connected
+                                    ? "Already connected — no further calls"
+                                    : attempts >= 3
+                                      ? "3-attempt cap reached"
+                                      : "Dial now"
+                                }
+                                onClick={() => dialNow(b)}
+                              >
+                                <Phone className="h-4 w-4" />
+                              </Button>
+                              <Button variant="ghost" size="sm" onClick={() => deleteRow(b)}>
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </div>
