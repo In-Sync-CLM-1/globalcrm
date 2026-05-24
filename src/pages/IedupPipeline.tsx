@@ -229,10 +229,14 @@ export default function IedupPipeline() {
     if (uploadRows.length === 0) return;
     setImporting(true);
     try {
+      const { data: userData } = await supabase.auth.getUser();
+      const userId = userData?.user?.id;
+      if (!userId) throw new Error("You must be signed in to import.");
       const inserts = uploadRows.map((r) => {
         const parts = r.name_en.trim().split(/\s+/);
         return {
           org_id: IEDUP_ORG_ID,
+          created_by: userId,
           first_name: parts[0] || r.name_en,
           last_name: parts.slice(1).join(" ") || null,
           name_hi: r.name_hi || r.name_en,
@@ -326,9 +330,13 @@ export default function IedupPipeline() {
     }
     setManualSaving(true);
     try {
+      const { data: userData } = await supabase.auth.getUser();
+      const userId = userData?.user?.id;
+      if (!userId) throw new Error("You must be signed in to add a beneficiary.");
       const parts = name.split(/\s+/);
       const { error } = await supabase.from("contacts").insert({
         org_id: IEDUP_ORG_ID,
+        created_by: userId,
         first_name: parts[0] || name,
         last_name: parts.slice(1).join(" ") || null,
         name_hi: (manualNameHi || name).trim(),
