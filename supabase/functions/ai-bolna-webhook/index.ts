@@ -22,14 +22,18 @@ const CALL_COST_PER_MINUTE = 3.0;
 const WHATSAPP_UTILITY_COST_PER_MSG = 0.20;
 
 // Org-specific post-call WhatsApp template config.
+// from_number overrides the default EXOTEL_SENDER_NUMBER env when set —
+// used when an org has its own WhatsApp sender on the same WABA.
 const POST_CALL_WA_BY_ORG: Record<string, {
   template_name: string;
   language_code: string;
+  from_number?: string;
   body_params: (ctx: { firstName: string }) => string[];
 }> = {
   "6dcf4229-6902-4cd4-9c7f-2d6ed4a6045d": {
     template_name: "iedup_cmyuva_training_link",
     language_code: "hi",
+    from_number: "+918808359820",
     body_params: ({ firstName }) => [
       firstName,
       "https://cmyuva.iedup.co.in/registration_form.php",
@@ -246,7 +250,7 @@ async function sendPostCallWhatsApp(
     const apiToken = Deno.env.get("EXOTEL_API_TOKEN");
     const sid = Deno.env.get("EXOTEL_SID");
     const subdomain = Deno.env.get("EXOTEL_SUBDOMAIN") || "api.exotel.com";
-    const from = Deno.env.get("EXOTEL_SENDER_NUMBER");
+    const from = args.config.from_number || Deno.env.get("EXOTEL_SENDER_NUMBER");
 
     if (!apiKey || !apiToken || !sid || !from) {
       console.error("post-call-wa skip: missing Exotel creds");
