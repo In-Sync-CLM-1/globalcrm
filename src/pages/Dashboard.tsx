@@ -29,31 +29,6 @@ export default function Dashboard() {
   const { effectiveOrgId, isLoading: orgLoading } = useOrgContext();
   const { isAdmin, isSuperAdmin, loading: roleLoading } = useUserRole();
 
-  // IEDUP org: render the dedicated minimal dashboard
-  if (effectiveOrgId === IEDUP_ORG_ID) {
-    return <IedupDashboard />;
-  }
-
-  // In-Sync Demo: admins see team-level compact dashboard; SDRs see their own dashboard
-  if (effectiveOrgId === INSYNC_DEMO_ORG_ID) {
-    if (roleLoading) {
-      return (
-        <DashboardLayout>
-          <LoadingState message="Loading dashboard..." />
-        </DashboardLayout>
-      );
-    }
-    return (
-      <DashboardLayout>
-        {isAdmin || isSuperAdmin ? (
-          <CompactDashboard orgId={effectiveOrgId} />
-        ) : (
-          <SDRDashboard orgId={effectiveOrgId} />
-        )}
-      </DashboardLayout>
-    );
-  }
-
   const queryClient = useQueryClient();
   const { triggerEdgeFunctionCheck, checkReminders } = useCallbackReminders();
   const hasCheckedReminders = useRef(false);
@@ -62,6 +37,13 @@ export default function Dashboard() {
   const [datePreset, setDatePreset] = useState<DateRangePreset>("this_month");
   const [dateRange, setDateRange] = useState(() => getDateRangeFromPreset("this_month"));
   const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Only the standard sales dashboard runs the heavy queries below.
+  // IEDUP and In-Sync Demo render their own dashboards and don't need this data.
+  const isStandardDashboardOrg =
+    !!effectiveOrgId &&
+    effectiveOrgId !== IEDUP_ORG_ID &&
+    effectiveOrgId !== INSYNC_DEMO_ORG_ID;
 
   // Trigger reminder check on dashboard load
   useEffect(() => {
@@ -83,7 +65,7 @@ export default function Dashboard() {
       if (error) throw error;
       return data;
     },
-    enabled: !!effectiveOrgId,
+    enabled: isStandardDashboardOrg,
   });
 
   // Fetch ordered pipeline stages with colors for funnel chart
@@ -97,7 +79,7 @@ export default function Dashboard() {
       if (error) throw error;
       return data || [];
     },
-    enabled: !!effectiveOrgId,
+    enabled: isStandardDashboardOrg,
   });
 
   // Fetch sales rep performance
@@ -112,7 +94,7 @@ export default function Dashboard() {
       if (error) throw error;
       return data || [];
     },
-    enabled: !!effectiveOrgId,
+    enabled: isStandardDashboardOrg,
   });
 
   // Fetch activity trends
@@ -128,7 +110,7 @@ export default function Dashboard() {
       if (error) throw error;
       return data || [];
     },
-    enabled: !!effectiveOrgId,
+    enabled: isStandardDashboardOrg,
   });
 
   // Fetch new contacts added in this period (for KPI)
@@ -145,7 +127,7 @@ export default function Dashboard() {
       if (error) throw error;
       return count || 0;
     },
-    enabled: !!effectiveOrgId,
+    enabled: isStandardDashboardOrg,
   });
 
   // Fetch contacts in won/lost stages for win rate
@@ -173,7 +155,7 @@ export default function Dashboard() {
 
       return { won: wonRes.count || 0, lost: lostRes.count || 0 };
     },
-    enabled: !!effectiveOrgId,
+    enabled: isStandardDashboardOrg,
   });
 
   // Process activity trends into per-day { date, calls, emails, meetings }
@@ -218,6 +200,32 @@ export default function Dashboard() {
   };
 
   // EARLY RETURN - All hooks are above this point
+
+  // IEDUP org: render the dedicated minimal dashboard
+  if (effectiveOrgId === IEDUP_ORG_ID) {
+    return <IedupDashboard />;
+  }
+
+  // In-Sync Demo: admins see team-level compact dashboard; SDRs see their own dashboard
+  if (effectiveOrgId === INSYNC_DEMO_ORG_ID) {
+    if (roleLoading) {
+      return (
+        <DashboardLayout>
+          <LoadingState message="Loading dashboard..." />
+        </DashboardLayout>
+      );
+    }
+    return (
+      <DashboardLayout>
+        {isAdmin || isSuperAdmin ? (
+          <CompactDashboard orgId={effectiveOrgId} />
+        ) : (
+          <SDRDashboard orgId={effectiveOrgId} />
+        )}
+      </DashboardLayout>
+    );
+  }
+
   if (!effectiveOrgId || loading) {
     return (
       <DashboardLayout>
