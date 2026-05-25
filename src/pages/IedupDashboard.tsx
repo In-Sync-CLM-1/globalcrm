@@ -182,7 +182,7 @@ export default function IedupDashboard() {
 
   return (
     <DashboardLayout>
-      <div className="space-y-5">
+      <div className="space-y-3">
         {/* Header */}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -208,10 +208,10 @@ export default function IedupDashboard() {
         </div>
 
         {/* Primary trend + funnel */}
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
           <ChartCard className="lg:col-span-2" title="WhatsApp outreach over time" subtitle="Sent → Delivered → Opened">
             {hasWaData ? (
-              <ResponsiveContainer width="100%" height={260}>
+              <ResponsiveContainer width="100%" height={200}>
                 <AreaChart data={trend} margin={{ top: 6, right: 8, left: -18, bottom: 0 }}>
                   <defs>
                     {(["sent", "delivered", "opened"] as const).map((k) => (
@@ -235,7 +235,7 @@ export default function IedupDashboard() {
           </ChartCard>
 
           <ChartCard title="Delivery funnel" subtitle="This period">
-            <div className="flex h-[260px] flex-col justify-center gap-4 px-1">
+            <div className="flex h-[200px] flex-col justify-center gap-3 px-1">
               <FunnelBar label="Sent" value={wa.sent} total={wa.sent} color={C.sent} />
               <FunnelBar label="Delivered" value={wa.delivered} total={wa.sent} color={C.delivered} />
               <FunnelBar label="Opened" value={wa.opened} total={wa.sent} color={C.opened} />
@@ -244,10 +244,10 @@ export default function IedupDashboard() {
         </div>
 
         {/* Calls trend + by-template */}
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
           <ChartCard title="Calls over time" subtitle="Placed vs Connected">
             {hasCallData ? (
-              <ResponsiveContainer width="100%" height={240}>
+              <ResponsiveContainer width="100%" height={200}>
                 <AreaChart data={trend} margin={{ top: 6, right: 8, left: -18, bottom: 0 }}>
                   <defs>
                     <linearGradient id="g-placed" x1="0" y1="0" x2="0" y2="1">
@@ -271,7 +271,7 @@ export default function IedupDashboard() {
 
           <ChartCard title="By message type" subtitle="Sent vs Opened">
             {byTemplate.length > 0 ? (
-              <ResponsiveContainer width="100%" height={240}>
+              <ResponsiveContainer width="100%" height={200}>
                 <BarChart data={byTemplate} layout="vertical" margin={{ top: 4, right: 12, left: 8, bottom: 0 }}>
                   <CartesianGrid horizontal={false} strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.5} />
                   <XAxis type="number" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} allowDecimals={false} />
@@ -285,25 +285,6 @@ export default function IedupDashboard() {
             ) : <Empty>No WhatsApp activity in this period</Empty>}
           </ChartCard>
         </div>
-
-        {/* Call & message detail tiles (this period) */}
-        <Section title="Call summary">
-          <Tile icon={<PhoneCall size={16} />} label="Placed" value={calls.placed} />
-          <Tile icon={<CheckCircle2 size={16} />} label="Connected" value={calls.connected} />
-          <Tile icon={<AlertTriangle size={16} />} label="No answer / busy" value={calls.noAnswer} />
-          <Tile icon={<XCircle size={16} />} label="Failed" value={calls.failed} />
-          <Tile icon={<Clock size={16} />} label="Avg duration" value={`${calls.avgSec}s`} />
-          <Tile icon={<IndianRupee size={16} />} label="Call cost" value={`₹${calls.costRupees}`} />
-        </Section>
-
-        <Section title="WhatsApp messages">
-          <Tile icon={<Send size={16} />} label="Sent" value={wa.sent} />
-          <Tile icon={<CheckCircle2 size={16} />} label="Delivered" value={wa.delivered} />
-          <Tile icon={<Eye size={16} />} label="Opened" value={wa.opened} />
-          <Tile icon={<XCircle size={16} />} label="Failed" value={wa.failed} />
-          <Tile icon={<MessageSquare size={16} />} label="Open rate" value={`${wa.openRate}%`} />
-          <Tile icon={<IndianRupee size={16} />} label="Message cost" value={`₹${wa.cost.toFixed(2)}`} />
-        </Section>
 
         {/* Wallet strip */}
         <Card className="border-0 bg-gradient-to-r from-muted/60 to-muted/20">
@@ -414,7 +395,7 @@ const ChartTooltip = ({ active, payload, label }: any) => {
 };
 
 function Empty({ children }: { children: React.ReactNode }) {
-  return <div className="flex h-[240px] items-center justify-center text-xs text-muted-foreground">{children}</div>;
+  return <div className="flex h-[200px] items-center justify-center text-xs text-muted-foreground">{children}</div>;
 }
 
 function daysBetween(a: Date, b: Date): number {
