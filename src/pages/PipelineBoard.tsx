@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { format } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import DashboardLayout from "@/components/Layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -123,6 +123,10 @@ export default function PipelineBoard() {
 
   const [filteredContacts, setFilteredContacts] = useState<Contact[] | null>(null);
   const [draggedContact, setDraggedContact] = useState<string | null>(null);
+  // Board perf: render a capped number of cards per column, expandable on demand,
+  // so a stage with hundreds of contacts doesn't paint hundreds of DOM cards at once.
+  const STAGE_CARD_PAGE = 25;
+  const [stageCardLimits, setStageCardLimits] = useState<Record<string, number>>({});
   
   // Use URL-based filter state for persistence across navigation
   const [urlFilters, setUrlFilters, clearUrlFilters] = useUrlFilterState<PipelineFiltersState>(
@@ -349,6 +353,9 @@ export default function PipelineBoard() {
       }
     },
     enabled: !!effectiveOrgId && dispositionFilterReady,
+    // Keep showing the previous page/tab's data while the next loads, so
+    // switching pages or board/table doesn't blank-flash and refetch from empty.
+    placeholderData: keepPreviousData,
   });
 
   // Latest disposition per visible contact (for the table column)
@@ -934,7 +941,12 @@ export default function PipelineBoard() {
 
           <TabsContent value="board" className="mt-6">
             <div className="flex gap-4 overflow-x-auto pb-4">
-          {stages.map(stage => (
+          {stages.map(stage => {
+            const stageContacts = getContactsInStage(stage.id);
+            const visibleCount = stageCardLimits[stage.id] ?? STAGE_CARD_PAGE;
+            const visibleContacts = stageContacts.slice(0, visibleCount);
+            const hiddenCount = stageContacts.length - visibleContacts.length;
+            return (
             <div
               key={stage.id}
               className="flex-shrink-0 w-80"
@@ -945,14 +957,14 @@ export default function PipelineBoard() {
                 <CardHeader className="pb-3">
                   <CardTitle className="text-sm font-medium flex items-center justify-between">
                     <span>{stage.name}</span>
-                    <Badge variant="secondary">{getContactsInStage(stage.id).length}</Badge>
+                    <Badge variant="secondary">{stageContacts.length}</Badge>
                   </CardTitle>
                   <p className="text-xs text-muted-foreground">
                     {stage.probability}% probability
                   </p>
                 </CardHeader>
                 <CardContent className="space-y-2 max-h-[calc(100vh-250px)] overflow-y-auto">
-                  {getContactsInStage(stage.id).map(contact => (
+                  {visibleContacts.map(contact => (
                     <Card
                        key={contact.id}
                        draggable
@@ -1053,10 +1065,26 @@ export default function PipelineBoard() {
                        </CardContent>
                      </Card>
                   ))}
+                  {hiddenCount > 0 && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="w-full text-xs text-muted-foreground"
+                      onClick={() =>
+                        setStageCardLimits(prev => ({
+                          ...prev,
+                          [stage.id]: (prev[stage.id] ?? STAGE_CARD_PAGE) + STAGE_CARD_PAGE,
+                        }))
+                      }
+                    >
+                      Show {Math.min(hiddenCount, STAGE_CARD_PAGE)} more ({hiddenCount} hidden)
+                    </Button>
+                  )}
                 </CardContent>
               </Card>
             </div>
-            ))}
+            );
+            })}
             </div>
           </TabsContent>
 
