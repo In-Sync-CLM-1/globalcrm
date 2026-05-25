@@ -113,6 +113,8 @@ export function BulkUploadDialog({ open, onOpenChange, orgId, onUploadStarted }:
       'company', 'job_title', 'organization_name', 'organization_founded_year', 'organization_industry',
       // Classification
       'industry_type', 'nature_of_business', 'status', 'source',
+      // Pipeline (matched by stage name; drives stage-based automations)
+      'pipeline_stage',
       // Address
       'address', 'city', 'state', 'country', 'postal_code',
       // Professional
@@ -352,6 +354,7 @@ export function BulkUploadDialog({ open, onOpenChange, orgId, onUploadStarted }:
             <ul className="list-disc list-inside space-y-1 text-muted-foreground">
               <li>UTF-8 encoded CSV file</li>
               <li>Required columns: <code className="bg-background px-1 rounded">first_name</code>, <code className="bg-background px-1 rounded">email</code></li>
+              <li>Optional <code className="bg-background px-1 rounded">pipeline_stage</code>: must match a stage name in your pipeline; sets the contact's stage on import</li>
               <li>Maximum 5,000 records per upload</li>
               <li>Maximum file size: 10MB</li>
             </ul>

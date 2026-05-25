@@ -232,6 +232,22 @@ serve(async (req) => {
       throw new Error(`Missing required columns: ${missingColumns.join(', ')}`);
     }
 
+    // For contact imports, build a stage-name -> id lookup so an uploaded
+    // "pipeline_stage" (or "stage") column can set each contact's pipeline stage.
+    // Matching is case-insensitive on the active stage names for this org;
+    // an unrecognised value just leaves the stage unset (no row failure).
+    const stageNameToId: Record<string, string> = {};
+    if (importJob.import_type === 'contacts') {
+      const { data: orgStages } = await supabase
+        .from('pipeline_stages')
+        .select('id, name')
+        .eq('org_id', importJob.org_id)
+        .eq('is_active', true);
+      for (const s of orgStages || []) {
+        stageNameToId[String(s.name).trim().toLowerCase()] = s.id;
+      }
+    }
+
     // Parse and process data
     await updateJobStage(supabase, importJobId, 'parsing', {
       message: 'Parsing CSV data...',
@@ -299,6 +315,7 @@ serve(async (req) => {
             nature_of_business: row.nature_of_business || null,
             status: row.status || 'new',
             source: row.source || 'bulk_import',
+            pipeline_stage_id: stageNameToId[String(row.pipeline_stage || row.stage || '').trim().toLowerCase()] || null,
             address: row.address || null,
             city: row.city || row.location_city || null,
             state: row.state || row.location_state || null,
