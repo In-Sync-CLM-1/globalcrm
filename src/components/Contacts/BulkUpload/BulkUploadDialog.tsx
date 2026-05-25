@@ -6,6 +6,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { supabase } from "@/integrations/supabase/client";
 import { useNotification } from "@/hooks/useNotification";
 import { logError } from "@/lib/errorLogger";
+import { IEDUP_ORG_ID } from "@/hooks/useIsIedup";
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const MAX_RECORDS = 5000;
@@ -106,7 +107,7 @@ export function BulkUploadDialog({ open, onOpenChange, orgId, onUploadStarted }:
   };
 
   const downloadTemplate = () => {
-    const headers = [
+    const baseHeaders = [
       // Basic Info (Required: first_name, email)
       'first_name', 'last_name', 'email', 'phone',
       // Company Info
@@ -124,6 +125,12 @@ export function BulkUploadDialog({ open, onOpenChange, orgId, onUploadStarted }:
       // Notes
       'notes'
     ];
+    // IEDUP runs an action-driven flow: surface the trigger column as "Action"
+    // and drop the generic lead "status" column (the status the client tracks —
+    // Call made / Message Sent / Delivered / Opened — is auto-filled, not uploaded).
+    const headers = orgId === IEDUP_ORG_ID
+      ? baseHeaders.filter((h) => h !== 'status').map((h) => (h === 'pipeline_stage' ? 'Action' : h))
+      : baseHeaders;
     const csvContent = headers.join(',') + '\n';
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = window.URL.createObjectURL(blob);
@@ -354,7 +361,7 @@ export function BulkUploadDialog({ open, onOpenChange, orgId, onUploadStarted }:
             <ul className="list-disc list-inside space-y-1 text-muted-foreground">
               <li>UTF-8 encoded CSV file</li>
               <li>Required columns: <code className="bg-background px-1 rounded">first_name</code>, <code className="bg-background px-1 rounded">email</code></li>
-              <li>Optional <code className="bg-background px-1 rounded">pipeline_stage</code>: must match a stage name in your pipeline; sets the contact's stage on import</li>
+              <li>Optional <code className="bg-background px-1 rounded">Action</code> (or <code className="bg-background px-1 rounded">pipeline_stage</code>): must match a stage/action name; sets the contact's stage and triggers its automation on import</li>
               <li>Maximum 5,000 records per upload</li>
               <li>Maximum file size: 10MB</li>
             </ul>

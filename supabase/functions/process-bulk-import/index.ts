@@ -315,7 +315,7 @@ serve(async (req) => {
             nature_of_business: row.nature_of_business || null,
             status: row.status || 'new',
             source: row.source || 'bulk_import',
-            pipeline_stage_id: stageNameToId[String(row.pipeline_stage || row.stage || '').trim().toLowerCase()] || null,
+            pipeline_stage_id: stageNameToId[String(row.action || row.pipeline_stage || row.stage || '').trim().toLowerCase()] || null,
             address: row.address || null,
             city: row.city || row.location_city || null,
             state: row.state || row.location_state || null,
