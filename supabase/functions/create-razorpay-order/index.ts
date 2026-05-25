@@ -80,7 +80,9 @@ Deno.serve(async (req) => {
       body: JSON.stringify({
         amount: amountInPaise,
         currency: 'INR',
-        receipt: `${type}_${org_id}_${Date.now()}`,
+        // Razorpay caps receipt at 40 chars; the full type + 36-char org UUID
+        // overflows it, so use a short prefix + truncated org id + timestamp.
+        receipt: `${type === 'subscription' ? 'sub' : 'wt'}_${org_id.slice(0, 8)}_${Date.now()}`,
         notes: {
           org_id,
           type,
