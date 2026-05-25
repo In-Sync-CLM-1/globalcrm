@@ -71,9 +71,23 @@ interface UploadRow {
   name_en: string;
   number: string;
   name_hi: string;
+  action: string;
 }
 
-const CSV_TEMPLATE = `name,number\nVibhu Dixit,+917607359820\n`;
+// Selectable actions = the IEDUP pipeline stages. Setting one on import triggers
+// that stage's automation (call or the mapped WhatsApp template).
+const IEDUP_ACTIONS = [
+  "Call",
+  "Send WhatsApp - After certificate",
+  "Send WhatsApp - After registration & payment verification",
+  "Send WhatsApp - Payment failed",
+  "Send WhatsApp - Add help desk number",
+  "Send WhatsApp - Photo rejected",
+  "Attendance",
+  "Short Attendance",
+];
+
+const CSV_TEMPLATE = `name,number,action\nVibhu Dixit,+917607359820,Call\n`;
 
 export default function IedupPipeline() {
   const notify = useNotification();
@@ -182,7 +196,7 @@ export default function IedupPipeline() {
   async function handleFilePicked(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     if (!f) return;
-    Papa.parse<{ name?: string; number?: string }>(f, {
+    Papa.parse<{ name?: string; number?: string; action?: string }>(f, {
       header: true,
       skipEmptyLines: true,
       complete: async (res) => {
@@ -191,6 +205,7 @@ export default function IedupPipeline() {
             name_en: String(r.name || "").trim(),
             number: normalizePhone(String(r.number || "")),
             name_hi: "",
+            action: String(r.action || "").trim(),
           }))
           .filter((r) => r.name_en && r.number);
         if (rows.length === 0) {
@@ -232,6 +247,18 @@ export default function IedupPipeline() {
       const { data: userData } = await supabase.auth.getUser();
       const userId = userData?.user?.id;
       if (!userId) throw new Error("You must be signed in to import.");
+
+      // Resolve the chosen Action to its pipeline stage so the import sets the
+      // stage (which fires that stage's automation via the enqueue trigger).
+      const { data: stages } = await supabase
+        .from("pipeline_stages")
+        .select("id, name")
+        .eq("org_id", IEDUP_ORG_ID)
+        .eq("is_active", true);
+      const stageMap = new Map(
+        (stages || []).map((s: any) => [String(s.name).trim().toLowerCase(), s.id as string]),
+      );
+
       const inserts = uploadRows.map((r) => {
         const parts = r.name_en.trim().split(/\s+/);
         return {
@@ -243,6 +270,7 @@ export default function IedupPipeline() {
           phone: r.number,
           product: "CM YUVA",
           source: "iedup_csv_upload",
+          pipeline_stage_id: r.action ? (stageMap.get(r.action.trim().toLowerCase()) || null) : null,
         };
       });
       const { error } = await supabase.from("contacts").insert(inserts);
@@ -850,6 +878,7 @@ export default function IedupPipeline() {
                     <TableHead>Name (EN)</TableHead>
                     <TableHead>Name (HI) — editable</TableHead>
                     <TableHead>Number</TableHead>
+                    <TableHead>Action</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -868,6 +897,22 @@ export default function IedupPipeline() {
                         />
                       </TableCell>
                       <TableCell className="font-mono text-sm">{r.number}</TableCell>
+                      <TableCell>
+                        <select
+                          value={IEDUP_ACTIONS.includes(r.action) ? r.action : ""}
+                          onChange={(e) =>
+                            setUploadRows((prev) =>
+                              prev.map((x, idx) => (idx === i ? { ...x, action: e.target.value } : x)),
+                            )
+                          }
+                          className="h-8 rounded-md border bg-background px-2 text-sm"
+                        >
+                          <option value="">— none —</option>
+                          {IEDUP_ACTIONS.map((a) => (
+                            <option key={a} value={a}>{a}</option>
+                          ))}
+                        </select>
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
