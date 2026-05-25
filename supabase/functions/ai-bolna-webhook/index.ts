@@ -3,6 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.58.0";
 import {
   isInsideWorkingWindow,
   triggerBolnaCall,
+  BILLABLE_CALL_ORG_IDS,
 } from "../_shared/aiCalling.ts";
 
 const corsHeaders = {
@@ -130,7 +131,7 @@ serve(async (req) => {
   // On terminal: log usage (call cost) — only when duration is known and > 0.
   // Atomic claim against double-logging: write a service_usage_logs row keyed
   // on reference_id=call_log.id. Cost = ceil(seconds/60) * Rs 3.
-  if (durationSec != null && durationSec > 0) {
+  if (durationSec != null && durationSec > 0 && BILLABLE_CALL_ORG_IDS.has(callLog.org_id as string)) {
     const minutes = Math.ceil(durationSec / 60);
     const cost = +(minutes * CALL_COST_PER_MINUTE).toFixed(2);
     // @ts-ignore EdgeRuntime is a Supabase runtime global

@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.58.0";
+import { BILLABLE_CALL_ORG_IDS } from "../_shared/aiCalling.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -7,6 +8,7 @@ const corsHeaders = {
 };
 
 const BOLNA_BASE = "https://api.bolna.ai";
+const CALL_COST_PER_MINUTE = 3.0;
 const TERMINAL_STATUSES = new Set([
   "completed", "failed", "no-answer", "busy", "canceled",
   "stopped", "balance-low", "error", "call-disconnected",
@@ -115,11 +117,124 @@ serve(async (req) => {
     }
   }
 
+  // Billing safety-net: charge any AI call that had talk-time but never got a
+  // 'call' usage row. The terminal Bolna webhook frequently arrives WITHOUT a
+  // duration (it's finalized later by reconcile / exotel-sync), so the webhook's
+  // billing branch is skipped and the call is never deducted. This sweep closes
+  // that gap. Idempotent on (org, 'call', call_log.id) — never double-charges.
+  const billing = await billUnbilledCalls(supabase, cutoff);
+
   return new Response(JSON.stringify({
     ok: true,
     scanned: rows?.length || 0,
     updated, unchanged, errors,
     lookback_hours: lookbackHours,
+    billed_calls: billing.billed,
     changes: changes.slice(0, 20),
   }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 });
+
+async function billUnbilledCalls(
+  supabase: any,
+  cutoff: string,
+): Promise<{ billed: number }> {
+  // AI calls in the window that actually connected (talk-time > 0).
+  // Scoped to billable orgs only — internal/demo orgs are not charged.
+  const billableOrgs = [...BILLABLE_CALL_ORG_IDS];
+  if (billableOrgs.length === 0) return { billed: 0 };
+  const { data: calls } = await supabase
+    .from("call_logs")
+    .select("id, org_id, conversation_duration")
+    .eq("caller_type", "ai")
+    .in("org_id", billableOrgs)
+    .gt("conversation_duration", 0)
+    .gte("created_at", cutoff);
+  if (!calls || calls.length === 0) return { billed: 0 };
+
+  // Which of these already have a 'call' usage row?
+  const ids = calls.map((c: any) => c.id);
+  const { data: existing } = await supabase
+    .from("service_usage_logs")
+    .select("reference_id")
+    .eq("service_type", "call")
+    .in("reference_id", ids);
+  const billed = new Set((existing || []).map((r: any) => r.reference_id));
+
+  let count = 0;
+  for (const c of calls) {
+    if (billed.has(c.id)) continue;
+    const minutes = Math.ceil(Number(c.conversation_duration) / 60);
+    if (minutes <= 0) continue;
+    await recordUsage(supabase, {
+      orgId: c.org_id as string,
+      serviceType: "call",
+      referenceId: c.id as string,
+      quantity: minutes,
+      cost: +(minutes * CALL_COST_PER_MINUTE).toFixed(2),
+      description: `AI call ${c.id} — ${minutes} min × Rs ${CALL_COST_PER_MINUTE}/min (reconciled)`,
+    });
+    count++;
+  }
+  return { billed: count };
+}
+
+// Records a usage row and atomically decrements the wallet. Idempotent on
+// (service_type, reference_id). Mirrors recordUsage in ai-bolna-webhook.
+async function recordUsage(
+  supabase: any,
+  args: { orgId: string; serviceType: "call" | "whatsapp" | "email"; referenceId: string; quantity: number; cost: number; description: string },
+): Promise<void> {
+  try {
+    const { data: existing } = await supabase
+      .from("service_usage_logs")
+      .select("id")
+      .eq("org_id", args.orgId)
+      .eq("service_type", args.serviceType)
+      .eq("reference_id", args.referenceId)
+      .maybeSingle();
+    if (existing) return;
+
+    const { data: usageRow } = await supabase
+      .from("service_usage_logs")
+      .insert({ org_id: args.orgId, service_type: args.serviceType, reference_id: args.referenceId, quantity: args.quantity, cost: args.cost, wallet_deducted: false })
+      .select("id")
+      .single();
+    if (!usageRow) return;
+
+    const { data: sub } = await supabase
+      .from("organization_subscriptions")
+      .select("wallet_balance")
+      .eq("org_id", args.orgId)
+      .maybeSingle();
+    if (!sub) return;
+
+    const balanceBefore = Number(sub.wallet_balance || 0);
+    const balanceAfter = balanceBefore - args.cost;
+
+    const { data: walletTxn } = await supabase
+      .from("wallet_transactions")
+      .insert({
+        org_id: args.orgId,
+        transaction_type: `deduction_${args.serviceType}`,
+        amount: -args.cost,
+        balance_before: balanceBefore,
+        balance_after: balanceAfter,
+        reference_id: args.referenceId,
+        reference_type: args.serviceType,
+        quantity: args.quantity,
+        unit_cost: args.cost / Math.max(1, args.quantity),
+        description: args.description,
+      })
+      .select("id")
+      .single();
+
+    await supabase.from("organization_subscriptions")
+      .update({ wallet_balance: balanceAfter, updated_at: new Date().toISOString() })
+      .eq("org_id", args.orgId);
+    await supabase.from("service_usage_logs")
+      .update({ wallet_deducted: true, wallet_transaction_id: walletTxn?.id })
+      .eq("id", usageRow.id);
+  } catch (e) {
+    console.error("recordUsage exception:", String(e));
+  }
+}

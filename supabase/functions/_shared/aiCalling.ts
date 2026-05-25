@@ -2,6 +2,9 @@
 
 export const INSYNC_DEMO_ORG_ID = "61f7f96d-e80c-4d9b-a765-8eb32bd3c70d";
 export const IEDUP_ORG_ID = "6dcf4229-6902-4cd4-9c7f-2d6ed4a6045d";
+// Orgs whose AI-call minutes are billed to the wallet (₹3/min). Internal/demo
+// orgs (e.g. In-Sync Demo) are intentionally excluded.
+export const BILLABLE_CALL_ORG_IDS = new Set<string>([IEDUP_ORG_ID]);
 export const BOLNA = "https://api.bolna.ai";
 // Exotel "Agentic Call" ExoPhone — required as from_phone_number; Exotel routes channels automatically.
 export const DEFAULT_FROM_NUMBER = "+911169323462";
