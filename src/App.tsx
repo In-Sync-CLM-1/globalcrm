@@ -40,6 +40,7 @@ const PageLoader = () => (
 
 // Lazy loaded pages - CRM
 const Dashboard = lazyRetry(() => import("./pages/Dashboard"));
+const Billing = lazyRetry(() => import("./pages/Billing"));
 const Contacts = lazyRetry(() => import("./pages/Contacts"));
 const ContactDetail = lazyRetry(() => import("./pages/ContactDetail"));
 const PipelineBoard = lazyRetry(() => import("./pages/PipelineBoard"));
@@ -142,6 +143,12 @@ const App = () => (
           <Route path="/pipeline" element={
             <ProtectedRoute>
               <PipelineBoard />
+            </ProtectedRoute>
+          } />
+
+          <Route path="/billing" element={
+            <ProtectedRoute>
+              <Billing />
             </ProtectedRoute>
           } />
           

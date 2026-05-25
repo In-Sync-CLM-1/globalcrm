@@ -6,7 +6,6 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
-import { TopUpWalletDialog } from "@/components/Subscription/TopUpWalletDialog";
 import DateRangeFilter, { DateRangePreset, getDateRangeFromPreset } from "@/components/common/DateRangeFilter";
 import {
   ResponsiveContainer, AreaChart, Area, BarChart, Bar,
@@ -37,7 +36,6 @@ const C = { sent: "#3b82f6", delivered: "#10b981", opened: "#8b5cf6", placed: "#
 
 export default function IedupDashboard() {
   const { isLoading: orgLoading } = useIsIedup();
-  const [topUpOpen, setTopUpOpen] = useState(false);
   const [datePreset, setDatePreset] = useState<DateRangePreset>("this_month");
   const [dateRange, setDateRange] = useState(() => getDateRangeFromPreset("this_month"));
 
@@ -296,12 +294,10 @@ export default function IedupDashboard() {
             </div>
             <div className="flex gap-2">
               <Button asChild variant="outline" size="sm"><Link to="/pipeline">Manage queue</Link></Button>
-              <Button size="sm" onClick={() => setTopUpOpen(true)}>Top up wallet</Button>
+              <Button asChild size="sm"><Link to="/billing">Billing</Link></Button>
             </div>
           </CardContent>
         </Card>
-
-        <TopUpWalletDialog open={topUpOpen} onOpenChange={setTopUpOpen} orgId={IEDUP_ORG_ID} />
       </div>
     </DashboardLayout>
   );

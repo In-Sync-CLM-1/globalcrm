@@ -11,6 +11,7 @@ interface OrderRequest {
   type: 'subscription' | 'wallet_topup';
   invoice_id?: string;
   is_initial_payment?: boolean;
+  billing_period?: 'monthly' | 'quarterly' | 'annual';
 }
 
 Deno.serve(async (req) => {
@@ -32,7 +33,7 @@ Deno.serve(async (req) => {
     }
 
     const body: OrderRequest = await req.json();
-    const { org_id, amount, type, invoice_id, is_initial_payment } = body;
+    const { org_id, amount, type, invoice_id, is_initial_payment, billing_period } = body;
 
     console.log('Creating Razorpay order:', { org_id, amount, type, invoice_id });
 
@@ -106,6 +107,7 @@ Deno.serve(async (req) => {
           is_initial_payment,
           base_amount: amount,
           gst_amount: gstAmount,
+          billing_period: billing_period || null,
         },
       })
       .select()

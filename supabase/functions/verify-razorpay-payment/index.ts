@@ -128,14 +128,17 @@ Deno.serve(async (req) => {
         console.log('Invoice updated to paid');
       }
 
-      // Update subscription
+      // Update subscription — advance next billing date by the chosen cadence.
+      const billingPeriod: string = paymentTxn.metadata?.billing_period || 'monthly';
+      const monthsToAdd = billingPeriod === 'annual' ? 12 : billingPeriod === 'quarterly' ? 3 : 1;
       const nextBillingDate = new Date();
-      nextBillingDate.setDate(nextBillingDate.getDate() + 30);
+      nextBillingDate.setMonth(nextBillingDate.getMonth() + monthsToAdd);
 
       await supabase
         .from('organization_subscriptions')
         .update({
           subscription_status: 'active',
+          billing_period: billingPeriod,
           last_payment_date: new Date().toISOString(),
           next_billing_date: nextBillingDate.toISOString().split('T')[0],
           suspension_date: null,
