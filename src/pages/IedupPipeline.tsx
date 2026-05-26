@@ -111,6 +111,12 @@ export default function IedupPipeline() {
     },
   });
 
+  // Filter + pagination state (declared before the query that reads them).
+  const [filterFrom, setFilterFrom] = useState<string>("");
+  const [filterTo, setFilterTo] = useState<string>("");
+  const [hideCalled, setHideCalled] = useState(false);
+  const [page, setPage] = useState(0);
+
   // Beneficiaries list — server-side paginated (one page at a time + exact total).
   const { data: pageData, refetch: refetchList } = useQuery({
     queryKey: ["iedup-beneficiaries", page, filterFrom, filterTo],
@@ -196,10 +202,6 @@ export default function IedupPipeline() {
   const [manualSaving, setManualSaving] = useState(false);
 
   // Filter + selection state
-  const [filterFrom, setFilterFrom] = useState<string>("");
-  const [filterTo, setFilterTo] = useState<string>("");
-  const [hideCalled, setHideCalled] = useState(false);
-  const [page, setPage] = useState(0);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkDialing, setBulkDialing] = useState(false);
 
