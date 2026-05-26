@@ -5,6 +5,10 @@ export const IEDUP_ORG_ID = "6dcf4229-6902-4cd4-9c7f-2d6ed4a6045d";
 // Orgs whose AI-call minutes are billed to the wallet (₹3/min). Internal/demo
 // orgs (e.g. In-Sync Demo) are intentionally excluded.
 export const BILLABLE_CALL_ORG_IDS = new Set<string>([IEDUP_ORG_ID]);
+// Internal / demo orgs. Their AI minutes are not billed, so the dialer must
+// never halt them on subscription status or wallet balance. Marked internal
+// 2026-05-26 to stop the wallet gate freezing In-Sync Demo's calling.
+export const INTERNAL_ORG_IDS = new Set<string>([INSYNC_DEMO_ORG_ID]);
 export const BOLNA = "https://api.bolna.ai";
 // Exotel "Agentic Call" ExoPhone — required as from_phone_number; Exotel routes channels automatically.
 export const DEFAULT_FROM_NUMBER = "+911169323462";
@@ -130,6 +134,7 @@ export interface ScriptRow {
   objection_handling: unknown;
   closing: string | null;
   product_name: string | null;
+  owner_id: string | null;
   product_notes: string | null;
   voice_id: string | null;
   voice_name: string | null;

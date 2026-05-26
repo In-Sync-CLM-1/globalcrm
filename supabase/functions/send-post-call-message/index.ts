@@ -117,13 +117,11 @@ serve(async (req) => {
     }
 
     const isDemo = dispoName === DEMO_DISPOSITION;
-    const emailTemplateName = isDemo ? EMAIL_TEMPLATE_DEMO : EMAIL_TEMPLATE_INTRO;
-    const waTemplateName = isDemo ? WA_TEMPLATE_DEMO : WA_TEMPLATE_INTRO;
 
     // 3) Load contact, agent, activity (for demo date/time)
     const [{ data: contact }, { data: agentProfile }, activityRes] = await Promise.all([
       supabase.from("contacts")
-        .select("id, first_name, last_name, email, phone")
+        .select("id, first_name, last_name, email, phone, product, assigned_to, do_not_email, do_not_whatsapp, opted_out")
         .eq("id", callLog.contact_id).maybeSingle(),
       supabase.from("profiles")
         .select("id, first_name, last_name, email")
@@ -151,19 +149,78 @@ serve(async (req) => {
     const demoDateStr = formatDemoDate(activity?.demo_date);
     const demoTimeStr = formatDemoTime(activity?.demo_time);
 
+    // Product-aware template selection (worksync vs vendorverification).
+    const product = String((contact as any).product || "").toLowerCase().trim();
+    const isVV = product === "vendorverification";
+    let emailTemplateName = isDemo
+      ? (isVV ? "Vendor Verification: Demo Confirmation" : "Work-Sync: Demo Confirmation")
+      : (isVV ? "Vendor Verification: Post-Call Introduction" : "Work-Sync: Post-Call Introduction");
+    let waTemplateName = isDemo
+      ? (isVV ? "vendorverification_demo_confirmation" : "worksync_demo_confirmation_v2")
+      : (isVV ? "vendorverification_intro_post_call" : "worksync_intro_post_call");
+
+    // The rep shown in the message is the lead owner (Riya / Anushree), falling back to the call agent.
+    let repName = agentName, repEmail = agentProfile?.email || "", repPhone = "";
+    if ((contact as any).assigned_to) {
+      const { data: owner } = await supabase.from("profiles")
+        .select("first_name, last_name, email, phone")
+        .eq("id", (contact as any).assigned_to).maybeSingle();
+      if (owner?.first_name) {
+        repName = `${owner.first_name} ${owner.last_name || ""}`.trim();
+        repEmail = owner.email || repEmail;
+        repPhone = owner.phone || "";
+      }
+    }
+
+    // For demo confirmations, pull the auto-created meeting's Meet link + RSVP token.
+    let meetingLink = "", rsvpToken = "", rsvpLink = "", datedMeetingFound = false;
+    if (isDemo) {
+      const { data: mtg } = await supabase.from("contact_activities")
+        .select("meeting_link, rsvp_token, demo_date")
+        .eq("contact_id", callLog.contact_id).eq("activity_type", "meeting")
+        .order("created_at", { ascending: false }).limit(1).maybeSingle();
+      if (mtg && mtg.demo_date) {
+        datedMeetingFound = true;
+        meetingLink = mtg.meeting_link || "";
+        rsvpToken = mtg.rsvp_token || "";
+        rsvpLink = rsvpToken ? `${Deno.env.get("SUPABASE_URL")}/functions/v1/demo-rsvp?token=${rsvpToken}` : "";
+      }
+    }
+
+    // Demo agreed but no date yet -> send the slot-request instead of a confirmation.
+    const productLabel = isVV ? "Vendor Verification" : "WorkSync";
+    const needsSlot = isDemo && !datedMeetingFound;
+    const slotLink = `${Deno.env.get("SUPABASE_URL")}/functions/v1/demo-slot-pick?c=${contact.id}`;
+    if (needsSlot) {
+      emailTemplateName = "Demo Slot Request";
+      waTemplateName = "demo_slot_request";
+    }
+
     const emailVars: Record<string, string> = {
       prospect_name: prospectFirstName,
       first_name: prospectFirstName,
-      assigned_to_name: agentName,
+      assigned_to_name: repName,
+      sales_rep_name: repName,
+      caller_name: repName,
+      caller_email: repEmail,
+      caller_phone: repPhone,
       demo_day: demoDateStr,
       demo_date: demoDateStr,
       demo_time: demoTimeStr,
+      meeting_link: meetingLink,
+      rsvp_link: rsvpLink,
+      product: productLabel,
+      slot_link: slotLink,
     };
 
     const result: Record<string, any> = { call_log_id, disposition: dispoName, isDemo };
 
+    // Suppression: opted-out or per-channel blocked contacts get nothing.
+    const suppressedEmail = (contact as any).do_not_email || (contact as any).opted_out;
+    const suppressedWa = (contact as any).do_not_whatsapp || (contact as any).opted_out;
+
     // 4) EMAIL
-    if (contact.email) {
+    if (contact.email && !suppressedEmail) {
       try {
         const { data: emailTpl } = await supabase
           .from("email_templates")
@@ -247,7 +304,7 @@ serve(async (req) => {
 
     // 5) WHATSAPP
     const waPhone = normalizePhone(contact.phone);
-    if (waPhone) {
+    if (waPhone && !suppressedWa) {
       try {
         const { data: settings } = await supabase
           .from("exotel_settings")
@@ -275,9 +332,12 @@ serve(async (req) => {
             // Build positional template variables per Exotel template body.
             //   worksync_demo_confirmation: {{1}} prospect, {{2}} agent, {{3}} date, {{4}} time
             //   worksync_intro_post_call:   {{1}} prospect, {{2}} agent
-            const params = isDemo
-              ? [prospectFirstName, agentName, demoDateStr, demoTimeStr]
-              : [prospectFirstName, agentName];
+            const params = needsSlot
+              ? [prospectFirstName, productLabel]
+              : (isDemo
+                ? [prospectFirstName, repName, demoDateStr, demoTimeStr]
+                : [prospectFirstName, repName]);
+            const buttonParam = needsSlot ? contact.id : (isDemo && rsvpToken ? rsvpToken : null);
 
             const apiKey = settings.whatsapp_api_key || settings.api_key;
             const apiToken = settings.whatsapp_api_token || settings.api_token;
@@ -298,10 +358,22 @@ serve(async (req) => {
                       name: waTemplateName,
                       // Exotel requires {code:"en"} object (string fails silently)
                       language: { policy: "deterministic", code: waTpl.language || "en" },
-                      components: [{
-                        type: "body",
-                        parameters: params.map((p) => ({ type: "text", text: String(p) })),
-                      }],
+                      components: [
+                        {
+                          type: "body",
+                          parameters: params.map((p) => ({ type: "text", text: String(p) })),
+                        },
+                        // Dynamic URL button (base + suffix): RSVP token for a dated demo,
+                        // or the contact id for the slot-request picker link.
+                        ...(buttonParam
+                          ? [{
+                              type: "button",
+                              sub_type: "url",
+                              index: "0",
+                              parameters: [{ type: "text", text: buttonParam }],
+                            }]
+                          : []),
+                      ],
                     },
                   },
                 }],

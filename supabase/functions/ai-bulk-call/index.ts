@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.58.0";
 import {
   INSYNC_DEMO_ORG_ID,
+  INTERNAL_ORG_IDS,
   isInsideCustomWindow,
   triggerBolnaCall,
   createBolnaAgent,
@@ -334,19 +335,23 @@ async function processOrg(
     return { org_id: orgId, acted: false, reason: "no active scripts", stale_closed: staleClosed };
   }
 
+  // Internal / demo orgs (In-Sync Demo) are not billed for AI minutes, so they
+  // must never be halted on subscription status or wallet balance.
+  const isInternal = INTERNAL_ORG_IDS.has(orgId);
+
   const { data: sub } = await supabase
     .from("organization_subscriptions")
     .select("subscription_status, wallet_balance, wallet_minimum_balance, last_payment_date, next_billing_date")
     .eq("org_id", orgId)
     .maybeSingle();
-  if (sub && (sub.subscription_status === "suspended_locked" || sub.subscription_status === "cancelled")) {
+  if (!isInternal && sub && (sub.subscription_status === "suspended_locked" || sub.subscription_status === "cancelled")) {
     return { org_id: orgId, acted: false, reason: `subscription ${sub.subscription_status}`, stale_closed: staleClosed };
   }
 
   // Wallet enforcement: outside of the free trial, halt dialing when the wallet
   // has dropped below its minimum. Trial = no payment yet AND next billing date
   // is still in the future.
-  if (sub) {
+  if (!isInternal && sub) {
     const today = new Date().toISOString().slice(0, 10);
     const inTrial = !sub.last_payment_date
       && typeof sub.next_billing_date === "string"
@@ -512,10 +517,14 @@ async function queueUntouchedContacts(
 ): Promise<Array<{ id: string }>> {
   const { orgId, script, limit } = args;
 
+  // Owner-based routing: each agent (script owner) only gets the leads they own.
+  // A script with no owner queues nothing.
+  if (!script.owner_id) return [];
+
   const { data: untouched, error: rpcErr } = await supabase.rpc("get_ai_call_candidates", {
     p_org: orgId,
     p_limit: limit,
-    p_product: script.product_name,
+    p_owner: script.owner_id,
   });
   if (rpcErr || !untouched || untouched.length === 0) {
     if (rpcErr) console.error("get_ai_call_candidates rpc error:", rpcErr);

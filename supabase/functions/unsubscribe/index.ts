@@ -53,6 +53,17 @@ Deno.serve(async (req) => {
       console.error('Error recording unsubscribe:', insertError);
     }
 
+    // Suppress this contact's email (and mark opted-out overall) so no further
+    // automated email goes out. Record is kept.
+    if (conversation.contact_id) {
+      await supabase.from('contacts').update({
+        do_not_email: true,
+        opted_out: true,
+        opt_out_reason: 'Email unsubscribe',
+        opt_out_at: new Date().toISOString(),
+      }).eq('id', conversation.contact_id);
+    }
+
     console.log('Successfully unsubscribed:', conversation.to_email);
 
     // Render success page

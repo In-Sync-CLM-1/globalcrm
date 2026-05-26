@@ -233,7 +233,20 @@ Deno.serve(async (req) => {
         } else {
           console.log('Stored inbound message from:', phoneNumber);
         }
-        
+
+        // Negative action: a STOP / opt-out reply suppresses WhatsApp (and marks
+        // the contact opted-out overall). Record is kept, just removed from outreach.
+        const optOutRe = /^\s*(stop|unsubscribe|opt[\s-]?out|remove me|do ?not ?(contact|message|call)|don'?t ?(contact|message|call))\b/i;
+        if (contactId && optOutRe.test(messageText)) {
+          await supabaseClient.from('contacts').update({
+            do_not_whatsapp: true,
+            opted_out: true,
+            opt_out_reason: 'WhatsApp STOP/opt-out reply',
+            opt_out_at: new Date().toISOString(),
+          }).eq('id', contactId);
+          console.log('Opt-out captured (WhatsApp) for contact:', contactId);
+        }
+
         continue;
       }
       
