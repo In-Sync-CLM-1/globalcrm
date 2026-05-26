@@ -246,25 +246,12 @@ export default function IedupPipeline() {
           if (fileInputRef.current) fileInputRef.current.value = "";
           return;
         }
-        setUploadRows(rows);
+        // Devanagari conversion happens AFTER import (background job), so the
+        // upload is instant and isn't capped by the converter's 500-name limit.
+        // Seed name_hi with the English name as a placeholder until converted.
+        setUploadRows(rows.map((r) => ({ ...r, name_hi: r.name_en })));
         setUploadOpen(true);
-        setTransliterating(true);
-        try {
-          const { data, error } = await supabase.functions.invoke("transliterate-names", {
-            body: { names: rows.map((r) => r.name_en) },
-          });
-          if (error) throw error;
-          const hi = (data?.names_hi || []) as string[];
-          setUploadRows((prev) =>
-            prev.map((r, i) => ({ ...r, name_hi: hi[i] || r.name_en })),
-          );
-        } catch (err: any) {
-          notify.warning("Hindi name conversion failed", "You can edit the Hindi names manually before importing.");
-          setUploadRows((prev) => prev.map((r) => ({ ...r, name_hi: r.name_en })));
-        } finally {
-          setTransliterating(false);
-          if (fileInputRef.current) fileInputRef.current.value = "";
-        }
+        if (fileInputRef.current) fileInputRef.current.value = "";
       },
       error: (err) => {
         notify.error("Could not read file", err.message);
@@ -308,7 +295,12 @@ export default function IedupPipeline() {
       });
       const { error } = await supabase.from("contacts").insert(inserts);
       if (error) throw error;
-      notify.success("Beneficiaries imported", `${inserts.length} row(s) added to the pipeline.`);
+      notify.success(
+        "Beneficiaries imported",
+        `${inserts.length} row(s) added. Hindi names are being converted in the background.`,
+      );
+      // Kick off Devanagari conversion now (fire-and-forget); a cron also catches up.
+      supabase.functions.invoke("transliterate-pending", { body: { org_id: IEDUP_ORG_ID } }).catch(() => undefined);
       setUploadOpen(false);
       setUploadRows([]);
       refetchList();
