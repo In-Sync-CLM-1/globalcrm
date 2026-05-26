@@ -92,6 +92,8 @@ const IEDUP_ACTIONS = [
 
 const CSV_TEMPLATE = `name,number,action\nVibhu Dixit,+917607359820,Call\n`;
 
+const PAGE_SIZE = 50;
+
 export default function IedupPipeline() {
   const notify = useNotification();
   const qc = useQueryClient();
@@ -109,18 +111,23 @@ export default function IedupPipeline() {
     },
   });
 
-  // Beneficiaries list (with last_call_at derived from call_logs)
-  const { data: beneficiaries, refetch: refetchList } = useQuery({
-    queryKey: ["iedup-beneficiaries"],
+  // Beneficiaries list — server-side paginated (one page at a time + exact total).
+  const { data: pageData, refetch: refetchList } = useQuery({
+    queryKey: ["iedup-beneficiaries", page, filterFrom, filterTo],
     queryFn: async () => {
-      const { data, error } = await supabase
+      let q = supabase
         .from("contacts")
-        .select("id, first_name, last_name, name_hi, phone, do_not_call, status, created_at, pipeline_stage_id")
-        .eq("org_id", IEDUP_ORG_ID)
-        .order("created_at", { ascending: false });
+        .select("id, first_name, last_name, name_hi, phone, do_not_call, status, created_at, pipeline_stage_id", { count: "exact" })
+        .eq("org_id", IEDUP_ORG_ID);
+      if (filterFrom) q = q.gte("created_at", filterFrom);
+      if (filterTo) q = q.lte("created_at", `${filterTo}T23:59:59.999`);
+      const { data, error, count } = await q
+        .order("created_at", { ascending: false })
+        .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
       if (error) throw error;
       const rows = (data || []) as BeneficiaryRow[];
-      if (rows.length === 0) return rows;
+      const total = count || 0;
+      if (rows.length === 0) return { rows, total };
 
       const ids = rows.map((r) => r.id);
       const [callsRes, statsRes, stagesRes, dispoRes] = await Promise.all([
@@ -155,17 +162,23 @@ export default function IedupPipeline() {
       for (const d of (dispoRes.data || []) as Array<{ contact_id: string; disposition_name: string }>) {
         if (d.contact_id && d.disposition_name) dispo.set(d.contact_id, d.disposition_name);
       }
-      return rows.map((r) => ({
-        ...r,
-        last_call_at: latest.get(r.id) ?? null,
-        attempts: stats.get(r.id)?.attempts || 0,
-        connected: stats.get(r.id)?.connected || 0,
-        action: r.pipeline_stage_id ? (stageName.get(r.pipeline_stage_id) ?? null) : null,
-        disposition: dispo.get(r.id) ?? null,
-      }));
+      return {
+        total,
+        rows: rows.map((r) => ({
+          ...r,
+          last_call_at: latest.get(r.id) ?? null,
+          attempts: stats.get(r.id)?.attempts || 0,
+          connected: stats.get(r.id)?.connected || 0,
+          action: r.pipeline_stage_id ? (stageName.get(r.pipeline_stage_id) ?? null) : null,
+          disposition: dispo.get(r.id) ?? null,
+        })),
+      };
     },
     refetchInterval: 30_000,
   });
+  const beneficiaries = (pageData?.rows ?? []) as BeneficiaryRow[];
+  const total = pageData?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   // Upload state
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -186,6 +199,7 @@ export default function IedupPipeline() {
   const [filterFrom, setFilterFrom] = useState<string>("");
   const [filterTo, setFilterTo] = useState<string>("");
   const [hideCalled, setHideCalled] = useState(false);
+  const [page, setPage] = useState(0);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkDialing, setBulkDialing] = useState(false);
 
@@ -402,25 +416,23 @@ export default function IedupPipeline() {
   }
 
   // Derived: filtered beneficiaries (by upload date and call status)
+  // Date range is filtered server-side (see the query); only the derived
+  // "hide ineligible" toggle is applied to the current page here.
   const filteredBeneficiaries = useMemo(() => {
-    const all = beneficiaries || [];
-    return all.filter((b) => {
-      if (filterFrom && b.created_at && b.created_at.slice(0, 10) < filterFrom) return false;
-      if (filterTo && b.created_at && b.created_at.slice(0, 10) > filterTo) return false;
-      if (hideCalled && callCapExhausted(b)) return false;
-      return true;
-    });
-  }, [beneficiaries, filterFrom, filterTo, hideCalled]);
+    const all = beneficiaries;
+    return hideCalled ? all.filter((b) => !callCapExhausted(b)) : all;
+  }, [beneficiaries, hideCalled]);
 
-  // Prune selection of rows that no longer match the filter
+  // Reset to the first page (and clear selection) when a server-side filter changes.
   useEffect(() => {
-    const visibleIds = new Set(filteredBeneficiaries.map((b) => b.id));
-    setSelectedIds((prev) => {
-      const next = new Set<string>();
-      for (const id of prev) if (visibleIds.has(id)) next.add(id);
-      return next;
-    });
-  }, [filteredBeneficiaries]);
+    setPage(0);
+    setSelectedIds(new Set());
+  }, [filterFrom, filterTo]);
+
+  // Keep the page in range if the total shrinks (e.g. after deletes).
+  useEffect(() => {
+    if (page > 0 && page >= totalPages) setPage(totalPages - 1);
+  }, [totalPages, page]);
 
   const selectableFiltered = filteredBeneficiaries.filter((b) => b.phone && !callCapExhausted(b));
   const allFilteredSelected =
@@ -637,12 +649,7 @@ export default function IedupPipeline() {
           <CardHeader className="space-y-3">
             <CardTitle className="text-base flex items-center justify-between">
               <span>Beneficiaries</span>
-              <Badge variant="secondary">
-                {filteredBeneficiaries.length}
-                {beneficiaries && filteredBeneficiaries.length !== beneficiaries.length
-                  ? ` of ${beneficiaries.length}`
-                  : ""}
-              </Badge>
+              <Badge variant="secondary">{total} total</Badge>
             </CardTitle>
             <div className="flex flex-wrap items-end gap-3">
               <div>
@@ -705,7 +712,7 @@ export default function IedupPipeline() {
             </div>
           </CardHeader>
           <CardContent>
-            {(!beneficiaries || beneficiaries.length === 0) ? (
+            {total === 0 ? (
               <p className="text-sm text-muted-foreground">
                 No beneficiaries yet. Click "Add beneficiary" or "Upload CSV" to add some.
               </p>
@@ -714,6 +721,7 @@ export default function IedupPipeline() {
                 No rows match the current filter. <Button variant="link" className="h-auto p-0" onClick={clearFilters}>Clear filters</Button>
               </p>
             ) : (
+              <>
               <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
@@ -815,6 +823,30 @@ export default function IedupPipeline() {
                   </TableBody>
                 </Table>
               </div>
+              <div className="flex items-center justify-between pt-3 text-sm">
+                <span className="text-muted-foreground">
+                  Page {page + 1} of {totalPages} · {total} total
+                </span>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={page === 0}
+                    onClick={() => setPage((p) => Math.max(0, p - 1))}
+                  >
+                    Previous
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={page + 1 >= totalPages}
+                    onClick={() => setPage((p) => p + 1)}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
+              </>
             )}
           </CardContent>
         </Card>
