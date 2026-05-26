@@ -1,9 +1,0 @@
-name = "globalcrm-cron-translit"
-main = "src/index.js"
-compatibility_date = "2026-05-01"
-vars = { TARGET_FN = "transliterate-pending" }
-
-# Converts newly-uploaded IEDUP names to Devanagari (backstop to the post-import
-# trigger). No-ops when nothing is pending.
-[triggers]
-crons = ["* * * * *"]

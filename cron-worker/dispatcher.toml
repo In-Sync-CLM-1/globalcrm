@@ -1,8 +1,0 @@
-name = "globalcrm-cron-dispatcher"
-main = "src/index.js"
-compatibility_date = "2026-05-01"
-vars = { TARGET_FN = "pipeline-action-dispatcher" }
-
-# Sends queued WhatsApp + stage-driven calls (self-gates on calling window).
-[triggers]
-crons = ["* * * * *"]
