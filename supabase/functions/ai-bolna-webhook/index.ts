@@ -561,9 +561,13 @@ async function autoDisposition(
       fireAutomation: true,
     });
 
-    // Follow-up email/WhatsApp only for positive outcomes (and not if opted out).
-    const SEND_FOLLOWUP = new Set(["demo_agreed", "interested", "callback", "decision_maker"]);
-    if (SEND_FOLLOWUP.has(outcomeKey) && !optOut) {
+    // Follow-up email/WhatsApp for every contact we attempted to reach, regardless
+    // of outcome — connected calls get the intro/demo message, no-answer calls get
+    // the "sorry we missed you" message (template chosen in send-post-call-message).
+    // Skip only opt-outs and do-not-contact outcomes; the sender additionally
+    // re-checks per-channel suppression and the Wrong Number / Do Not Call dispositions.
+    const NO_FOLLOWUP = new Set(["do_not_call", "wrong_person"]);
+    if (!optOut && !NO_FOLLOWUP.has(outcomeKey)) {
       await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/send-post-call-message`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}` },

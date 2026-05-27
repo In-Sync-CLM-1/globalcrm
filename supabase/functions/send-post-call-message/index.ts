@@ -9,7 +9,10 @@ const corsHeaders = {
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
 
 const DEMO_DISPOSITION = "Demo Booked";
-const SKIP_DISPOSITIONS = new Set(["Wrong Number", "Do Not Call"]);
+const SKIP_DISPOSITIONS = new Set(["Wrong Number / DND", "Do Not Call"]);
+// No-answer dispositions get the "sorry we missed you" message instead of the
+// "thank you for your time on the call" intro, since no conversation happened.
+const MISSED_DISPOSITIONS = new Set(["Did Not Pick Up", "Not Connected", "Voicemail"]);
 
 const EMAIL_TEMPLATE_DEMO = "Work-Sync: Demo Confirmation";
 const EMAIL_TEMPLATE_INTRO = "Work-Sync: Post-Call Introduction";
@@ -117,6 +120,7 @@ serve(async (req) => {
     }
 
     const isDemo = dispoName === DEMO_DISPOSITION;
+    const isMissed = MISSED_DISPOSITIONS.has(dispoName);
 
     // 3) Load contact, agent, activity (for demo date/time)
     const [{ data: contact }, { data: agentProfile }, activityRes] = await Promise.all([
@@ -154,10 +158,14 @@ serve(async (req) => {
     const isVV = product === "vendorverification";
     let emailTemplateName = isDemo
       ? (isVV ? "Vendor Verification: Demo Confirmation" : "Work-Sync: Demo Confirmation")
-      : (isVV ? "Vendor Verification: Post-Call Introduction" : "Work-Sync: Post-Call Introduction");
+      : isMissed
+        ? (isVV ? "Vendor Verification: Missed Call" : "Work-Sync: Missed Call")
+        : (isVV ? "Vendor Verification: Post-Call Introduction" : "Work-Sync: Post-Call Introduction");
     let waTemplateName = isDemo
       ? (isVV ? "vendorverification_demo_confirmation" : "worksync_demo_confirmation_v2")
-      : (isVV ? "vendorverification_intro_post_call" : "worksync_intro_post_call");
+      : isMissed
+        ? (isVV ? "vendorverification_missed_call" : "worksync_missed_call")
+        : (isVV ? "vendorverification_intro_post_call" : "worksync_intro_post_call");
 
     // The rep shown in the message is the lead owner (Riya / Anushree), falling back to the call agent.
     let repName = agentName, repEmail = agentProfile?.email || "", repPhone = "";
