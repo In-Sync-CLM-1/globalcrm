@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { RiyaTodaySnapshot } from "@/components/Dashboard/RiyaTodaySnapshot";
+import { AiAgentsPanel } from "@/components/Dashboard/AiAgentsPanel";
 import { RiyaDailyLearnings } from "@/components/Dashboard/RiyaDailyLearnings";
 import { RiyaScriptProposal } from "@/components/Dashboard/RiyaScriptProposal";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -442,7 +443,12 @@ export function CompactDashboard({ orgId }: Props) {
           <TabsTrigger value="call-logs">Call Logs</TabsTrigger>
           <TabsTrigger value="coaching">Agent Coaching</TabsTrigger>
           <TabsTrigger value="ai-caller">AI Caller</TabsTrigger>
+          <TabsTrigger value="ai-agents">AI Agents</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="ai-agents" className="mt-3">
+          <AiAgentsPanel />
+        </TabsContent>
 
         <TabsContent value="overview" className="space-y-3 mt-3">
       {/* KPI cards */}

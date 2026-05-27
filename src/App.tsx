@@ -53,7 +53,6 @@ const Reports = lazyRetry(() => import("./pages/Reports"));
 const ReportBuilder = lazyRetry(() => import("./pages/ReportBuilder"));
 const SavedReports = lazyRetry(() => import("./pages/SavedReports"));
 const CallingDashboard = lazyRetry(() => import("./pages/CallingDashboard"));
-const AiAgentsDashboard = lazyRetry(() => import("./pages/AiAgentsDashboard"));
 const CallLogs = lazyRetry(() => import("./pages/CallLogs"));
 
 // Lazy loaded pages - Templates (campaigns are external: wa.in-sync.co.in / email.in-sync.co.in)
@@ -196,11 +195,6 @@ const App = () => (
             </ProtectedRoute>
           } />
 
-          <Route path="/ai-agents" element={
-            <ProtectedRoute>
-              <AiAgentsDashboard />
-            </ProtectedRoute>
-          } />
 
           <Route path="/call-logs" element={
             <ProtectedRoute>
