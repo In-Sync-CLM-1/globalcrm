@@ -20,8 +20,9 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// Orgs that opted into the per-org daily connected-call target. Other orgs (e.g.
-// IEDUP) are notification-style and dial until the queue empties.
+// Orgs that opted into a daily connected-call target, applied PER PRODUCT/agent
+// (not an org-wide pool). Other orgs (e.g. IEDUP) are notification-style and dial
+// until the queue empties.
 const ORGS_WITH_DAILY_TARGET = new Set<string>([INSYNC_DEMO_ORG_ID]);
 
 serve(async (req) => {
@@ -368,33 +369,36 @@ async function processOrg(
     }
   }
 
-  if (ORGS_WITH_DAILY_TARGET.has(orgId)) {
-    const todayStart = new Date();
-    todayStart.setUTCHours(0, 0, 0, 0);
-    const { count: connectedTodayCount } = await supabase
-      .from("call_logs")
-      .select("id", { count: "exact", head: true })
-      .eq("org_id", orgId)
-      .eq("caller_type", "ai")
-      .gte("created_at", todayStart.toISOString())
-      .gte("conversation_duration", CONNECTED_THRESHOLD_SEC);
-    const connectedToday = connectedTodayCount || 0;
-    if (connectedToday >= DAILY_CONNECTED_TARGET) {
-      return {
-        org_id: orgId,
-        acted: false,
-        reason: `daily target met (${connectedToday}/${DAILY_CONNECTED_TARGET})`,
-        stale_closed: staleClosed,
-      };
-    }
-  }
-
   const perScript: any[] = [];
   for (const s of activeScripts as ScriptRow[]) {
     const agentId = await ensureBolnaAgent(supabase, bolnaKey, s);
     if (!agentId) {
       perScript.push({ script: s.name, product: s.product_name, error: "agent provision failed" });
       continue;
+    }
+
+    // Per-product daily cap: each product/agent stops at its own connected-call
+    // target; other products keep dialing. (Not an org-wide pool.)
+    if (ORGS_WITH_DAILY_TARGET.has(orgId)) {
+      const todayStart = new Date();
+      todayStart.setUTCHours(0, 0, 0, 0);
+      const { count: connectedForScript } = await supabase
+        .from("call_logs")
+        .select("id", { count: "exact", head: true })
+        .eq("org_id", orgId)
+        .eq("caller_type", "ai")
+        .eq("ai_script_id", s.id)
+        .gte("created_at", todayStart.toISOString())
+        .gte("conversation_duration", CONNECTED_THRESHOLD_SEC);
+      const connected = connectedForScript || 0;
+      if (connected >= DAILY_CONNECTED_TARGET) {
+        perScript.push({
+          script: s.name,
+          product: s.product_name,
+          skipped: `daily target met (${connected}/${DAILY_CONNECTED_TARGET})`,
+        });
+        continue;
+      }
     }
 
     const { count: inFlightCount } = await supabase
