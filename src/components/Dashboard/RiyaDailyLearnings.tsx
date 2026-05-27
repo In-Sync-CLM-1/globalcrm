@@ -20,25 +20,31 @@ interface Row {
   generated_at: string;
 }
 
-export function RiyaDailyLearnings() {
+// product = "__all__" (default) shows the org-wide lump; pass a product name
+// (e.g. "Worksync") to show that one agent's learnings.
+export function RiyaDailyLearnings({ product = "__all__" }: { product?: string } = {}) {
   const [row, setRow] = useState<Row | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let cancelled = false;
     const load = async () => {
       const { data, error } = await supabase
         .from("ai_daily_insights")
         .select("for_date, call_count, completed_count, insights, generated_at")
+        .eq("product", product)
         .order("for_date", { ascending: false })
         .limit(1)
         .maybeSingle();
-      if (!error && data) setRow(data as unknown as Row);
+      if (cancelled) return;
+      setRow(!error && data ? (data as unknown as Row) : null);
       setLoading(false);
     };
+    setLoading(true);
     load();
     const t = setInterval(load, 120_000);
-    return () => clearInterval(t);
-  }, []);
+    return () => { cancelled = true; clearInterval(t); };
+  }, [product]);
 
   if (loading) {
     return (

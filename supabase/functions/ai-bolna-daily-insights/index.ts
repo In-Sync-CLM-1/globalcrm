@@ -6,69 +6,36 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const BOLNA_CALLER_ID = "+911169323462";
+const ALL = "__all__"; // sentinel product for the org-wide lump (Dashboard Overview)
 
-serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+interface CallRow {
+  org_id: string;
+  status: string;
+  conversation_duration: number | null;
+  extracted_data: any;
+  transcript: string | null;
+  product: string;
+}
 
-  const supabase = createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-  );
-  const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY");
-  if (!anthropicKey) {
-    return new Response(JSON.stringify({ ok: false, error: "ANTHROPIC_API_KEY missing" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-  }
-
-  // For-date (defaults to today IST, can override via body)
-  let forDate: string | null = null;
-  try {
-    const body = req.method === "POST" ? await req.json() : {};
-    if (typeof body.for_date === "string") forDate = body.for_date;
-  } catch { /* default */ }
-
-  const now = new Date();
-  const istNow = new Date(now.getTime() + 5.5 * 3600 * 1000);
-  if (!forDate) forDate = istNow.toISOString().slice(0, 10);
-
-  const [y, m, d] = forDate.split("-").map(Number);
-  const startUTC = new Date(Date.UTC(y, m - 1, d, 0, 0, 0) - 5.5 * 3600 * 1000).toISOString();
-  const endUTC = new Date(Date.UTC(y, m - 1, d, 23, 59, 59, 999) - 5.5 * 3600 * 1000).toISOString();
-
-  const { data: rows, error } = await supabase
-    .from("call_logs")
-    .select("org_id, status, conversation_duration, extracted_data, transcript")
-    .eq("from_number", BOLNA_CALLER_ID)
-    .gte("created_at", startUTC)
-    .lte("created_at", endUTC);
-
-  if (error) {
-    return new Response(JSON.stringify({ ok: false, error: error.message }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-  }
-
-  const total = rows?.length || 0;
-  const completed = (rows || []).filter((r: any) => r.status === "completed");
-
-  if (completed.length === 0) {
-    return new Response(JSON.stringify({ ok: true, message: "No completed calls to analyze", date: forDate, total }),
-      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-  }
-
-  // Group by outcome
+// Build the analysis prompt for one product (or the lump) and call Claude.
+async function analyze(anthropicKey: string, label: string, isLump: boolean, completed: CallRow[]): Promise<any | null> {
+  // Group by Bolna outcome for prompt structure.
   const groups: Record<string, any[]> = {};
   for (const r of completed) {
-    const o = (r.extracted_data as any)?.General?.outcome?.objective || "unknown";
-    if (!groups[o]) groups[o] = [];
-    groups[o].push({
+    const o = r.extracted_data?.General?.outcome?.objective || "unknown";
+    (groups[o] ||= []).push({
       dur: r.conversation_duration || 0,
-      notes: (r.extracted_data as any)?.General?.notes?.subjective || "",
+      product: r.product,
+      notes: r.extracted_data?.General?.notes?.subjective || "",
       transcript: ((r.transcript as string) || "").slice(0, 1200),
     });
   }
 
-  let promptText = `You are analyzing today's outbound AI sales calls made by Riya, an AI agent pitching WorkSync (a task-accountability product for Indian operations heads). Distill what was learned today.
+  const subject = isLump
+    ? `today's outbound AI sales calls across ALL products (a combined view; calls span multiple products and AI agents)`
+    : `today's outbound AI sales calls for the product "${label}" (made by its dedicated AI agent)`;
+
+  let promptText = `You are analyzing ${subject}. Distill what was learned today.
 
 Return ONLY a JSON object with this exact shape (no markdown fences, no commentary):
 {
@@ -84,71 +51,108 @@ Max 4 items per array. Be specific (cite Bolna's extraction or transcript snippe
   for (const [outcome, arr] of Object.entries(groups)) {
     promptText += `===== Outcome: ${outcome} (${arr.length} calls) =====\n`;
     for (const c of arr.slice(0, 15)) {
-      promptText += `[dur ${c.dur}s] ${c.notes}\n`;
+      promptText += `[dur ${c.dur}s${isLump ? `, ${c.product}` : ""}] ${c.notes}\n`;
       if (c.transcript) promptText += `Transcript: ${c.transcript}\n`;
       promptText += `---\n`;
     }
   }
 
-  const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
-    headers: {
-      "x-api-key": anthropicKey,
-      "anthropic-version": "2023-06-01",
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 2000,
-      messages: [{ role: "user", content: promptText }],
-    }),
+    headers: { "x-api-key": anthropicKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+    body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 2000, messages: [{ role: "user", content: promptText }] }),
   });
-
-  if (!anthropicRes.ok) {
-    const err = await anthropicRes.text();
-    return new Response(JSON.stringify({ ok: false, error: "Anthropic error: " + err.slice(0, 500) }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-  }
-
-  const anthropicJson = await anthropicRes.json();
-  const text = anthropicJson.content?.[0]?.text || "{}";
-
-  let insights: any = {};
+  if (!res.ok) { console.error(`anthropic ${label}:`, (await res.text()).slice(0, 300)); return null; }
+  const json = await res.json();
+  const text = json.content?.[0]?.text || "{}";
   try {
-    const match = text.match(/\{[\s\S]*\}/);
-    insights = JSON.parse(match ? match[0] : text);
-  } catch (_e) {
-    return new Response(JSON.stringify({ ok: false, error: "Failed to parse model output as JSON", raw: text.slice(0, 800) }),
+    const m = text.match(/\{[\s\S]*\}/);
+    return JSON.parse(m ? m[0] : text);
+  } catch { console.error(`parse fail ${label}:`, text.slice(0, 300)); return null; }
+}
+
+serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+  const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY");
+  if (!anthropicKey) {
+    return new Response(JSON.stringify({ ok: false, error: "ANTHROPIC_API_KEY missing" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 
-  const orgId = (rows?.[0] as any)?.org_id;
+  let forDate: string | null = null;
+  try {
+    const body = req.method === "POST" ? await req.json() : {};
+    if (typeof body.for_date === "string") forDate = body.for_date;
+  } catch { /* default */ }
+  const istNow = new Date(Date.now() + 5.5 * 3600 * 1000);
+  if (!forDate) forDate = istNow.toISOString().slice(0, 10);
+
+  const [y, m, d] = forDate.split("-").map(Number);
+  const startUTC = new Date(Date.UTC(y, m - 1, d, 0, 0, 0) - 5.5 * 3600 * 1000).toISOString();
+  const endUTC = new Date(Date.UTC(y, m - 1, d, 23, 59, 59, 999) - 5.5 * 3600 * 1000).toISOString();
+
+  // All AI calls for the day, with each contact's product.
+  const { data: raw, error } = await supabase
+    .from("call_logs")
+    .select("org_id, status, conversation_duration, extracted_data, transcript, contacts(product)")
+    .eq("caller_type", "ai")
+    .gte("created_at", startUTC)
+    .lte("created_at", endUTC);
+
+  if (error) {
+    return new Response(JSON.stringify({ ok: false, error: error.message }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  }
+
+  const rows: CallRow[] = (raw || []).map((r: any) => ({
+    org_id: r.org_id,
+    status: r.status,
+    conversation_duration: r.conversation_duration,
+    extracted_data: r.extracted_data,
+    transcript: r.transcript,
+    product: (r.contacts?.product || "(unassigned)").toString(),
+  }));
+
+  const orgId = rows[0]?.org_id;
   if (!orgId) {
-    return new Response(JSON.stringify({ ok: false, error: "Could not determine org_id" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ ok: true, message: "No AI calls to analyze", date: forDate, total: 0 }),
+      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 
-  const { error: uerr } = await supabase
-    .from("ai_daily_insights")
-    .upsert({
+  const completedAll = rows.filter((r) => r.status === "completed");
+
+  // One job per product that has completed calls, plus the org-wide lump.
+  const byProduct: Record<string, CallRow[]> = {};
+  for (const r of rows) (byProduct[r.product] ||= []).push(r);
+
+  const jobs: { product: string; all: CallRow[]; completed: CallRow[] }[] = [
+    { product: ALL, all: rows, completed: completedAll },
+    ...Object.entries(byProduct).map(([product, all]) => ({
+      product,
+      all,
+      completed: all.filter((r) => r.status === "completed"),
+    })),
+  ];
+
+  const results: Record<string, string> = {};
+  for (const job of jobs) {
+    if (job.completed.length === 0) { results[job.product] = "skipped (no completed calls)"; continue; }
+    const insights = await analyze(anthropicKey, job.product, job.product === ALL, job.completed);
+    if (!insights) { results[job.product] = "analysis failed"; continue; }
+    const { error: uerr } = await supabase.from("ai_daily_insights").upsert({
       org_id: orgId,
       for_date: forDate,
-      call_count: total,
-      completed_count: completed.length,
+      product: job.product,
+      call_count: job.all.length,
+      completed_count: job.completed.length,
       insights,
       generated_at: new Date().toISOString(),
-    }, { onConflict: "org_id,for_date" });
-
-  if (uerr) {
-    return new Response(JSON.stringify({ ok: false, error: uerr.message }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }, { onConflict: "org_id,for_date,product" });
+    results[job.product] = uerr ? `upsert error: ${uerr.message}` : "ok";
   }
 
-  return new Response(JSON.stringify({
-    ok: true,
-    date: forDate,
-    total,
-    completed: completed.length,
-    insights,
-  }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  return new Response(JSON.stringify({ ok: true, date: forDate, total: rows.length, completed: completedAll.length, results }),
+    { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 });

@@ -509,8 +509,12 @@ export function CompactDashboard({ orgId }: Props) {
         </div>
       </Card>
 
-      {/* Bottom row: Email/WA timeline · Leaderboard · AI insights */}
-      <div className="grid gap-3 grid-cols-1 lg:grid-cols-3">
+      {/* All-agents AI learnings — the lump. No human agents, so the Overview carries it.
+          Per-agent learnings live on the AI Agents page. */}
+      <RiyaDailyLearnings product="__all__" />
+
+      {/* Bottom row: Email/WA timeline · AI insights */}
+      <div className="grid gap-3 grid-cols-1 lg:grid-cols-2">
         {/* Email + WhatsApp timeline */}
         <Card className="p-3">
           <div className="mb-2">
@@ -536,33 +540,6 @@ export function CompactDashboard({ orgId }: Props) {
                 <Area type="monotone" dataKey="WhatsApp" stroke="#16a34a" fill="#16a34a" fillOpacity={0.4} />
               </AreaChart>
             </ResponsiveContainer>
-          </div>
-        </Card>
-
-        {/* Leaderboard */}
-        <Card className="p-3">
-          <div className="mb-2">
-            <h3 className="text-sm font-semibold">Team Leaderboard</h3>
-            <p className="text-[11px] text-muted-foreground">Calls · Emails · WhatsApp</p>
-          </div>
-          <div className="space-y-1.5 max-h-[200px] overflow-auto pr-1">
-            {leaderboard.length === 0 ? (
-              <div className="text-xs text-muted-foreground py-6 text-center">No activity in this period</div>
-            ) : (
-              leaderboard.map((row, idx) => (
-                <div key={row.id} className="flex items-center justify-between text-xs border-b border-border/50 pb-1.5 last:border-0">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="text-muted-foreground w-4">{idx + 1}.</span>
-                    <span className="truncate font-medium">{row.name}</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-[11px] shrink-0">
-                    <span className="text-emerald-500 inline-flex items-center gap-0.5"><Phone className="h-3 w-3" />{row.calls}</span>
-                    <span className="text-amber-500 inline-flex items-center gap-0.5"><Mail className="h-3 w-3" />{row.emails}</span>
-                    <span className="text-green-600 inline-flex items-center gap-0.5"><MessageCircle className="h-3 w-3" />{row.whatsapp}</span>
-                  </div>
-                </div>
-              ))
-            )}
           </div>
         </Card>
 

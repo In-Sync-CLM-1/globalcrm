@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { RefreshCw, Phone, PhoneCall, UserCheck, CalendarCheck, Clock, TrendingUp, Voicemail } from "lucide-react";
 import { useNotification } from "@/hooks/useNotification";
+import { RiyaDailyLearnings } from "@/components/Dashboard/RiyaDailyLearnings";
 
 // One row per product (= one AI agent), straight from get_ai_agent_analytics.
 interface AgentRow {
@@ -274,6 +275,9 @@ export default function AiAgentsDashboard() {
                     </div>
                   </CardContent>
                 </Card>
+
+                {/* This agent's own AI learnings (Key Learnings / objections / script tweaks). */}
+                <RiyaDailyLearnings product={current.product} />
               </>
             )}
           </TabsContent>
