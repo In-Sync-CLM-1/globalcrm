@@ -89,6 +89,26 @@ function normalizeHeader(header: string): string {
     .replace(/[^a-z0-9_]/g, '');
 }
 
+// Used to compare a CSV action/stage cell against the configured stage names.
+// Real-world uploads come through Excel/Word, which silently substitute several
+// look-alike characters that break exact-string matching:
+//   - en-dash (–, U+2013) and em-dash (—, U+2014) replacing a regular hyphen
+//   - non-breaking space (U+00A0) and other Unicode spaces replacing a regular space
+//   - leading BOM (U+FEFF) on the first column
+//   - double-spaces from copy-paste
+// Normalising both the CSV value AND the configured stage-name key with this
+// function rescues those near-matches without weakening the exact-match guarantee
+// for anything else.
+function normalizeStageMatch(s: string): string {
+  return String(s ?? '')
+    .normalize('NFKC')
+    .replace(/[‐-―−­]/g, '-')
+    .replace(/[  -‍  ⁠　﻿]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
 // Special mapping for inventory columns to handle variations in CSV headers
 function mapInventoryColumn(normalizedHeader: string): string {
   const inventoryColumnMap: Record<string, string> = {
@@ -234,8 +254,9 @@ serve(async (req) => {
 
     // For contact imports, build a stage-name -> id lookup so an uploaded
     // "pipeline_stage" (or "stage") column can set each contact's pipeline stage.
-    // Matching is case-insensitive on the active stage names for this org;
-    // an unrecognised value just leaves the stage unset (no row failure).
+    // Both sides go through normalizeStageMatch so Excel's silent en-dash and
+    // non-breaking-space substitutions still match; unrecognised values just
+    // leave the stage unset (no row failure).
     const stageNameToId: Record<string, string> = {};
     if (importJob.import_type === 'contacts') {
       const { data: orgStages } = await supabase
@@ -244,7 +265,7 @@ serve(async (req) => {
         .eq('org_id', importJob.org_id)
         .eq('is_active', true);
       for (const s of orgStages || []) {
-        stageNameToId[String(s.name).trim().toLowerCase()] = s.id;
+        stageNameToId[normalizeStageMatch(s.name)] = s.id;
       }
     }
 
@@ -315,7 +336,7 @@ serve(async (req) => {
             nature_of_business: row.nature_of_business || null,
             status: row.status || 'new',
             source: row.source || 'bulk_import',
-            pipeline_stage_id: stageNameToId[String(row.action || row.pipeline_stage || row.stage || '').trim().toLowerCase()] || null,
+            pipeline_stage_id: stageNameToId[normalizeStageMatch(row.action || row.pipeline_stage || row.stage || '')] || null,
             address: row.address || null,
             city: row.city || row.location_city || null,
             state: row.state || row.location_state || null,
