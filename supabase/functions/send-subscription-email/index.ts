@@ -9,13 +9,15 @@ const corsHeaders = {
 
 interface EmailRequest {
   org_id: string;
-  template_type: 'payment_reminder' | 'suspension_warning' | 'services_suspended' | 'services_restored' | 'payment_successful' | 'invoice_generated';
+  template_type: 'payment_reminder' | 'suspension_warning' | 'services_suspended' | 'services_restored' | 'payment_successful' | 'invoice_generated' | 'wallet_low_balance' | 'wallet_exhausted';
   data: {
     amount?: number;
     due_date?: string;
     invoice_id?: string;
     payment_id?: string;
     invoice_number?: string;
+    current_balance?: number;
+    min_balance?: number;
   };
 }
 
@@ -139,6 +141,28 @@ Deno.serve(async (req) => {
           <p>Amount: ₹${data.amount}</p>
           <p>Due Date: ${data.due_date}</p>
           <p>Please make payment by the due date to avoid service interruption.</p>
+          <p>Best regards,<br>Billing Team</p>
+        `;
+        break;
+
+      case 'wallet_low_balance':
+        subject = `⚠️ Wallet Balance Low - ${orgName}`;
+        html = `
+          <h2>⚠️ Wallet Balance Running Low</h2>
+          <p>Dear ${adminName},</p>
+          <p>This is an automated billing alert for <strong>${orgName}</strong>. Your wallet balance is running low: only <strong>₹${data.current_balance}</strong> remaining.</p>
+          <p>To avoid any interruption to your AI calls and WhatsApp automations, please recharge your wallet from the portal.</p>
+          <p>Best regards,<br>Billing Team</p>
+        `;
+        break;
+
+      case 'wallet_exhausted':
+        subject = `🚫 Wallet Exhausted - Automations Paused - ${orgName}`;
+        html = `
+          <h2>🚫 Wallet Balance Exhausted</h2>
+          <p>Dear ${adminName},</p>
+          <p>This is an automated billing alert for <strong>${orgName}</strong>. Your wallet balance is exhausted (₹${data.current_balance}), so all AI calls and WhatsApp automations have now been <strong>paused</strong>.</p>
+          <p>Please recharge your wallet from the portal to resume service.</p>
           <p>Best regards,<br>Billing Team</p>
         `;
         break;
