@@ -161,7 +161,7 @@ export default function Billing() {
         {/* Snapshot */}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <SnapCard icon={<Wallet size={16} />} tone="blue" label="Wallet balance" value={inr(balance)}
-            hint={balance <= 0 ? "Top up to keep calls & messages running" : balance <= 100 ? "Low balance" : undefined} />
+            hint={balance <= 500 ? "At the ₹500 reserve — calls & messages are paused until you top up" : balance <= 1000 ? "Low balance" : undefined} />
           <SnapCard icon={<CheckCircle2 size={16} />} tone="emerald" label="Subscription"
             value={<span className="capitalize">{status === "trialing" ? "Trial" : status}</span>}
             hint={`${seats} user${seats > 1 ? "s" : ""} × ${inr(perUser)}/mo`} />
@@ -212,7 +212,7 @@ export default function Billing() {
           <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="text-sm text-muted-foreground">
               Balance <span className="text-lg font-semibold text-foreground">{inr(balance)}</span>
-              <p className="mt-1 text-xs">New accounts start with ₹100 free credit for testing. AI calls deduct ₹3/min; WhatsApp messages deduct ₹0.20 (utility) or ₹1 (marketing) each.</p>
+              <p className="mt-1 text-xs">AI calls deduct ₹3/min; WhatsApp messages deduct ₹0.20 (utility) or ₹1 (marketing) each. Calls & messages pause once the balance reaches the ₹500 reserve. Minimum recharge ₹5,000.</p>
             </div>
             <Button variant="outline" onClick={() => setTopUpOpen(true)} className="gap-2"><IndianRupee className="h-4 w-4" /> Add funds</Button>
           </CardContent>
