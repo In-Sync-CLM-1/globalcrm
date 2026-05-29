@@ -1,0 +1,19 @@
+{
+  "action": "send",
+  "payload": {
+    "status_callback": "https://ejzjrvazegaxrhqizgaa.supabase.co/functions/v1/whatsapp-webhook",
+    "whatsapp": {
+      "messages": [{
+        "from": "918808359820",
+        "to": "917738919680",
+        "content": {
+          "type": "template",
+          "template": {
+            "name": "iedup_cmyuva_short_attendance_v1",
+            "language": { "code": "hi" }
+          }
+        }
+      }]
+    }
+  }
+}

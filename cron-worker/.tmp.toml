@@ -1,0 +1,6 @@
+name = "globalcrm-cron-wallet-alert-check"
+main = "src/index.js"
+compatibility_date = "2026-05-01"
+vars = { TARGET_FN = "wallet-alert-check" }
+[triggers]
+crons = ["*/10 * * * *"]
