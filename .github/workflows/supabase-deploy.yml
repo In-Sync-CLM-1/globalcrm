@@ -1,0 +1,59 @@
+﻿name: Deploy Supabase
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'supabase/**'
+      - '.github/workflows/supabase-deploy.yml'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    name: Push migrations and deploy edge functions
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      SUPABASE_PROJECT_ID: ${{ secrets.VITE_SUPABASE_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Link project
+        run: supabase link --project-ref "$SUPABASE_PROJECT_ID"
+      - name: Mark legacy migrations as applied
+        run: |
+          if [ ! -d supabase/migrations ]; then echo "no migrations dir"; exit 0; fi
+          versions=$(ls supabase/migrations 2>/dev/null | sed 's/_.*//' | sort -u | awk '$1 <= "20260528190000"')
+          if [ -z "$versions" ]; then echo "no legacy migrations"; exit 0; fi
+          values=$(echo "$versions" | awk 'BEGIN{ORS=""} {printf (NR==1?"":",") "(\x27" $1 "\x27)"}')
+          sql="INSERT INTO supabase_migrations.schema_migrations(version) VALUES $values ON CONFLICT DO NOTHING;"
+          body=$(jq -nc --arg q "$sql" '{query:$q}')
+          curl -sS -X POST "https://api.supabase.com/v1/projects/$SUPABASE_PROJECT_ID/database/query" -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" -H "Content-Type: application/json" -d "$body"
+          echo
+      - name: Push database migrations
+        run: |
+          if [ -d supabase/migrations ]; then supabase db push --linked; else echo "no migrations"; fi
+      - name: Determine functions to deploy
+        id: changed
+        run: |
+          if [ ! -d supabase/functions ]; then echo "mode=none" >> "$GITHUB_OUTPUT"; exit 0; fi
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then echo "mode=all" >> "$GITHUB_OUTPUT"; exit 0; fi
+          BEFORE="${{ github.event.before }}"
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then echo "mode=all" >> "$GITHUB_OUTPUT"; exit 0; fi
+          CHANGED=$(git diff --name-only "$BEFORE" HEAD)
+          if echo "$CHANGED" | grep -qE '^supabase/(functions/_shared/|config\.toml$)'; then echo "mode=all" >> "$GITHUB_OUTPUT"; exit 0; fi
+          SLUGS=$(echo "$CHANGED" | awk -F/ '$1=="supabase" && $2=="functions" && $3!="" && $3!="_shared" {print $3}' | sort -u | tr '\n' ' ')
+          if [ -z "$SLUGS" ]; then echo "mode=none" >> "$GITHUB_OUTPUT"; else echo "mode=changed" >> "$GITHUB_OUTPUT"; echo "slugs=$SLUGS" >> "$GITHUB_OUTPUT"; fi
+      - name: Deploy edge functions
+        run: |
+          case "${{ steps.changed.outputs.mode }}" in
+            all) echo "Deploying all"; supabase functions deploy --project-ref "$SUPABASE_PROJECT_ID" ;;
+            changed) for s in ${{ steps.changed.outputs.slugs }}; do echo "Deploying $s"; supabase functions deploy "$s" --project-ref "$SUPABASE_PROJECT_ID"; done ;;
+            none) echo "No edge functions changed" ;;
+          esac
