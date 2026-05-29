@@ -179,7 +179,7 @@ Deno.serve(async (req) => {
         'Authorization': `Bearer ${RESEND_API_KEY}`,
       },
       body: JSON.stringify({
-        from: 'Billing <noreply@' + (org?.email_settings?.[0]?.sending_domain || 'in-sync.co.in') + '>',
+        from: 'In-Sync Billing <notifications@globalcrm.in-sync.co.in>',
         to: [adminEmail],
         subject,
         html,
