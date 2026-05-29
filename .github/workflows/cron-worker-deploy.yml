@@ -51,7 +51,7 @@ jobs:
           crons = ["$sched"]
           EOF
             if npx wrangler@latest deploy --config .tmp.toml; then
-              printf '%s' "$SUPABASE_SERVICE_ROLE_KEY" | npx wrangler@latest secret put SUPABASE_SERVICE_ROLE_KEY --name "$name"
+              printf '%s' "$SUPABASE_SERVICE_ROLE_KEY" | npx wrangler@latest secret put SUPABASE_SERVICE_ROLE_KEY --config .tmp.toml
               echo "OK    $name -> $fn ($sched)"
               ok=$((ok+1))
             else
