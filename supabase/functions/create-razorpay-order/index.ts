@@ -45,6 +45,15 @@ Deno.serve(async (req) => {
 
     console.log('Creating Razorpay order:', { org_id, amount, type, invoice_id });
 
+    // Minimum wallet recharge is ₹5,000 (excluding GST). Reject smaller top-ups.
+    const MIN_WALLET_TOPUP = 5000;
+    if (type === 'wallet_topup' && Number(amount) < MIN_WALLET_TOPUP) {
+      return new Response(
+        JSON.stringify({ error: `Minimum wallet recharge is ₹${MIN_WALLET_TOPUP}.` }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
     // Get GST percentage from active pricing
     const { data: pricing } = await db
       .from('subscription_pricing')

@@ -15,13 +15,13 @@ import { Loader2, IndianRupee, CreditCard } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useNotification } from "@/hooks/useNotification";
 
-const PRESET_AMOUNTS = [500, 1000, 2000, 5000];
+const PRESET_AMOUNTS = [5000, 10000, 25000, 50000];
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   orgId: string;
-  /** Minimum top-up amount in rupees (excluding GST). Default ₹500. */
+  /** Minimum top-up amount in rupees (excluding GST). Default ₹5,000. */
   minAmount?: number;
 }
 
@@ -51,10 +51,10 @@ function loadRazorpayScript(): Promise<void> {
   return scriptLoadingPromise;
 }
 
-export function TopUpWalletDialog({ open, onOpenChange, orgId, minAmount = 500 }: Props) {
+export function TopUpWalletDialog({ open, onOpenChange, orgId, minAmount = 5000 }: Props) {
   const notify = useNotification();
   const qc = useQueryClient();
-  const [amount, setAmount] = useState<number>(PRESET_AMOUNTS[1]);
+  const [amount, setAmount] = useState<number>(PRESET_AMOUNTS[0]);
   const [submitting, setSubmitting] = useState(false);
 
   // Active pricing for GST display

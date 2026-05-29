@@ -34,6 +34,30 @@ export default function ProtectedRoute({ children, requiredRole }: ProtectedRout
     staleTime: 5 * 60 * 1000,
   });
 
+  // Fetch subscription status to enforce the non-payment lockout. Readable even
+  // when the org is locked (RLS for the subscription table ignores the lock), so
+  // a locked org can still reach the billing/pay screen.
+  const { data: subData } = useQuery({
+    queryKey: ["org-subscription-status", user?.id],
+    queryFn: async () => {
+      if (!user?.id) return null;
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("org_id")
+        .eq("id", user.id)
+        .maybeSingle();
+      if (!profile?.org_id) return null;
+      const { data } = await supabase
+        .from("organization_subscriptions")
+        .select("subscription_status")
+        .eq("org_id", profile.org_id)
+        .maybeSingle();
+      return data;
+    },
+    enabled: !!user?.id,
+    staleTime: 60 * 1000,
+  });
+
   // Only fetch role if user is authenticated and role is required
   const { data: roleData, isLoading: roleLoading } = useQuery({
     queryKey: ["user-role", user?.id],
@@ -85,6 +109,16 @@ export default function ProtectedRoute({ children, requiredRole }: ProtectedRout
     location.pathname !== "/onboarding"
   ) {
     return <Navigate to="/onboarding" replace />;
+  }
+
+  // Account locked for non-payment (>2 days overdue): the only reachable screen
+  // is /billing so they can pay and auto-restore access. The data layer (RLS)
+  // independently blocks all of the org's data, so this is the UX, not the lock.
+  if (
+    subData?.subscription_status === "suspended_locked" &&
+    location.pathname !== "/billing"
+  ) {
+    return <Navigate to="/billing" replace />;
   }
 
   // If role is required, wait for role check

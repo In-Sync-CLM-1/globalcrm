@@ -2,7 +2,6 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.58.0";
 import {
   INSYNC_DEMO_ORG_ID,
-  INTERNAL_ORG_IDS,
   isInsideCustomWindow,
   triggerBolnaCall,
   createBolnaAgent,
@@ -14,6 +13,7 @@ import {
   getConcurrency,
   WindowSlot,
 } from "../_shared/aiCalling.ts";
+import { orgServiceGate } from "../_shared/billingGate.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -336,37 +336,12 @@ async function processOrg(
     return { org_id: orgId, acted: false, reason: "no active scripts", stale_closed: staleClosed };
   }
 
-  // Internal / demo orgs (In-Sync Demo) are not billed for AI minutes, so they
-  // must never be halted on subscription status or wallet balance.
-  const isInternal = INTERNAL_ORG_IDS.has(orgId);
-
-  const { data: sub } = await supabase
-    .from("organization_subscriptions")
-    .select("subscription_status, wallet_balance, wallet_minimum_balance, last_payment_date, next_billing_date")
-    .eq("org_id", orgId)
-    .maybeSingle();
-  if (!isInternal && sub && (sub.subscription_status === "suspended_locked" || sub.subscription_status === "cancelled")) {
-    return { org_id: orgId, acted: false, reason: `subscription ${sub.subscription_status}`, stale_closed: staleClosed };
-  }
-
-  // Wallet enforcement: outside of the free trial, halt dialing when the wallet
-  // has dropped below its minimum. Trial = no payment yet AND next billing date
-  // is still in the future.
-  if (!isInternal && sub) {
-    const today = new Date().toISOString().slice(0, 10);
-    const inTrial = !sub.last_payment_date
-      && typeof sub.next_billing_date === "string"
-      && sub.next_billing_date >= today;
-    const balance = Number(sub.wallet_balance ?? 0);
-    const minBalance = Number(sub.wallet_minimum_balance ?? 0);
-    if (!inTrial && balance <= minBalance) {
-      return {
-        org_id: orgId,
-        acted: false,
-        reason: `wallet exhausted (balance ${balance.toFixed(2)} <= min ${minBalance.toFixed(2)})`,
-        stale_closed: staleClosed,
-      };
-    }
+  // No money, no service: halt dialing for any external org that is locked for
+  // non-payment or whose wallet has hit its ₹500 reserve — trial included.
+  // Internal/demo orgs are exempt (handled inside the gate).
+  const gate = await orgServiceGate(supabase, orgId);
+  if (!gate.allowed) {
+    return { org_id: orgId, acted: false, reason: gate.reason, stale_closed: staleClosed };
   }
 
   const perScript: any[] = [];

@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getSupabaseClient } from '../_shared/supabaseClient.ts';
+import { orgServiceGate } from '../_shared/billingGate.ts';
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -172,6 +173,16 @@ serve(async (req) => {
     }
 
     console.log('✓ Organization verified:', profile.org_id);
+
+    // No money, no service: block paid email sends when the org is locked for
+    // non-payment or its wallet has hit the ₹500 reserve.
+    const gate = await orgServiceGate(getSupabaseClient(), profile.org_id);
+    if (!gate.allowed) {
+      return new Response(
+        JSON.stringify({ error: `Email unavailable: ${gate.reason}`, code: gate.locked ? 'account_locked' : 'wallet_exhausted' }),
+        { status: 402, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      );
+    }
 
     // Get email settings and verify domain
     const { data: emailSettings, error: settingsError } = await supabaseClient

@@ -1,4 +1,5 @@
 import { getSupabaseClient } from '../_shared/supabaseClient.ts';
+import { orgServiceGate } from '../_shared/billingGate.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -49,6 +50,19 @@ Deno.serve(async (req) => {
       return new Response(
         JSON.stringify({ error: 'Campaign not found' }),
         { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // No money, no service: stop the campaign if the org is locked or out of funds.
+    const gate = await orgServiceGate(supabaseClient, campaign.org_id);
+    if (!gate.allowed) {
+      await supabaseClient
+        .from('sms_bulk_campaigns')
+        .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+        .eq('id', campaignId);
+      return new Response(
+        JSON.stringify({ error: `Campaign blocked: ${gate.reason}`, code: gate.locked ? 'account_locked' : 'wallet_exhausted' }),
+        { status: 402, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
       );
     }
 

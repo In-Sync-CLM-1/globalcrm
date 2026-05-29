@@ -12,6 +12,7 @@ import {
   normalizePhone,
   WindowSlot,
 } from "../_shared/aiCalling.ts";
+import { orgServiceGate } from "../_shared/billingGate.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -94,20 +95,12 @@ async function processOrg(supabase: any, orgId: string): Promise<unknown> {
     return { org_id: orgId, acted: false, reason: win.reason };
   }
 
-  // Hard wallet cap: when the org opts in (IEDUP), stop all sends once the wallet
-  // is spent — even during the free trial. Mirrors the dialer's candidate-side
-  // gate so calls and WhatsApp respect the same ceiling.
-  if (os?.enforce_wallet_in_trial) {
-    const { data: sub } = await supabase
-      .from("organization_subscriptions")
-      .select("wallet_balance, wallet_minimum_balance")
-      .eq("org_id", orgId)
-      .maybeSingle();
-    const balance = Number(sub?.wallet_balance ?? 0);
-    const minBalance = Number(sub?.wallet_minimum_balance ?? 0);
-    if (balance <= minBalance) {
-      return { org_id: orgId, acted: false, reason: `wallet exhausted (balance ${balance.toFixed(2)} <= min ${minBalance.toFixed(2)})` };
-    }
+  // No money, no service: stop all sends when an external org is locked for
+  // non-payment or its wallet has hit the ₹500 reserve — trial included.
+  // Internal/demo orgs are exempt (handled inside the gate).
+  const gate = await orgServiceGate(supabase, orgId);
+  if (!gate.allowed) {
+    return { org_id: orgId, acted: false, reason: gate.reason };
   }
 
   const todayOnly = !!os?.act_today_only;

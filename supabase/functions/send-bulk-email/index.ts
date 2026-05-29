@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { getSupabaseClient } from "../_shared/supabaseClient.ts";
 import { replaceVariables } from "../_shared/templateVariables.ts";
+import { orgServiceGate } from "../_shared/billingGate.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -77,6 +78,19 @@ serve(async (req) => {
 
     if (campaignError || !campaign) {
       throw new Error("Campaign not found");
+    }
+
+    // No money, no service: stop the campaign if the org is locked or out of funds.
+    const gate = await orgServiceGate(supabaseClient, campaign.org_id);
+    if (!gate.allowed) {
+      await supabaseClient
+        .from("email_bulk_campaigns")
+        .update({ status: "failed" })
+        .eq("id", campaignId);
+      return new Response(
+        JSON.stringify({ error: `Campaign blocked: ${gate.reason}`, code: gate.locked ? 'account_locked' : 'wallet_exhausted' }),
+        { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
     }
 
     console.log('[send-bulk-email] Campaign:', campaign.campaign_name || campaign.name);
