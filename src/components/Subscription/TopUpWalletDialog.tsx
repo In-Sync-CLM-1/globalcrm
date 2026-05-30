@@ -16,6 +16,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { useNotification } from "@/hooks/useNotification";
 
 const PRESET_AMOUNTS = [5000, 10000, 25000, 50000];
+// Shown only to orgs with the opt-in `allow_low_recharge` switch (IEDUP).
+const LOW_PRESET_AMOUNTS = [500, 1000, 5000, 10000];
 
 interface Props {
   open: boolean;
@@ -56,6 +58,30 @@ export function TopUpWalletDialog({ open, onOpenChange, orgId, minAmount = 5000 
   const qc = useQueryClient();
   const [amount, setAmount] = useState<number>(PRESET_AMOUNTS[0]);
   const [submitting, setSubmitting] = useState(false);
+
+  // Per-org low-recharge switch (IEDUP): when on, allow ₹500/₹1,000 top-ups.
+  const { data: orgSettings } = useQuery({
+    queryKey: ["topup-org-settings", orgId],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("organization_settings")
+        .select("allow_low_recharge")
+        .eq("org_id", orgId)
+        .maybeSingle();
+      return data;
+    },
+    enabled: open && !!orgId,
+  });
+  const allowLow = !!orgSettings?.allow_low_recharge;
+  const presets = allowLow ? LOW_PRESET_AMOUNTS : PRESET_AMOUNTS;
+  const effectiveMin = allowLow ? 500 : minAmount;
+
+  // Reset the selected amount to the first preset whenever the dialog opens or
+  // the low-recharge flag resolves, so the default never sits below the minimum.
+  useEffect(() => {
+    if (open) setAmount(presets[0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, allowLow]);
 
   // Active pricing for GST display
   const { data: pricing } = useQuery({
@@ -98,8 +124,8 @@ export function TopUpWalletDialog({ open, onOpenChange, orgId, minAmount = 5000 
   const total = +(amount + gst).toFixed(2);
 
   async function handleSubmit() {
-    if (amount < minAmount) {
-      notify.error("Amount too low", `Minimum top-up is ₹${minAmount}.`);
+    if (amount < effectiveMin) {
+      notify.error("Amount too low", `Minimum top-up is ₹${effectiveMin}.`);
       return;
     }
     setSubmitting(true);
@@ -182,7 +208,7 @@ export function TopUpWalletDialog({ open, onOpenChange, orgId, minAmount = 5000 
 
         <div className="space-y-4 py-2">
           <div className="grid grid-cols-4 gap-2">
-            {PRESET_AMOUNTS.map((p) => (
+            {presets.map((p) => (
               <Button
                 key={p}
                 variant={amount === p ? "default" : "outline"}
@@ -201,14 +227,14 @@ export function TopUpWalletDialog({ open, onOpenChange, orgId, minAmount = 5000 
               <Input
                 id="topup-amount"
                 type="number"
-                min={minAmount}
+                min={effectiveMin}
                 step={100}
                 value={amount}
                 onChange={(e) => setAmount(Math.max(0, Number(e.target.value) || 0))}
                 className="pl-8"
               />
             </div>
-            <p className="mt-1 text-xs text-muted-foreground">Minimum ₹{minAmount}.</p>
+            <p className="mt-1 text-xs text-muted-foreground">Minimum ₹{effectiveMin}.</p>
           </div>
 
           <div className="rounded-md border bg-muted/40 p-3 text-sm">
@@ -234,7 +260,7 @@ export function TopUpWalletDialog({ open, onOpenChange, orgId, minAmount = 5000 
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
             Cancel
           </Button>
-          <Button onClick={handleSubmit} disabled={submitting || amount < minAmount}>
+          <Button onClick={handleSubmit} disabled={submitting || amount < effectiveMin}>
             {submitting ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Opening payment…
