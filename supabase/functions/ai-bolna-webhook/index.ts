@@ -39,10 +39,12 @@ const POST_CALL_WA_BY_ORG: Record<string, {
   body_params: (ctx: { firstName: string }) => string[];
 }> = {
   "6dcf4229-6902-4cd4-9c7f-2d6ed4a6045d": {
-    template_name: "iedup_cmyuva_training_link_v4",
+    // v5 is the UTILITY-classed replacement for v4 (which Meta classed MARKETING,
+    // billing ₹1 vs ₹0.20). Same single name variable. v4 is being retired.
+    template_name: "iedup_cmyuva_training_link_v5",
     language_code: "hi",
     from_number: "+918808359820",
-    cost_per_msg: WHATSAPP_MARKETING_COST_PER_MSG, // Meta classed v4 as MARKETING
+    cost_per_msg: WHATSAPP_UTILITY_COST_PER_MSG,
     body_params: ({ firstName }) => [firstName],
   },
 };

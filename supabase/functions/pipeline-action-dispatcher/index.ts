@@ -31,12 +31,10 @@ const MAX_WA_PER_TICK = 25;
 const WHATSAPP_UTILITY_COST_PER_MSG = 0.20;
 const WHATSAPP_MARKETING_COST_PER_MSG = 1.00;
 // Templates Meta classifies as MARKETING (charged at the marketing rate).
-const MARKETING_TEMPLATES = new Set<string>([
-  "iedup_cmyuva_registration_steps_v2",
-  // Meta re-classified the help-desk template as MARKETING on the v2 re-file
-  // (was UTILITY); bill it at the marketing rate so the wallet stays accurate.
-  "iedup_cmyuva_training_helpdesk_v2",
-]);
+// Kept empty by policy: IEDUP now runs UTILITY-only templates (the old MARKETING
+// versions — registration_steps_v2, training_helpdesk_v2, training_link_v4 —
+// have been retired/deleted in favour of their utility v3/v5/v6 replacements).
+const MARKETING_TEMPLATES = new Set<string>([]);
 function waCostFor(templateName: string | null): number {
   return templateName && MARKETING_TEMPLATES.has(templateName)
     ? WHATSAPP_MARKETING_COST_PER_MSG
