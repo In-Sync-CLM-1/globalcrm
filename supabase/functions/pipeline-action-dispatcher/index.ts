@@ -195,8 +195,33 @@ async function processOrg(supabase: any, orgId: string): Promise<unknown> {
         .eq("caller_type", "ai")
         .eq("status", "in_progress");
       const slots = Math.max(0, callConcurrency() - (inFlight || 0));
+      const candidateRows = callRows.slice(0, slots);
 
-      for (const r of callRows.slice(0, slots)) {
+      // Idempotency guard against duplicate dialing: a contact can be enqueued
+      // more than once (re-upload, repeated stage change), and a freshly-queued
+      // call has no started_at yet — so without this guard the same person gets
+      // dialed twice. Skip any contact that already has an AI call TODAY (IST) or
+      // one currently queued/in-flight. Keys on the call_logs row existing, not on
+      // started_at, so it is race-proof across 5-min ticks. (Next-day retries are
+      // unaffected — only same-day repeats are blocked.)
+      const candidateContactIds = [...new Set(candidateRows.map((r) => r.contact_id))];
+      const alreadyCalled = new Set<string>();
+      if (candidateContactIds.length > 0) {
+        const todayStartIso = new Date(istStartOfTodayMs()).toISOString();
+        const { data: priorCalls } = await supabase
+          .from("call_logs")
+          .select("contact_id")
+          .eq("org_id", orgId)
+          .eq("caller_type", "ai")
+          .in("contact_id", candidateContactIds)
+          .or(`created_at.gte.${todayStartIso},status.in.(queued,in_progress)`);
+        for (const c of (priorCalls || [])) {
+          if (c.contact_id) alreadyCalled.add(c.contact_id as string);
+        }
+      }
+
+      const seenThisTick = new Set<string>();
+      for (const r of candidateRows) {
         const contact = contactById.get(r.contact_id);
         const phone = normalizePhone(contact?.phone);
         if (!contact || !phone || contact.do_not_call) {
@@ -204,6 +229,13 @@ async function processOrg(supabase: any, orgId: string): Promise<unknown> {
           skipped++;
           continue;
         }
+        // Already dialed today / in-flight, or a duplicate queue row this tick.
+        if (alreadyCalled.has(r.contact_id) || seenThisTick.has(r.contact_id)) {
+          await markQueue(supabase, r.id, "skipped", "duplicate — already called today / in progress");
+          skipped++;
+          continue;
+        }
+        seenThisTick.add(r.contact_id);
         const res = await triggerCall(supabase, {
           orgId, bolnaKey, agentId: script.bolna_agent_id, scriptId: script.id,
           dispositionId: dispo?.id ?? null, contact, phone,
