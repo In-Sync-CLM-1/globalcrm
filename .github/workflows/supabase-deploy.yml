@@ -47,8 +47,21 @@ jobs:
           BEFORE="${{ github.event.before }}"
           if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then echo "mode=all" >> "$GITHUB_OUTPUT"; exit 0; fi
           CHANGED=$(git diff --name-only "$BEFORE" HEAD)
-          if echo "$CHANGED" | grep -qE '^supabase/(functions/_shared/|config\.toml$)'; then echo "mode=all" >> "$GITHUB_OUTPUT"; exit 0; fi
-          SLUGS=$(echo "$CHANGED" | awk -F/ '$1=="supabase" && $2=="functions" && $3!="" && $3!="_shared" {print $3}' | sort -u | tr '\n' ' ')
+          # Shared code is bundled into every function -> a _shared change is the only
+          # case that legitimately requires redeploying all functions.
+          if echo "$CHANGED" | grep -qE '^supabase/functions/_shared/'; then echo "mode=all" >> "$GITHUB_OUTPUT"; exit 0; fi
+          # Functions whose source directory changed.
+          DIR_SLUGS=$(echo "$CHANGED" | awk -F/ '$1=="supabase" && $2=="functions" && $3!="" && $3!="_shared" {print $3}')
+          # Functions whose config.toml verify_jwt was added or flipped: redeploy ONLY
+          # those, never the whole fleet. Diff the parsed [functions.X] verify_jwt maps.
+          CFG_SLUGS=""
+          if echo "$CHANGED" | grep -qE '^supabase/config\.toml$'; then
+            parse() { awk '/^\[functions\.[A-Za-z0-9_-]+\]/{fn=$0;gsub(/^\[functions\.|\]$/,"",fn);next} /^\[/{fn=""} fn!="" && $1=="verify_jwt"{print fn"="$3}'; }
+            OLD=$(git show "$BEFORE:supabase/config.toml" 2>/dev/null | parse | sort)
+            NEW=$(git show "HEAD:supabase/config.toml" 2>/dev/null | parse | sort)
+            CFG_SLUGS=$(comm -13 <(printf '%s\n' "$OLD") <(printf '%s\n' "$NEW") | sed -E 's/=.*//')
+          fi
+          SLUGS=$(printf '%s\n%s\n' "$DIR_SLUGS" "$CFG_SLUGS" | sed '/^$/d' | sort -u | tr '\n' ' ')
           if [ -z "$SLUGS" ]; then echo "mode=none" >> "$GITHUB_OUTPUT"; else echo "mode=changed" >> "$GITHUB_OUTPUT"; echo "slugs=$SLUGS" >> "$GITHUB_OUTPUT"; fi
       - name: Deploy edge functions
         run: |
