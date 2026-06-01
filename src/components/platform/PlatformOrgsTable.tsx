@@ -22,13 +22,14 @@ interface Organization {
   usersActive30Days?: number;
   callVolume?: number;
   emailVolume?: number;
+  whatsappVolume?: number;
 }
 
 interface Props {
   organizations: Organization[];
 }
 
-type SortKey = "name" | "userCount" | "contactCount" | "usersActive30Days" | "callVolume" | "emailVolume";
+type SortKey = "name" | "userCount" | "contactCount" | "usersActive30Days" | "callVolume" | "emailVolume" | "whatsappVolume";
 
 export function PlatformOrgsTable({ organizations }: Props) {
   const [search, setSearch] = useState("");
@@ -116,6 +117,7 @@ export function PlatformOrgsTable({ organizations }: Props) {
                   <SortHeader label="Active 30d" field="usersActive30Days" />
                   <SortHeader label="Calls" field="callVolume" />
                   <SortHeader label="Emails" field="emailVolume" />
+                  <SortHeader label="WhatsApp" field="whatsappVolume" />
                   <TableHead>Status</TableHead>
                   <TableHead>Created</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
@@ -124,7 +126,7 @@ export function PlatformOrgsTable({ organizations }: Props) {
               <TableBody>
                 {filtered.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={10} className="py-8 text-center text-muted-foreground">
+                    <TableCell colSpan={11} className="py-8 text-center text-muted-foreground">
                       No organizations found
                     </TableCell>
                   </TableRow>
@@ -155,6 +157,11 @@ export function PlatformOrgsTable({ organizations }: Props) {
                       <TableCell>
                         <Badge variant="secondary" className="font-mono text-xs">
                           {org.emailVolume}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="secondary" className="font-mono text-xs">
+                          {org.whatsappVolume}
                         </Badge>
                       </TableCell>
                       <TableCell>
@@ -229,6 +236,10 @@ export function PlatformOrgsTable({ organizations }: Props) {
               <div>
                 <p className="text-muted-foreground">Emails</p>
                 <p className="font-medium">{detailOrg?.emailVolume}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">WhatsApp</p>
+                <p className="font-medium">{detailOrg?.whatsappVolume}</p>
               </div>
             </div>
 

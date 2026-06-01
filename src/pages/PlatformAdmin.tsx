@@ -31,6 +31,7 @@ interface Organization {
   usersActive30Days?: number;
   callVolume?: number;
   emailVolume?: number;
+  whatsappVolume?: number;
 }
 
 interface OrgStats {
@@ -43,12 +44,13 @@ interface OrgStats {
   usersLast30Days: number;
   callVolume: number;
   emailVolume: number;
+  whatsappVolume: number;
 }
 
 const EMPTY_STATS: OrgStats = {
   totalOrgs: 0, activeOrgs: 0, totalUsers: 0, totalContacts: 0,
   usersLast1Day: 0, usersLast7Days: 0, usersLast30Days: 0,
-  callVolume: 0, emailVolume: 0,
+  callVolume: 0, emailVolume: 0, whatsappVolume: 0,
 };
 
 const fadeIn = {
@@ -116,6 +118,7 @@ export default function PlatformAdmin() {
             usersActive30Days: (orgStats as any)?.active_users_30d || 0,
             callVolume: (orgStats as any)?.call_volume || 0,
             emailVolume: (orgStats as any)?.email_volume || 0,
+            whatsappVolume: (orgStats as any)?.whatsapp_volume || 0,
           };
         })
       );
@@ -133,6 +136,7 @@ export default function PlatformAdmin() {
           usersLast30Days: (platformStats as any).active_users_30d || 0,
           callVolume: (platformStats as any).call_volume || 0,
           emailVolume: (platformStats as any).email_volume || 0,
+          whatsappVolume: (platformStats as any).whatsapp_volume || 0,
         });
       }
     } catch (error: any) {
