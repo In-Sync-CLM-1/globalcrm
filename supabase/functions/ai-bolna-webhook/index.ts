@@ -518,11 +518,27 @@ async function autoDisposition(
 ): Promise<void> {
   try {
     // Idempotent: skip if a disposition is already set (duplicate webhooks).
-    const { data: cl } = await supabase.from("call_logs").select("disposition_id").eq("id", args.callLogId).maybeSingle();
+    const { data: cl } = await supabase.from("call_logs").select("disposition_id, bolna_execution_id").eq("id", args.callLogId).maybeSingle();
     if (cl?.disposition_id) return;
 
-    const transcript = args.transcript || "";
-    const connected = (args.durationSec ?? 0) > 0 && /(?:^|\n)\s*user\s*:/i.test(transcript);
+    let transcript = args.transcript || "";
+    let durationSec = args.durationSec;
+    // Bolna can fire the terminal webhook before the transcript/duration are
+    // attached — which makes a real conversation look "not connected". Fetch the
+    // authoritative execution from Bolna and classify on that, not the partial payload.
+    if ((!transcript || !/(?:^|\n)\s*user\s*:/i.test(transcript)) && cl?.bolna_execution_id) {
+      try {
+        const bk = Deno.env.get("BOLNA_API_KEY");
+        const r = await fetch(`https://api.bolna.ai/executions/${cl.bolna_execution_id}`, { headers: { Authorization: `Bearer ${bk}` } });
+        if (r.ok) {
+          const ex = await r.json();
+          if (ex.transcript) transcript = ex.transcript as string;
+          const d = (ex.telephony_data || {})?.duration;
+          if (d != null) durationSec = Number(d);
+        }
+      } catch (e) { console.warn("autoDisposition: bolna execution fetch failed:", String(e)); }
+    }
+    const connected = (durationSec ?? 0) > 0 || /(?:^|\n)\s*user\s*:/i.test(transcript);
 
     let outcomeKey: string;
     let demoDate: string | null = null;
@@ -559,7 +575,7 @@ async function autoDisposition(
       demoTime,
       optOut,
       summary,
-      callDuration: args.durationSec,
+      callDuration: durationSec,
       fireAutomation: true,
     });
 

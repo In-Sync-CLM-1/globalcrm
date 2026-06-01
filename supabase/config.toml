@@ -162,3 +162,10 @@ verify_jwt = false
 [functions.pipeline-action-dispatcher]
 verify_jwt = false
 
+# Invoked internally by ai-bolna-webhook / exotel-webhook (post-call follow-up
+# messages). Those callers present the sb_secret_ service key, which the gateway
+# rejects on verify_jwt=true — so the demo confirmation + intro messages were
+# silently 401ing. Idempotent (customer_message_sent_at guard).
+[functions.send-post-call-message]
+verify_jwt = false
+
