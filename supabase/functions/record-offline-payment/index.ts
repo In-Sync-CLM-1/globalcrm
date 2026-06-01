@@ -100,6 +100,15 @@ Deno.serve(async (req) => {
     // received amount (the invoice total already includes GST).
     const creditAmount = payment_for === 'wallet' ? baseAmount : amount;
 
+    // Current state — used to decide whether clearing the lock must also reactivate
+    // a subscription that had been suspended/cancelled for non-payment.
+    const { data: subRow } = await db
+      .from('organization_subscriptions')
+      .select('subscription_status, wallet_balance')
+      .eq('org_id', org_id)
+      .single();
+    const prevStatus = (subRow?.subscription_status as string | undefined) ?? null;
+
     // 5. One payment_transactions row of record (mirrors the Razorpay shape, but
     //    marked offline so it's auditable and never confused with an online charge).
     const { data: paymentTxn, error: txnError } = await db
@@ -170,14 +179,7 @@ Deno.serve(async (req) => {
       await db.from('organizations').update({ services_enabled: true }).eq('id', org_id);
     } else {
       // Wallet top-up — credit the balance and write an audited wallet ledger row.
-      // Crossing back above the ₹500 floor auto-unlocks the org (live computation).
-      const { data: sub } = await db
-        .from('organization_subscriptions')
-        .select('wallet_balance')
-        .eq('org_id', org_id)
-        .single();
-
-      const before = Number(sub?.wallet_balance || 0);
+      const before = Number(subRow?.wallet_balance || 0);
       const after = before + creditAmount;
 
       await db
@@ -197,6 +199,20 @@ Deno.serve(async (req) => {
         created_by: user.id,
       });
     }
+
+    // 5b. Unlock the org. Offline-billing orgs carry NO wallet reserve floor, so
+    //     set the minimum to zero (any positive balance counts as "in service"),
+    //     and reactivate the subscription if it had been suspended/cancelled for
+    //     non-payment. Recording an admin payment always restores access —
+    //     is_org_locked() recomputes live, so the lock lifts immediately.
+    const unlock: Record<string, unknown> = { wallet_minimum_balance: 0, updated_at: nowIso };
+    if (prevStatus === 'suspended_locked' || prevStatus === 'cancelled') {
+      unlock.subscription_status = 'active';
+      unlock.suspension_date = null;
+      unlock.suspension_reason = null;
+    }
+    await db.from('organization_subscriptions').update(unlock).eq('org_id', org_id);
+    await db.from('organizations').update({ services_enabled: true }).eq('id', org_id);
 
     // 6. Best-effort receipt email to the org (never blocks the record).
     try {
