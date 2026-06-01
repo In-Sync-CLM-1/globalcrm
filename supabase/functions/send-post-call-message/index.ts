@@ -332,7 +332,7 @@ serve(async (req) => {
         } else {
           const { data: waTpl } = await supabase
             .from("communication_templates")
-            .select("template_id, status, language")
+            .select("id, template_id, status, language")
             .eq("org_id", callLog.org_id)
             .eq("template_name", waTemplateName)
             .eq("template_type", "whatsapp")
@@ -405,10 +405,10 @@ serve(async (req) => {
             const ok = r.ok && (msg?.code === 200 || msg?.code === 202 || msg?.status === "success");
             const messageSid = msg?.data?.sid || null;
 
-            await supabase.from("whatsapp_messages").insert({
+            const { error: waLogErr } = await supabase.from("whatsapp_messages").insert({
               org_id: callLog.org_id,
               contact_id: contact.id,
-              template_id: waTpl.template_id,
+              template_id: waTpl.id, // uuid FK to communication_templates (NOT the Meta id)
               sent_by: callLog.agent_id,
               phone_number: waPhone,
               message_content: `Template: ${waTemplateName}`,
@@ -417,8 +417,9 @@ serve(async (req) => {
               error_message: ok ? null : (msg?.error_data?.message || parsed?.message || `HTTP ${r.status}`),
               exotel_status_code: String(msg?.code ?? r.status),
               exotel_message_id: messageSid,
-              direction: "outgoing",
+              direction: "outbound", // CHECK allows only inbound|outbound
             });
+            if (waLogErr) console.error("[postcall] whatsapp_messages insert failed:", waLogErr.message);
 
             result.whatsapp = ok ? "sent" : "failed";
             if (!ok) result.whatsapp_error = msg?.error_data?.message || parsed?.message || `HTTP ${r.status}`;
