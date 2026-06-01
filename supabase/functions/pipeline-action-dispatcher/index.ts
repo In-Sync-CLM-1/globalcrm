@@ -88,10 +88,10 @@ async function processOrg(supabase: any, orgId: string): Promise<unknown> {
     .eq("org_id", orgId)
     .maybeSingle();
 
+  // Window is computed but NOT an early exit: stages flagged ignore_window (e.g.
+  // inbound demo-request qualify calls) must fire regardless of the cold-calling
+  // window. Out-of-window filtering happens after the queue is loaded.
   const win = isInsideCustomWindow(os?.calling_windows as WindowSlot[] | null);
-  if (!win.inside) {
-    return { org_id: orgId, acted: false, reason: win.reason };
-  }
 
   // No money, no service: stop all sends when an external org is locked for
   // non-payment or its wallet has hit the ₹500 reserve — trial included.
@@ -144,6 +144,23 @@ async function processOrg(supabase: any, orgId: string): Promise<unknown> {
       }
     }
     activeQueue = keep;
+  }
+
+  // Calling window: outside the window, only stages flagged ignore_window (the
+  // inbound demo-request qualify call) run now; everything else stays pending
+  // for the next in-window tick. Inside the window, all rows run.
+  if (!win.inside) {
+    const { data: exempt } = await supabase
+      .from("pipeline_stage_actions")
+      .select("stage_id")
+      .eq("org_id", orgId)
+      .eq("is_active", true)
+      .eq("ignore_window", true);
+    const exemptStages = new Set<string>((exempt || []).map((e: any) => e.stage_id));
+    activeQueue = activeQueue.filter((r) => exemptStages.has(r.stage_id));
+    if (activeQueue.length === 0) {
+      return { org_id: orgId, acted: false, reason: win.reason };
+    }
   }
 
   // ---- WhatsApp -------------------------------------------------------------
