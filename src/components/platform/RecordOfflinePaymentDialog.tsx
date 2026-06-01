@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   Dialog,
   DialogContent,
@@ -56,6 +57,25 @@ export function RecordOfflinePaymentDialog({ open, onOpenChange, org, onRecorded
   const [notes, setNotes] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
 
+  // Active GST rate — the entered amount is GST-inclusive; we show how much of it
+  // is GST and how much actually lands in the wallet.
+  const { data: pricing } = useQuery({
+    queryKey: ["offline-pay-pricing"],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("subscription_pricing")
+        .select("gst_percentage")
+        .eq("is_active", true)
+        .maybeSingle();
+      return data;
+    },
+    enabled: open,
+  });
+  const gstPct = Number(pricing?.gst_percentage ?? 18);
+  const base = amount > 0 ? +(amount / (1 + gstPct / 100)).toFixed(2) : 0;
+  const gst = +(amount - base).toFixed(2);
+  const inr = (n: number) => `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
   // Reset the form each time the dialog opens for a fresh org.
   useEffect(() => {
     if (open) {
@@ -93,7 +113,7 @@ export function RecordOfflinePaymentDialog({ open, onOpenChange, org, onRecorded
       notify.success(
         "Payment recorded",
         paymentFor === "wallet"
-          ? `₹${amount.toLocaleString("en-IN")} added to ${org.name}'s wallet.`
+          ? `${inr(base)} (excl. GST) added to ${org.name}'s wallet.`
           : `${org.name}'s subscription marked paid and reactivated.`
       );
       onRecorded?.();
@@ -152,7 +172,7 @@ export function RecordOfflinePaymentDialog({ open, onOpenChange, org, onRecorded
           </div>
 
           <div>
-            <Label htmlFor="offline-amount">Amount received (₹)</Label>
+            <Label htmlFor="offline-amount">Amount received — incl. GST (₹)</Label>
             <div className="relative">
               <IndianRupee className="pointer-events-none absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
@@ -166,7 +186,30 @@ export function RecordOfflinePaymentDialog({ open, onOpenChange, org, onRecorded
                 placeholder="0"
               />
             </div>
+            <p className="mt-1 text-xs text-muted-foreground">Enter the total the client actually paid, GST included.</p>
           </div>
+
+          {amount > 0 && (
+            <div className="rounded-md border bg-muted/40 p-3 text-sm">
+              <div className="flex justify-between">
+                <span>Amount received</span>
+                <span>{inr(amount)}</span>
+              </div>
+              <div className="flex justify-between text-muted-foreground">
+                <span>GST ({gstPct}%)</span>
+                <span>−{inr(gst)}</span>
+              </div>
+              <div className="mt-1 flex justify-between border-t pt-1 font-semibold">
+                <span>{paymentFor === "wallet" ? "Credited to wallet" : "Applied to subscription"}</span>
+                <span>{paymentFor === "wallet" ? inr(base) : inr(amount)}</span>
+              </div>
+              <p className="mt-2 text-xs text-muted-foreground">
+                {paymentFor === "wallet"
+                  ? "GST is paid to the government and is not part of the spendable wallet balance."
+                  : "The subscription invoice total already includes GST, so the full amount is applied."}
+              </p>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <div>

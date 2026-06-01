@@ -85,6 +85,21 @@ Deno.serve(async (req) => {
     const recordedBy = [caller.first_name, caller.last_name].filter(Boolean).join(' ') || user.email;
     const nowIso = new Date().toISOString();
 
+    // The amount the admin enters is the total received, GST INCLUSIVE. Only the
+    // ex-GST base is wallet money (GST is paid to the government). Back it out
+    // from the active GST rate so offline credit matches the Razorpay path.
+    const { data: pricing } = await db
+      .from('subscription_pricing')
+      .select('gst_percentage')
+      .eq('is_active', true)
+      .maybeSingle();
+    const gstPct = Number(pricing?.gst_percentage ?? 18);
+    const baseAmount = Math.round((amount / (1 + gstPct / 100)) * 100) / 100;
+    const gstAmount = Math.round((amount - baseAmount) * 100) / 100;
+    // Wallet gets the ex-GST base; a subscription invoice is settled at the full
+    // received amount (the invoice total already includes GST).
+    const creditAmount = payment_for === 'wallet' ? baseAmount : amount;
+
     // 5. One payment_transactions row of record (mirrors the Razorpay shape, but
     //    marked offline so it's auditable and never confused with an online charge).
     const { data: paymentTxn, error: txnError } = await db
@@ -109,6 +124,9 @@ Deno.serve(async (req) => {
           recorded_by: recordedBy,
           recorded_by_id: user.id,
           billing_period: billing_period || null,
+          gst_percentage: gstPct,
+          base_amount: baseAmount,
+          gst_amount: gstAmount,
         },
       })
       .select()
@@ -160,7 +178,7 @@ Deno.serve(async (req) => {
         .single();
 
       const before = Number(sub?.wallet_balance || 0);
-      const after = before + amount;
+      const after = before + creditAmount;
 
       await db
         .from('organization_subscriptions')
@@ -170,12 +188,12 @@ Deno.serve(async (req) => {
       await db.from('wallet_transactions').insert({
         org_id,
         transaction_type: 'topup',
-        amount,
+        amount: creditAmount,
         balance_before: before,
         balance_after: after,
         payment_transaction_id: paymentTxn.id,
-        description: `Offline payment — ${methodLabel}${refSuffix}`,
-        admin_reason: notes || `Recorded by ${recordedBy}`,
+        description: `Offline payment (excl. GST) — ${methodLabel}${refSuffix}`,
+        admin_reason: notes || `₹${amount} received incl. GST · recorded by ${recordedBy}`,
         created_by: user.id,
       });
     }
