@@ -150,8 +150,10 @@ serve(async (req) => {
       : (agentProfile?.email || "the In-Sync team");
 
     const prospectFirstName = contact.first_name || "there";
-    const demoDateStr = formatDemoDate(activity?.demo_date);
-    const demoTimeStr = formatDemoTime(activity?.demo_time);
+    // May be overridden below from the booked meeting (the source of truth for a
+    // demo's date/time — call_log.activity_id is not always set).
+    let demoDateStr = formatDemoDate(activity?.demo_date);
+    let demoTimeStr = formatDemoTime(activity?.demo_time);
 
     // Product-aware template selection (worksync vs vendorverification).
     const product = String((contact as any).product || "").toLowerCase().trim();
@@ -184,7 +186,7 @@ serve(async (req) => {
     let meetingLink = "", rsvpToken = "", rsvpLink = "", datedMeetingFound = false;
     if (isDemo) {
       const { data: mtg } = await supabase.from("contact_activities")
-        .select("meeting_link, rsvp_token, demo_date")
+        .select("meeting_link, rsvp_token, demo_date, demo_time")
         .eq("contact_id", callLog.contact_id).eq("activity_type", "meeting")
         .order("created_at", { ascending: false }).limit(1).maybeSingle();
       if (mtg && mtg.demo_date) {
@@ -192,6 +194,10 @@ serve(async (req) => {
         meetingLink = mtg.meeting_link || "";
         rsvpToken = mtg.rsvp_token || "";
         rsvpLink = rsvpToken ? `${Deno.env.get("SUPABASE_URL")}/functions/v1/demo-rsvp?token=${rsvpToken}` : "";
+        // Meeting is the source of truth for the demo date/time (call_log.activity_id
+        // may be null). Use it so the confirmation isn't blank.
+        demoDateStr = formatDemoDate(mtg.demo_date);
+        if (mtg.demo_time) demoTimeStr = formatDemoTime(mtg.demo_time);
       }
     }
 
