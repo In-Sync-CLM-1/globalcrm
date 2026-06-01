@@ -434,6 +434,41 @@ serve(async (req) => {
       result.whatsapp = "no_contact_phone";
     }
 
+    // 5b) HOST ALERT — push email to the team on a booked demo, so a booking is
+    // never missed (the in-app notification alone is easy to overlook).
+    if (isDemo && datedMeetingFound && RESEND_API_KEY) {
+      try {
+        const { data: es } = await supabase
+          .from("email_settings")
+          .select("sending_domain, verification_status, is_active")
+          .eq("org_id", callLog.org_id).maybeSingle();
+        if (es?.is_active && es.verification_status === "verified") {
+          const fromEmail = `noreply@${es.sending_domain}`;
+          const fullName = `${contact.first_name || ""} ${contact.last_name || ""}`.trim() || "A prospect";
+          const subj = `New demo booked — ${fullName} (${productLabel}) · ${demoDateStr} ${demoTimeStr}`;
+          const rows = [
+            `A new ${productLabel} demo has been booked.`,
+            `Prospect: ${fullName}`,
+            `Phone: ${contact.phone || "-"}`,
+            `Email: ${contact.email || "-"}`,
+            `When: ${demoDateStr} at ${demoTimeStr}`,
+            `Owner: ${repName}`,
+            meetingLink ? `Meeting: ${meetingLink}` : "",
+          ].filter(Boolean);
+          const html = `<div style="font-family:sans-serif;font-size:15px">${rows.map((l) => `<p style="margin:5px 0">${l}</p>`).join("")}</div>`;
+          const hr = await fetch("https://api.resend.com/emails", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${RESEND_API_KEY}` },
+            body: JSON.stringify({ from: `In-Sync <${fromEmail}>`, to: ["a@in-sync.co.in"], subject: subj, html }),
+          });
+          result.host_alert = hr.ok ? "sent" : "failed";
+        }
+      } catch (e: any) {
+        result.host_alert = "exception";
+        console.error("[postcall] host alert exception:", e);
+      }
+    }
+
     // 6) Mark as sent so we never double-send
     await supabase.from("call_logs")
       .update({ customer_message_sent_at: new Date().toISOString() })
