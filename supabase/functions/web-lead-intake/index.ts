@@ -107,18 +107,33 @@ Deno.serve(async (req) => {
     // Use the product string exactly as stored so the auto-assign trigger matches.
     const productCanonical = rule.product;
 
-    // First pipeline stage ("New").
-    const { data: stage, error: stageErr } = await supabase
-      .from('pipeline_stages')
-      .select('id')
-      .eq('org_id', orgId)
-      .eq('name', 'New')
-      .eq('is_active', true)
-      .maybeSingle();
-
-    if (stageErr || !stage) {
-      console.error('Pipeline stage "New" not found for org', orgId, stageErr);
-      return json({ error: 'Pipeline not configured' }, 500);
+    // Stage routing: products with a dedicated demo-confirm flow (WorkSync) drop
+    // into the "Demo Requested" stage, which fires the prompt qualify-and-book
+    // call. Everything else starts at "New". Falls back to "New" if absent.
+    let stage: { id: string } | null = null;
+    if (productCanonical.toLowerCase() === 'worksync') {
+      const { data: demoStage } = await supabase
+        .from('pipeline_stages')
+        .select('id')
+        .eq('org_id', orgId)
+        .eq('name', 'Demo Requested')
+        .eq('is_active', true)
+        .maybeSingle();
+      stage = demoStage ?? null;
+    }
+    if (!stage) {
+      const { data: newStage, error: stageErr } = await supabase
+        .from('pipeline_stages')
+        .select('id')
+        .eq('org_id', orgId)
+        .eq('name', 'New')
+        .eq('is_active', true)
+        .maybeSingle();
+      if (stageErr || !newStage) {
+        console.error('Pipeline stage not found for org', orgId, stageErr);
+        return json({ error: 'Pipeline not configured' }, 500);
+      }
+      stage = newStage;
     }
 
     const gclid = clean(payload.gclid);

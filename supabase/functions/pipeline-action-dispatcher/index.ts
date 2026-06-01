@@ -184,7 +184,20 @@ async function processOrg(supabase: any, orgId: string): Promise<unknown> {
       .eq("is_active", true)
       .maybeSingle();
 
-    if (!bolnaKey || !script?.bolna_agent_id) {
+    // Per-stage dedicated agent/caller-id (e.g. the WorkSync demo-confirm agent
+    // on the "Demo Requested" stage). Falls back to the org's default script.
+    const { data: stageActs } = await supabase
+      .from("pipeline_stage_actions")
+      .select("stage_id, agent_id, from_number")
+      .eq("org_id", orgId)
+      .eq("action_type", "call")
+      .eq("is_active", true)
+      .not("agent_id", "is", null);
+    const agentByStage = new Map<string, { agent: string; from: string | null }>(
+      (stageActs || []).map((a: any) => [a.stage_id, { agent: a.agent_id, from: a.from_number }]),
+    );
+
+    if (!bolnaKey || (!script?.bolna_agent_id && agentByStage.size === 0)) {
       for (const r of callRows) { await markQueue(supabase, r.id, "failed", "no Bolna key/agent for org"); }
     } else {
       // Cap total in-flight calls for the org.
@@ -236,8 +249,16 @@ async function processOrg(supabase: any, orgId: string): Promise<unknown> {
           continue;
         }
         seenThisTick.add(r.contact_id);
+        const stageAgent = agentByStage.get(r.stage_id);
+        const agentId = stageAgent?.agent || script?.bolna_agent_id;
+        if (!agentId) {
+          await markQueue(supabase, r.id, "failed", "no agent for stage/org");
+          skipped++;
+          continue;
+        }
         const res = await triggerCall(supabase, {
-          orgId, bolnaKey, agentId: script.bolna_agent_id, scriptId: script.id,
+          orgId, bolnaKey, agentId, scriptId: script?.id ?? null,
+          fromNumber: stageAgent?.from ?? null,
           dispositionId: dispo?.id ?? null, contact, phone,
         });
         if (res.ok) { await markQueue(supabase, r.id, "sent", null); callsTriggered++; }
@@ -439,11 +460,12 @@ async function recordUsage(
 async function triggerCall(
   supabase: any,
   args: {
-    orgId: string; bolnaKey: string; agentId: string; scriptId: string;
-    dispositionId: string | null; contact: any; phone: string;
+    orgId: string; bolnaKey: string; agentId: string; scriptId: string | null;
+    fromNumber?: string | null; dispositionId: string | null; contact: any; phone: string;
   },
 ): Promise<{ ok: boolean; error?: string }> {
   const { orgId, bolnaKey, agentId, scriptId, dispositionId, contact, phone } = args;
+  const fromNumber = args.fromNumber || "+911169323462";
 
   const { data: inserted, error: insErr } = await supabase
     .from("call_logs")
@@ -455,7 +477,7 @@ async function triggerCall(
       status: "queued",
       call_type: "outbound",
       direction: "outbound",
-      from_number: "+911169323462",
+      from_number: fromNumber,
       to_number: phone,
       created_at: new Date().toISOString(),
     })
@@ -466,6 +488,7 @@ async function triggerCall(
   const result = await triggerBolnaCall(bolnaKey, {
     agentId,
     toNumber: phone,
+    fromNumber,
     callLogId: inserted.id,
     contact: {
       id: contact.id,
