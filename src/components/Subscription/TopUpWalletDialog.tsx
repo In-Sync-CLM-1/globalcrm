@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Loader2, IndianRupee, CreditCard } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useNotification } from "@/hooks/useNotification";
+import { ManualPaymentDetails } from "@/components/Subscription/ManualPaymentDetails";
 
 const PRESET_AMOUNTS = [5000, 10000, 25000, 50000];
 // Shown only to orgs with the opt-in `allow_low_recharge` switch (IEDUP).
@@ -58,6 +59,7 @@ export function TopUpWalletDialog({ open, onOpenChange, orgId, minAmount = 5000 
   const qc = useQueryClient();
   const [amount, setAmount] = useState<number>(PRESET_AMOUNTS[0]);
   const [submitting, setSubmitting] = useState(false);
+  const [showManualPay, setShowManualPay] = useState(false);
 
   // Per-org low-recharge switch (IEDUP): when on, allow ₹500/₹1,000 top-ups.
   const { data: orgSettings } = useQuery({
@@ -79,7 +81,7 @@ export function TopUpWalletDialog({ open, onOpenChange, orgId, minAmount = 5000 
   // Reset the selected amount to the first preset whenever the dialog opens or
   // the low-recharge flag resolves, so the default never sits below the minimum.
   useEffect(() => {
-    if (open) setAmount(presets[0]);
+    if (open) { setAmount(presets[0]); setShowManualPay(false); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, allowLow]);
 
@@ -184,10 +186,12 @@ export function TopUpWalletDialog({ open, onOpenChange, orgId, minAmount = 5000 
       });
       rzp.on("payment.failed", (resp: any) => {
         notify.error("Payment failed", resp?.error?.description || "Razorpay reported a failure.");
+        setShowManualPay(true);
       });
       rzp.open();
     } catch (e: any) {
       notify.error("Could not start payment", e?.message || "Try again in a moment.");
+      setShowManualPay(true);
     } finally {
       setSubmitting(false);
     }
@@ -254,6 +258,13 @@ export function TopUpWalletDialog({ open, onOpenChange, orgId, minAmount = 5000 
               ₹{amount.toFixed(2)} goes to the wallet — GST is paid to the government and is not part of the wallet balance.
             </p>
           </div>
+
+          <button type="button" onClick={() => setShowManualPay((v) => !v)}
+            className="text-xs text-muted-foreground underline-offset-2 hover:underline">
+            Card or UPI not working? Pay by bank transfer / UPI instead
+          </button>
+
+          {showManualPay && <ManualPaymentDetails amount={total} purpose="wallet top-up" />}
         </div>
 
         <DialogFooter>

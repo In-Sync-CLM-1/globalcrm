@@ -6,6 +6,7 @@ import { useOrgContext } from "@/hooks/useOrgContext";
 import { useNotification } from "@/hooks/useNotification";
 import { LoadingState } from "@/components/common/LoadingState";
 import { TopUpWalletDialog } from "@/components/Subscription/TopUpWalletDialog";
+import { ManualPaymentDetails } from "@/components/Subscription/ManualPaymentDetails";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -40,6 +41,7 @@ export default function Billing() {
   const [period, setPeriod] = useState<"quarterly" | "annual">("quarterly");
   const [topUpOpen, setTopUpOpen] = useState(false);
   const [paying, setPaying] = useState(false);
+  const [showManualPay, setShowManualPay] = useState(false);
 
   useEffect(() => { loadRazorpay().catch(() => undefined); }, []);
 
@@ -133,10 +135,14 @@ export default function Billing() {
           }
         },
       });
-      rzp.on("payment.failed", (r: any) => notify.error("Payment failed", r?.error?.description || "Razorpay reported a failure."));
+      rzp.on("payment.failed", (r: any) => {
+        notify.error("Payment failed", r?.error?.description || "Razorpay reported a failure.");
+        setShowManualPay(true);
+      });
       rzp.open();
     } catch (e: any) {
       notify.error("Could not start payment", e?.message || "Try again in a moment.");
+      setShowManualPay(true);
     } finally {
       setPaying(false);
     }
@@ -200,9 +206,17 @@ export default function Billing() {
               <div className="mt-1 flex justify-between border-t pt-1 font-semibold"><span>You pay</span><span>{inr(total)}</span></div>
             </div>
 
-            <Button onClick={paySubscription} disabled={paying} className="w-full sm:w-auto">
-              {paying ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Opening payment…</> : <>Pay {inr(total)} · {PLANS.find((p) => p.id === period)!.label}</>}
-            </Button>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <Button onClick={paySubscription} disabled={paying} className="w-full sm:w-auto">
+                {paying ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Opening payment…</> : <>Pay {inr(total)} · {PLANS.find((p) => p.id === period)!.label}</>}
+              </Button>
+              <button type="button" onClick={() => setShowManualPay((v) => !v)}
+                className="text-left text-xs text-muted-foreground underline-offset-2 hover:underline">
+                Card or UPI not working? Pay by bank transfer / UPI instead
+              </button>
+            </div>
+
+            {showManualPay && <ManualPaymentDetails amount={total} purpose="subscription payment" />}
           </CardContent>
         </Card>
 
