@@ -6,7 +6,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Search, ArrowUpDown, Eye } from "lucide-react";
+import { Search, ArrowUpDown, Eye, IndianRupee } from "lucide-react";
+import { RecordOfflinePaymentDialog } from "./RecordOfflinePaymentDialog";
 
 interface Organization {
   id: string;
@@ -37,6 +38,8 @@ export function PlatformOrgsTable({ organizations }: Props) {
   const [detailOrg, setDetailOrg] = useState<Organization | null>(null);
   const [detailUsers, setDetailUsers] = useState<any[]>([]);
   const [detailLoading, setDetailLoading] = useState(false);
+
+  const [payOrg, setPayOrg] = useState<Organization | null>(null);
 
   const viewOrgDetails = async (org: Organization) => {
     setDetailOrg(org);
@@ -163,9 +166,20 @@ export function PlatformOrgsTable({ organizations }: Props) {
                         {new Date(org.created_at).toLocaleDateString()}
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => viewOrgDetails(org)}>
-                          <Eye className="h-4 w-4" />
-                        </Button>
+                        <div className="flex items-center justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            title="Record offline payment"
+                            onClick={() => setPayOrg(org)}
+                          >
+                            <IndianRupee className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-8 w-8" title="View details" onClick={() => viewOrgDetails(org)}>
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))
@@ -179,7 +193,14 @@ export function PlatformOrgsTable({ organizations }: Props) {
       <Dialog open={!!detailOrg} onOpenChange={(open) => { if (!open) setDetailOrg(null); }}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>{detailOrg?.name}</DialogTitle>
+            <DialogTitle className="flex items-center justify-between gap-3 pr-6">
+              <span>{detailOrg?.name}</span>
+              {detailOrg && (
+                <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setPayOrg(detailOrg)}>
+                  <IndianRupee className="h-3.5 w-3.5" /> Record payment
+                </Button>
+              )}
+            </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="grid grid-cols-2 gap-3 text-sm">
@@ -253,6 +274,12 @@ export function PlatformOrgsTable({ organizations }: Props) {
           </div>
         </DialogContent>
       </Dialog>
+
+      <RecordOfflinePaymentDialog
+        open={!!payOrg}
+        onOpenChange={(o) => { if (!o) setPayOrg(null); }}
+        org={payOrg ? { id: payOrg.id, name: payOrg.name } : null}
+      />
     </>
   );
 }
