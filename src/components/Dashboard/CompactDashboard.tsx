@@ -447,7 +447,7 @@ export function CompactDashboard({ orgId }: Props) {
         </TabsList>
 
         <TabsContent value="ai-agents" className="mt-3">
-          <AiAgentsPanel />
+          <AiAgentsPanel orgId={orgId} />
         </TabsContent>
 
         <TabsContent value="overview" className="space-y-3 mt-3">

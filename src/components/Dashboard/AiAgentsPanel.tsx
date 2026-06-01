@@ -96,7 +96,7 @@ const WINDOWS = [
   { value: "30", label: "Last 30 days" },
 ];
 
-export function AiAgentsPanel() {
+export function AiAgentsPanel({ orgId }: { orgId?: string }) {
   const notify = useNotification();
   const [loading, setLoading] = useState(true);
   const [days, setDays] = useState("1");
@@ -105,7 +105,12 @@ export function AiAgentsPanel() {
 
   const load = async () => {
     setLoading(true);
-    const { data, error } = await supabase.rpc("get_ai_agent_analytics", { p_days: Number(days) });
+    // Pass the org being viewed: a platform admin has no org of their own, so the
+    // RPC can't infer it from the caller — without this the panel comes up empty.
+    const { data, error } = await supabase.rpc("get_ai_agent_analytics", {
+      p_days: Number(days),
+      ...(orgId ? { p_org_id: orgId } : {}),
+    });
     if (error) {
       notify.error("Couldn't load agent analytics", error.message);
       setRows([]);
@@ -117,7 +122,7 @@ export function AiAgentsPanel() {
     setLoading(false);
   };
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [days]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [days, orgId]);
 
   const ranked = useMemo(
     () => [...rows].sort((a, b) => {
