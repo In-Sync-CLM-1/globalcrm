@@ -211,7 +211,11 @@ Deno.serve(async (req) => {
         .eq('org_id', paymentTxn.org_id)
         .single();
 
-      const newBalance = (sub?.wallet_balance || 0) + paymentTxn.amount;
+      // Only the ex-GST portion is wallet money — GST is paid to the government
+      // and is not spendable balance. create-razorpay-order stores that base in
+      // metadata.base_amount; fall back to the gross amount for older rows.
+      const creditAmount = Number(paymentTxn.metadata?.base_amount ?? paymentTxn.amount);
+      const newBalance = (sub?.wallet_balance || 0) + creditAmount;
 
       await supabase
         .from('organization_subscriptions')
@@ -227,11 +231,11 @@ Deno.serve(async (req) => {
         .insert({
           org_id: paymentTxn.org_id,
           transaction_type: paymentTxn.transaction_type === 'wallet_auto_topup' ? 'auto_topup' : 'topup',
-          amount: paymentTxn.amount,
+          amount: creditAmount,
           balance_before: sub?.wallet_balance || 0,
           balance_after: newBalance,
           payment_transaction_id: payment_transaction_id,
-          description: 'Wallet top-up',
+          description: 'Wallet top-up (excl. GST)',
         });
 
       console.log('Wallet topped up:', newBalance);
