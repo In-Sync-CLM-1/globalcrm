@@ -150,3 +150,9 @@ verify_jwt = false
 [functions.ai-bulk-call]
 verify_jwt = true
 
+# Public lead intake — product landing pages (WorkSync "Request a Demo", etc.)
+# POST leads directly from the browser with no Supabase JWT, so the gateway must
+# be open. No key is exposed in any product's frontend bundle.
+[functions.web-lead-intake]
+verify_jwt = false
+
