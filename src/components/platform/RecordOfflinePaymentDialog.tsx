@@ -136,7 +136,7 @@ export function RecordOfflinePaymentDialog({ open, onOpenChange, org, onRecorded
           <DialogDescription>
             Log a payment received outside Razorpay (bank transfer, UPI, cheque, cash) for{" "}
             <span className="font-medium text-foreground">{org?.name}</span>. This credits the
-            account immediately.
+            account immediately and restores access if the org was locked. No minimum applies.
           </DialogDescription>
         </DialogHeader>
 
@@ -186,7 +186,7 @@ export function RecordOfflinePaymentDialog({ open, onOpenChange, org, onRecorded
                 placeholder="0"
               />
             </div>
-            <p className="mt-1 text-xs text-muted-foreground">Enter the total the client actually paid, GST included.</p>
+            <p className="mt-1 text-xs text-muted-foreground">Enter the total the client actually paid, GST included. No minimum for offline payments.</p>
           </div>
 
           {amount > 0 && (
