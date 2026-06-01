@@ -1,4 +1,4 @@
-import { Building2, Users, UserCheck, Activity, PhoneCall, Mail, TrendingUp, TrendingDown } from "lucide-react";
+import { Building2, Users, UserCheck, Activity, PhoneCall, Mail, MessageCircle, TrendingUp, TrendingDown } from "lucide-react";
 
 interface PlatformStats {
   totalOrgs: number;
@@ -10,6 +10,7 @@ interface PlatformStats {
   usersLast30Days: number;
   callVolume: number;
   emailVolume: number;
+  whatsappVolume: number;
 }
 
 interface Props {
@@ -58,7 +59,7 @@ function KpiCard({
 
 export function PlatformSummaryStats({ stats }: Props) {
   return (
-    <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
+    <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-7">
       <KpiCard
         label="Organizations"
         value={stats.totalOrgs}
@@ -118,6 +119,16 @@ export function PlatformSummaryStats({ stats }: Props) {
         colorClass="from-rose-500/15 to-rose-500/5"
         borderClass="border-rose-500/20"
         shadowClass="hover:shadow-rose-500/10"
+      />
+      <KpiCard
+        label="WhatsApp Volume"
+        value={stats.whatsappVolume}
+        subtitle="total messages sent"
+        icon={MessageCircle}
+        bgIcon={MessageCircle}
+        colorClass="from-green-500/15 to-green-500/5"
+        borderClass="border-green-500/20"
+        shadowClass="hover:shadow-green-500/10"
       />
     </div>
   );
