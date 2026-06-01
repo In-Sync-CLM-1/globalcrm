@@ -111,6 +111,7 @@ Deno.serve(async (req) => {
     // into the "Demo Requested" stage, which fires the prompt qualify-and-book
     // call. Everything else starts at "New". Falls back to "New" if absent.
     let stage: { id: string } | null = null;
+    let isDemoIntake = false;
     if (productCanonical.toLowerCase() === 'worksync') {
       const { data: demoStage } = await supabase
         .from('pipeline_stages')
@@ -120,6 +121,7 @@ Deno.serve(async (req) => {
         .eq('is_active', true)
         .maybeSingle();
       stage = demoStage ?? null;
+      isDemoIntake = !!stage;
     }
     if (!stage) {
       const { data: newStage, error: stageErr } = await supabase
@@ -214,6 +216,25 @@ Deno.serve(async (req) => {
     });
 
     console.log(`web-lead-intake: created contact ${contact.id} (${productCanonical}), owner=${contact.assigned_to}`);
+
+    // Instant dial: the insert above already enqueued the qualify call via the
+    // stage trigger. Ping the dispatcher now so an in-window demo request is
+    // called within seconds instead of waiting for the next cron tick. The
+    // dispatcher self-enforces the calling window / caps / billing, so this is a
+    // safe no-op out of window — the every-minute cron stays the catch-all.
+    if (isDemoIntake) {
+      const dispatcherUrl = `${Deno.env.get('SUPABASE_URL')}/functions/v1/pipeline-action-dispatcher`;
+      const srk = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+      const kick = fetch(dispatcherUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${srk}` },
+        body: '{}',
+      }).catch((e) => console.error('dispatcher kick failed:', String(e)));
+      // Keep the fetch alive past the HTTP response (a bare fire-and-forget gets cut off).
+      try { (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime?.waitUntil?.(kick); }
+      catch { /* EdgeRuntime unavailable — cron picks it up within a minute */ }
+    }
+
     return json({ success: true, contact_id: contact.id });
   } catch (error) {
     console.error('web-lead-intake fatal:', error);
