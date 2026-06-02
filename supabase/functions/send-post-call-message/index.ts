@@ -169,16 +169,24 @@ serve(async (req) => {
         ? (isVV ? "vendorverification_missed_call" : "worksync_missed_call")
         : (isVV ? "vendorverification_intro_post_call" : "worksync_intro_post_call");
 
-    // The rep shown in the message is the lead owner (Riya / Anushree), falling back to the call agent.
+    // Who's named in the message: for a DEMO confirmation it's the demo HOST
+    // (e.g. Amit) — they actually run the demo; for intro/missed it's the lead
+    // owner (Riya / Anushree). Falls back to the call agent.
     let repName = agentName, repEmail = agentProfile?.email || "", repPhone = "";
-    if ((contact as any).assigned_to) {
-      const { data: owner } = await supabase.from("profiles")
+    let repUserId: string | null = (contact as any).assigned_to ?? null;
+    if (isDemo) {
+      const { data: os } = await supabase.from("organization_settings")
+        .select("demo_host_user_id").eq("org_id", callLog.org_id).maybeSingle();
+      repUserId = os?.demo_host_user_id ?? repUserId;
+    }
+    if (repUserId) {
+      const { data: rep } = await supabase.from("profiles")
         .select("first_name, last_name, email, phone")
-        .eq("id", (contact as any).assigned_to).maybeSingle();
-      if (owner?.first_name) {
-        repName = `${owner.first_name} ${owner.last_name || ""}`.trim();
-        repEmail = owner.email || repEmail;
-        repPhone = owner.phone || "";
+        .eq("id", repUserId).maybeSingle();
+      if (rep?.first_name) {
+        repName = `${rep.first_name} ${rep.last_name || ""}`.trim();
+        repEmail = rep.email || repEmail;
+        repPhone = rep.phone || "";
       }
     }
 
