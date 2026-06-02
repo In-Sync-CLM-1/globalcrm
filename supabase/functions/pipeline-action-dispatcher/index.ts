@@ -25,7 +25,11 @@ const WA_SENDER_BY_ORG: Record<string, string> = {
 };
 
 // How many of each action to fire per org per tick.
-const MAX_WA_PER_TICK = 25;
+// WhatsApp sends run with bounded concurrency (WA_SEND_CONCURRENCY) so a tick can
+// push a large batch quickly without exceeding the function's wall-clock limit.
+// Spend is still hard-capped by the per-message floor-guarded reserve, never by this.
+const MAX_WA_PER_TICK = 150;
+const WA_SEND_CONCURRENCY = 12;
 // Exotel WhatsApp price per message (₹). Utility = ₹0.20, Marketing = ₹1.00.
 const WHATSAPP_UTILITY_COST_PER_MSG = 0.20;
 const WHATSAPP_MARKETING_COST_PER_MSG = 1.00;
@@ -38,6 +42,21 @@ function waCostFor(templateName: string | null): number {
   return templateName && MARKETING_TEMPLATES.has(templateName)
     ? WHATSAPP_MARKETING_COST_PER_MSG
     : WHATSAPP_UTILITY_COST_PER_MSG;
+}
+
+// Run an async fn over items with bounded concurrency, preserving result order.
+async function mapPool<T, R>(items: T[], concurrency: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (true) {
+      const i = next++;
+      if (i >= items.length) break;
+      results[i] = await fn(items[i]);
+    }
+  });
+  await Promise.all(workers);
+  return results;
 }
 function callConcurrency(): number {
   const v = parseInt(Deno.env.get("PIPELINE_CALL_CONCURRENCY") ?? "3", 10);
@@ -99,6 +118,15 @@ async function processOrg(supabase: any, orgId: string): Promise<unknown> {
   if (!gate.allowed) {
     return { org_id: orgId, acted: false, reason: gate.reason };
   }
+
+  // Self-heal: release rows a crashed tick left mid-claim (status 'processing' but
+  // never finished) back to 'pending' so they retry. 10 min > any real tick.
+  await supabase
+    .from("pipeline_action_queue")
+    .update({ status: "pending", processed_at: null })
+    .eq("org_id", orgId)
+    .eq("status", "processing")
+    .lt("processed_at", new Date(Date.now() - 10 * 60 * 1000).toISOString());
 
   const todayOnly = !!os?.act_today_only;
   const istTodayStart = todayOnly ? istStartOfTodayMs() : 0;
@@ -172,22 +200,46 @@ async function processOrg(supabase: any, orgId: string): Promise<unknown> {
   // rest pending until the client tops up (wallet-alert-check reminds them).
   // Internal/demo orgs have no floor on the gate → never blocked.
   const waRows = activeQueue.filter((r) => r.action_type === "whatsapp").slice(0, MAX_WA_PER_TICK);
-  if (waRows.length > 0) {
+  // Pre-check funds ONCE per tick: if the wallet can't cover even the cheapest
+  // message above the floor, skip WhatsApp entirely. Without this, a wallet sitting
+  // at its floor would still claim + log + fail 150 rows every cron tick forever.
+  const floor = typeof gate.floor === "number" ? gate.floor : null;
+  const canAffordWa = floor === null || typeof gate.balance !== "number" ||
+    (gate.balance - floor) >= WHATSAPP_UTILITY_COST_PER_MSG;
+  if (waRows.length > 0 && canAffordWa) {
     const sender = WA_SENDER_BY_ORG[orgId] || Deno.env.get("EXOTEL_SENDER_NUMBER") || "";
-    const floor = typeof gate.floor === "number" ? gate.floor : null;
-    for (const r of waRows) {
+    // Send concurrently (bounded) for throughput. Each row is independently claimed
+    // (atomic pending→processing CAS) and charged (atomic floor-guarded reserve), so
+    // parallel sends — and a concurrent cron tick — can never double-send or push the
+    // wallet below the floor. A row that can't be funded is released back to pending.
+    const outcomes = await mapPool(waRows, WA_SEND_CONCURRENCY, async (r) => {
+      const { data: claimed } = await supabase
+        .from("pipeline_action_queue")
+        .update({ status: "processing", processed_at: new Date().toISOString() })
+        .eq("id", r.id)
+        .eq("status", "pending")
+        .select("id")
+        .maybeSingle();
+      if (!claimed) return "raced"; // another runner already took this row
       const contact = contactById.get(r.contact_id);
       const phone = normalizePhone(contact?.phone);
       if (!contact || !phone || !r.template_name) {
         await markQueue(supabase, r.id, "skipped", "missing phone/template");
-        skipped++;
-        continue;
+        return "skipped";
       }
       const res = await sendWhatsAppTemplate(supabase, { orgId, sender, contact, phone, row: r, floor });
-      if (res.ok) { await markQueue(supabase, r.id, "sent", null); waSent++; }
-      else if (res.insufficientFunds) { break; } // wallet at floor — leave the rest pending
-      else { await markQueue(supabase, r.id, "failed", res.error); waFailed++; }
-    }
+      if (res.ok) { await markQueue(supabase, r.id, "sent", null); return "sent"; }
+      if (res.insufficientFunds) {
+        // Wallet at floor — release the claim so it retries after the client tops up.
+        await supabase.from("pipeline_action_queue").update({ status: "pending" }).eq("id", r.id);
+        return "nofunds";
+      }
+      await markQueue(supabase, r.id, "failed", res.error);
+      return "failed";
+    });
+    waSent = outcomes.filter((o) => o === "sent").length;
+    waFailed = outcomes.filter((o) => o === "failed").length;
+    skipped += outcomes.filter((o) => o === "skipped").length;
   }
 
   // ---- Calls (concurrency-capped) ------------------------------------------
