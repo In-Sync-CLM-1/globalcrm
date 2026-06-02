@@ -156,6 +156,11 @@ verify_jwt = true
 [functions.web-lead-intake]
 verify_jwt = false
 
+# Public: the demo form reads booked demo slots (from the CRM calendar) to grey
+# out taken times. Browser-called, no key.
+[functions.demo-availability]
+verify_jwt = false
+
 # Invoked by the cron Worker and by web-lead-intake's instant-dispatch kick.
 # Open the gateway so the kick (which can't present a legacy JWT) reaches it;
 # it takes no sensitive input and is idempotent + billing/window-gated internally.
