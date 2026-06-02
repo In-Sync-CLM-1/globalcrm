@@ -8,7 +8,6 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.58.0";
 import {
   isInsideCustomWindow,
-  triggerBolnaCall,
   normalizePhone,
   WindowSlot,
 } from "../_shared/aiCalling.ts";
@@ -121,7 +120,7 @@ async function processOrg(supabase: any, orgId: string): Promise<unknown> {
   const contactIds = [...new Set(queue.map((r) => r.contact_id))];
   const { data: contactRows } = await supabase
     .from("contacts")
-    .select("id, first_name, last_name, name_hi, company, job_title, phone, do_not_call, created_at")
+    .select("id, first_name, last_name, name_hi, company, job_title, phone, do_not_call, created_at, team_size, preferred_demo_date, preferred_demo_time")
     .in("id", contactIds);
   const contactById = new Map<string, any>((contactRows || []).map((c: any) => [c.id, c]));
 
@@ -502,20 +501,35 @@ async function triggerCall(
     .single();
   if (insErr || !inserted) return { ok: false, error: `call_logs insert: ${insErr?.message || "unknown"}` };
 
-  const result = await triggerBolnaCall(bolnaKey, {
-    agentId,
-    toNumber: phone,
-    fromNumber,
-    callLogId: inserted.id,
-    contact: {
-      id: contact.id,
-      first_name: contact.first_name,
-      last_name: contact.last_name,
-      name_hi: contact.name_hi,
-      company: contact.company,
-      job_title: contact.job_title,
-    },
-  });
+  // Call Bolna directly (not the shared helper) so we can also pass the demo
+  // preferences captured on the form — the agent confirms them instead of asking.
+  const firstNameForBolna = contact.name_hi || contact.first_name || "";
+  const userData: Record<string, unknown> = {
+    contact_id: contact.id,
+    call_log_id: inserted.id,
+    first_name: firstNameForBolna,
+    last_name: contact.last_name ?? "",
+    company: contact.company ?? "your company",
+    job_title: contact.job_title ?? "",
+    team_size: contact.team_size ?? "",
+    preferred_date: contact.preferred_demo_date ?? "",
+    preferred_time: contact.preferred_demo_time ?? "",
+  };
+  let result: { execution_id?: string; error?: string };
+  try {
+    const br = await fetch("https://api.bolna.ai/call", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${bolnaKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ agent_id: agentId, recipient_phone_number: phone, from_phone_number: fromNumber, user_data: userData }),
+    });
+    const bt = await br.text();
+    let bj: Record<string, unknown> = {};
+    try { bj = JSON.parse(bt); } catch { /* keep raw */ }
+    const execId = (bj.execution_id as string) || (bj.run_id as string);
+    result = br.ok && execId ? { execution_id: execId } : { error: `${br.status}: ${bt.slice(0, 200)}` };
+  } catch (e) {
+    result = { error: String(e) };
+  }
 
   if (result.error) {
     await supabase.from("call_logs").update({ status: "error", notes: result.error }).eq("id", inserted.id);
