@@ -34,6 +34,7 @@ interface LeadPayload {
   phone?: string;
   email?: string;
   company?: string;
+  designation?: string; // lead's role/designation → stored as contact job_title
   message?: string;
   gclid?: string;
   utm_source?: string;
@@ -145,6 +146,7 @@ Deno.serve(async (req) => {
     const gclid = clean(payload.gclid);
     const utmSource = clean(payload.utm_source);
     const message = clean(payload.message);
+    const designation = clean(payload.designation);
     const teamSize = clean(payload.team_size);
     const preferredDate = clean(payload.preferred_date); // YYYY-MM-DD or undefined
     const preferredTime = clean(payload.preferred_time); // HH:mm or undefined
@@ -182,6 +184,7 @@ Deno.serve(async (req) => {
 
     const notes =
       `Demo requested via ${source} (${productCanonical}).` +
+      (designation ? `\nRole: ${designation}` : '') +
       (teamSize ? `\nTeam size: ${teamSize}` : '') +
       (preferredDate || preferredTime ? `\nPreferred demo: ${preferredDate || '(no date)'} ${preferredTime || ''}`.trimEnd() : '') +
       (message ? `\nMessage: ${message}` : '') +
@@ -196,6 +199,7 @@ Deno.serve(async (req) => {
         phone,
         email,
         company: clean(payload.company),
+        job_title: designation,
         source,
         product: productCanonical,
         status: 'new',
