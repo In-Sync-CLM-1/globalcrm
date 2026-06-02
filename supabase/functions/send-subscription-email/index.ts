@@ -64,6 +64,18 @@ Deno.serve(async (req) => {
     const adminName = `${adminProfile.first_name} ${adminProfile.last_name}`;
     const orgName = org?.name || 'Your Organization';
 
+    // Orgs set to "act on today's uploads only" (e.g. IEDUP) do NOT retry pending
+    // actions the next day — so once the wallet is funded the admin must RE-UPLOAD
+    // the unsent list for the automation to act on it. Only these orgs get that note.
+    const { data: orgSettings } = await supabase
+      .from('organization_settings')
+      .select('act_today_only')
+      .eq('org_id', org_id)
+      .maybeSingle();
+    const reuploadNote = orgSettings?.act_today_only
+      ? `<p><strong>Important:</strong> Any messages or calls that were waiting when the wallet ran out will <strong>not</strong> be sent automatically once you recharge. After you fund the wallet, please <strong>re-upload the pending file</strong> so the automation processes it.</p>`
+      : '';
+
     // Build email content based on template type
     let subject = '';
     let html = '';
@@ -163,6 +175,7 @@ Deno.serve(async (req) => {
           <p>Dear ${adminName},</p>
           <p>This is an automated billing alert for <strong>${orgName}</strong>. Your wallet balance is exhausted (₹${data.current_balance}), so all AI calls and WhatsApp automations have now been <strong>paused</strong>.</p>
           <p>Please recharge your wallet from the portal to resume service.</p>
+          ${reuploadNote}
           <p>Best regards,<br>Billing Team</p>
         `;
         break;

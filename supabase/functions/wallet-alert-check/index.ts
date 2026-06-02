@@ -16,6 +16,12 @@ const corsHeaders = {
 
 const LOW_DEFAULT = 5000;
 
+// A wallet that can't fund even one more action is effectively empty. The
+// dispatcher charges before sending and stops at the floor, leaving a sub-rupee
+// residual above the minimum — so treat anything within ₹1 of the floor as
+// "exhausted" and remind the client to pay; otherwise the reminder never fires.
+const EXHAUSTED_BUFFER = 1;
+
 // Per-org WhatsApp sender (WABA from-number). Mirrors the dispatcher / post-call
 // override; all numbers sit under the one shared WABA, so the approved admin
 // templates work from any of them. Other orgs fall back to EXOTEL_SENDER_NUMBER.
@@ -74,6 +80,14 @@ serve(async (req) => {
     .select("org_id");
   const usedWallet = new Set<string>((txnOrgs || []).map((r: any) => r.org_id as string));
 
+  // Internal/demo orgs are never billed (the spend gate exempts them), so they
+  // can never be "out of funds" — don't pester them with payment reminders.
+  const { data: intOrgs } = await supabase
+    .from("organizations")
+    .select("id")
+    .eq("is_internal", true);
+  const internal = new Set<string>((intOrgs || []).map((r: any) => r.id as string));
+
   const results: unknown[] = [];
   for (const s of subs as any[]) {
     const orgId = s.org_id as string;
@@ -82,10 +96,11 @@ serve(async (req) => {
     const low = Number(s.wallet_low_alert_threshold ?? LOW_DEFAULT);
     const current = (s.wallet_alert_level ?? "none") as Level;
 
-    // Skip orgs that don't use the wallet (no balance, no minimum, no history).
+    // Skip internal/demo orgs and orgs that don't use the wallet at all.
+    if (internal.has(orgId)) continue;
     if (balance === 0 && min === 0 && !usedWallet.has(orgId)) continue;
 
-    const target: Level = balance <= min ? "exhausted" : (balance <= low ? "low" : "none");
+    const target: Level = balance <= min + EXHAUSTED_BUFFER ? "exhausted" : (balance <= low ? "low" : "none");
     if (target === current) continue;
 
     if (target === "none") {
