@@ -163,9 +163,18 @@ async function processOrg(supabase: any, orgId: string): Promise<unknown> {
   }
 
   // ---- WhatsApp -------------------------------------------------------------
+  // Charge-before-send: each message RESERVES its cost from the wallet first, via
+  // an atomic floor-guarded debit (reserve_wallet_funds) — so the balance can never
+  // dip below the org's minimum even though many sends share one wallet and the
+  // gate only checks the balance once per tick. If the send then fails, the
+  // reserved amount is credited straight back. When the wallet can't fund the next
+  // message without breaching the floor, the reserve is refused: stop and leave the
+  // rest pending until the client tops up (wallet-alert-check reminds them).
+  // Internal/demo orgs have no floor on the gate → never blocked.
   const waRows = activeQueue.filter((r) => r.action_type === "whatsapp").slice(0, MAX_WA_PER_TICK);
   if (waRows.length > 0) {
     const sender = WA_SENDER_BY_ORG[orgId] || Deno.env.get("EXOTEL_SENDER_NUMBER") || "";
+    const floor = typeof gate.floor === "number" ? gate.floor : null;
     for (const r of waRows) {
       const contact = contactById.get(r.contact_id);
       const phone = normalizePhone(contact?.phone);
@@ -174,8 +183,9 @@ async function processOrg(supabase: any, orgId: string): Promise<unknown> {
         skipped++;
         continue;
       }
-      const res = await sendWhatsAppTemplate(supabase, { orgId, sender, contact, phone, row: r });
+      const res = await sendWhatsAppTemplate(supabase, { orgId, sender, contact, phone, row: r, floor });
       if (res.ok) { await markQueue(supabase, r.id, "sent", null); waSent++; }
+      else if (res.insufficientFunds) { break; } // wallet at floor — leave the rest pending
       else { await markQueue(supabase, r.id, "failed", res.error); waFailed++; }
     }
   }
@@ -296,9 +306,9 @@ async function processOrg(supabase: any, orgId: string): Promise<unknown> {
 // sender. Recipient is digits-with-country-code, no '+', as that path proved out.
 async function sendWhatsAppTemplate(
   supabase: any,
-  args: { orgId: string; sender: string; contact: any; phone: string; row: QueueRow },
-): Promise<{ ok: boolean; error?: string }> {
-  const { orgId, sender, contact, phone, row } = args;
+  args: { orgId: string; sender: string; contact: any; phone: string; row: QueueRow; floor: number | null },
+): Promise<{ ok: boolean; error?: string; insufficientFunds?: boolean }> {
+  const { orgId, sender, contact, phone, row, floor } = args;
   const apiKey = Deno.env.get("EXOTEL_API_KEY");
   const apiToken = Deno.env.get("EXOTEL_API_TOKEN");
   const sid = Deno.env.get("EXOTEL_SID");
@@ -333,6 +343,23 @@ async function sendWhatsAppTemplate(
     .single();
   const waLogId = waLogRow?.id as string | undefined;
 
+  // Charge BEFORE sending: atomically reserve the message cost from the wallet,
+  // refusing if it would breach the org's floor. Refunded below if the send fails.
+  const cost = waCostFor(row.template_name);
+  const category = MARKETING_TEMPLATES.has(row.template_name || "") ? "marketing" : "utility";
+  if (waLogId) {
+    const reserved = await reserveFunds(supabase, {
+      orgId, serviceType: "whatsapp", referenceId: waLogId, quantity: 1, cost, floor,
+      description: `WhatsApp ${category} template ${row.template_name} → ${cleanTo}`,
+    });
+    if (!reserved.ok) {
+      await supabase.from("whatsapp_logs")
+        .update({ status: "failed", failed_at: new Date().toISOString(), error_text: "insufficient wallet balance (floor)" })
+        .eq("id", waLogId);
+      return { ok: false, error: "insufficient wallet balance", insufficientFunds: true };
+    }
+  }
+
   const callbackUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/whatsapp-webhook`;
   const payload = {
     custom_data: row.contact_id,
@@ -366,6 +393,7 @@ async function sendWhatsAppTemplate(
     httpOk = resp.ok;
   } catch (e: any) {
     if (waLogId) {
+      await refundFunds(supabase, { orgId, serviceType: "whatsapp", referenceId: waLogId, cost, description: `Refund — WhatsApp send failed (${row.template_name})` });
       await supabase.from("whatsapp_logs")
         .update({ status: "failed", failed_at: new Date().toISOString(), error_text: `fetch failed: ${String(e?.message || e)}` })
         .eq("id", waLogId);
@@ -382,8 +410,7 @@ async function sendWhatsAppTemplate(
   } catch { /* keep raw */ }
 
   if (httpOk && waLogId) {
-    const cost = waCostFor(row.template_name);
-    const category = MARKETING_TEMPLATES.has(row.template_name || "") ? "marketing" : "utility";
+    // Already charged at reserve time — just mark the log sent.
     await supabase.from("whatsapp_logs")
       .update({
         status: "sent",
@@ -392,18 +419,11 @@ async function sendWhatsAppTemplate(
         cost_charged: cost,
       })
       .eq("id", waLogId);
-    await recordUsage(supabase, {
-      orgId,
-      serviceType: "whatsapp",
-      referenceId: waLogId,
-      quantity: 1,
-      cost,
-      description: `WhatsApp ${category} template ${row.template_name} → ${cleanTo}`,
-    });
     return { ok: true };
   }
 
   if (waLogId) {
+    await refundFunds(supabase, { orgId, serviceType: "whatsapp", referenceId: waLogId, cost, description: `Refund — WhatsApp send failed (${row.template_name})` });
     await supabase.from("whatsapp_logs")
       .update({ status: "failed", failed_at: new Date().toISOString(), error_text: respText.slice(0, 500) })
       .eq("id", waLogId);
@@ -411,12 +431,16 @@ async function sendWhatsAppTemplate(
   return { ok: false, error: respText.slice(0, 300) };
 }
 
-// Records a usage row and atomically decrements the org's wallet. Idempotent on
-// (service_type, reference_id). Mirrors recordUsage in ai-bolna-webhook.
-async function recordUsage(
+// Reserve (charge) funds BEFORE sending. Atomically debits the wallet via the
+// reserve_wallet_funds RPC, which only succeeds if balance − cost stays at/above
+// the org's floor (passing null floor = unlimited, for internal/demo orgs). On
+// success, writes the deduction ledger + usage row so the dashboard reflects the
+// charge. Idempotent on (service_type, reference_id): a retry for the same message
+// is a no-op success. Returns { ok:false } when the wallet can't fund it.
+async function reserveFunds(
   supabase: any,
-  args: { orgId: string; serviceType: "call" | "whatsapp" | "email"; referenceId: string; quantity: number; cost: number; description: string },
-): Promise<void> {
+  args: { orgId: string; serviceType: "call" | "whatsapp" | "email"; referenceId: string; quantity: number; cost: number; floor: number | null; description: string },
+): Promise<{ ok: boolean; balanceAfter?: number }> {
   try {
     const { data: existing } = await supabase
       .from("service_usage_logs")
@@ -425,25 +449,18 @@ async function recordUsage(
       .eq("service_type", args.serviceType)
       .eq("reference_id", args.referenceId)
       .maybeSingle();
-    if (existing) return;
+    if (existing) return { ok: true }; // already charged
 
-    const { data: usageRow } = await supabase
-      .from("service_usage_logs")
-      .insert({ org_id: args.orgId, service_type: args.serviceType, reference_id: args.referenceId, quantity: args.quantity, cost: args.cost, wallet_deducted: false })
-      .select("id")
-      .single();
-    if (!usageRow) return;
+    // Atomic, floor-guarded debit. NULL floor → effectively unlimited (internal orgs).
+    const effectiveFloor = args.floor ?? -1e15;
+    const { data: newBal, error } = await supabase.rpc("reserve_wallet_funds", {
+      p_org: args.orgId, p_amount: args.cost, p_floor: effectiveFloor,
+    });
+    if (error) { console.error("reserve_wallet_funds error:", error.message); return { ok: false }; }
+    if (newBal === null || newBal === undefined) return { ok: false }; // insufficient — would breach floor
 
-    const { data: sub } = await supabase
-      .from("organization_subscriptions")
-      .select("wallet_balance")
-      .eq("org_id", args.orgId)
-      .maybeSingle();
-    if (!sub) return;
-
-    const balanceBefore = Number(sub.wallet_balance || 0);
-    const balanceAfter = balanceBefore - args.cost;
-
+    const balanceAfter = Number(newBal);
+    const balanceBefore = balanceAfter + args.cost;
     const { data: walletTxn } = await supabase
       .from("wallet_transactions")
       .insert({
@@ -460,15 +477,54 @@ async function recordUsage(
       })
       .select("id")
       .single();
-
-    await supabase.from("organization_subscriptions")
-      .update({ wallet_balance: balanceAfter, updated_at: new Date().toISOString() })
-      .eq("org_id", args.orgId);
     await supabase.from("service_usage_logs")
-      .update({ wallet_deducted: true, wallet_transaction_id: walletTxn?.id })
-      .eq("id", usageRow.id);
+      .insert({ org_id: args.orgId, service_type: args.serviceType, reference_id: args.referenceId, quantity: args.quantity, cost: args.cost, wallet_deducted: true, wallet_transaction_id: walletTxn?.id });
+    return { ok: true, balanceAfter };
   } catch (e) {
-    console.error("recordUsage exception:", String(e));
+    console.error("reserveFunds exception:", String(e));
+    return { ok: false };
+  }
+}
+
+// Credit a previously-reserved charge back when the send fails. Atomic increment
+// via credit_wallet_funds, plus a refund ledger row, and removes the usage row so
+// the reserve becomes re-chargeable (and so reporting doesn't count a sent message
+// that never went out). Idempotent: if the usage row is already gone, does nothing.
+async function refundFunds(
+  supabase: any,
+  args: { orgId: string; serviceType: "call" | "whatsapp" | "email"; referenceId: string; cost: number; description: string },
+): Promise<void> {
+  try {
+    const { data: usage } = await supabase
+      .from("service_usage_logs")
+      .select("id")
+      .eq("org_id", args.orgId)
+      .eq("service_type", args.serviceType)
+      .eq("reference_id", args.referenceId)
+      .maybeSingle();
+    if (!usage) return; // nothing was charged (or already refunded)
+
+    const { data: newBal, error } = await supabase.rpc("credit_wallet_funds", {
+      p_org: args.orgId, p_amount: args.cost,
+    });
+    if (error) { console.error("credit_wallet_funds error:", error.message); return; }
+    const balanceAfter = Number(newBal ?? 0);
+    const balanceBefore = balanceAfter - args.cost;
+    await supabase.from("wallet_transactions").insert({
+      org_id: args.orgId,
+      transaction_type: `refund_${args.serviceType}`,
+      amount: args.cost,
+      balance_before: balanceBefore,
+      balance_after: balanceAfter,
+      reference_id: args.referenceId,
+      reference_type: args.serviceType,
+      quantity: 1,
+      unit_cost: args.cost,
+      description: args.description,
+    });
+    await supabase.from("service_usage_logs").delete().eq("id", usage.id);
+  } catch (e) {
+    console.error("refundFunds exception:", String(e));
   }
 }
 
