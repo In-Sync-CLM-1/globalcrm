@@ -1,13 +1,20 @@
 // Shared billing gate for paid actions (AI calls, WhatsApp, email, SMS).
 //
 // "No money, no service" for every EXTERNAL org:
-//   - subscription locked/cancelled  → blocked (account has no access at all)
-//   - wallet at/under the ₹500 floor → blocked (out of funds)
+//   - subscription locked/cancelled       → blocked (account has no access at all)
+//   - wallet at/under the org's floor      → blocked (out of funds)
 // Internal/demo orgs (organizations.is_internal = true) are never gated.
+//
+// The floor is the org's own wallet_minimum_balance. It defaults to the ₹500
+// platform reserve when the org has never had one set explicitly, but an admin
+// action CAN lower it: recording an offline payment (record-offline-payment)
+// sets wallet_minimum_balance = 0, so an offline-billed org runs with NO reserve
+// (any positive balance counts as "in service"). Honour that 0 — do not clamp
+// it back up to ₹500, or the offline-payment rule silently never takes effect.
 //
 // Use this as a PRE-send check so an empty wallet never gets a free send.
 
-// Platform wallet floor (₹). External orgs cannot spend below this reserve.
+// Default platform wallet floor (₹), used only when an org has no minimum set.
 export const WALLET_FLOOR = 500;
 
 export interface GateResult {
@@ -43,7 +50,9 @@ export async function orgServiceGate(supabase: any, orgId: string): Promise<Gate
   }
 
   const balance = Number(sub.wallet_balance ?? 0);
-  const floor = Math.max(Number(sub.wallet_minimum_balance ?? 0), WALLET_FLOOR);
+  // Honour the org's configured minimum (0 for offline-billed orgs). Fall back to
+  // the ₹500 platform reserve only when no minimum is on file (null/undefined).
+  const floor = Number(sub.wallet_minimum_balance ?? WALLET_FLOOR);
   if (balance <= floor) {
     return {
       allowed: false,
