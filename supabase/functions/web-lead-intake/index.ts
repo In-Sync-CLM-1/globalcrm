@@ -40,6 +40,10 @@ interface LeadPayload {
   utm_medium?: string;
   utm_campaign?: string;
   source_url?: string;
+  // Demo preferences captured on the form so the call can confirm, not elicit.
+  team_size?: string;
+  preferred_date?: string; // YYYY-MM-DD
+  preferred_time?: string; // HH:mm
   // Honeypot — real users never fill this; bots do. If set, we 200-OK and drop.
   _hp?: string;
 }
@@ -141,6 +145,9 @@ Deno.serve(async (req) => {
     const gclid = clean(payload.gclid);
     const utmSource = clean(payload.utm_source);
     const message = clean(payload.message);
+    const teamSize = clean(payload.team_size);
+    const preferredDate = clean(payload.preferred_date); // YYYY-MM-DD or undefined
+    const preferredTime = clean(payload.preferred_time); // HH:mm or undefined
     // Channel attribution: a gclid means it came from a Google Ad.
     const source = gclid ? 'Google Ads' : (utmSource || 'Website');
 
@@ -175,6 +182,8 @@ Deno.serve(async (req) => {
 
     const notes =
       `Demo requested via ${source} (${productCanonical}).` +
+      (teamSize ? `\nTeam size: ${teamSize}` : '') +
+      (preferredDate || preferredTime ? `\nPreferred demo: ${preferredDate || '(no date)'} ${preferredTime || ''}`.trimEnd() : '') +
       (message ? `\nMessage: ${message}` : '') +
       (payload.source_url ? `\nPage: ${clean(payload.source_url)}` : '');
 
@@ -196,6 +205,9 @@ Deno.serve(async (req) => {
         utm_medium: clean(payload.utm_medium),
         utm_campaign: clean(payload.utm_campaign),
         source_url: clean(payload.source_url),
+        team_size: teamSize,
+        preferred_demo_date: preferredDate || null,
+        preferred_demo_time: preferredTime,
         notes,
       })
       .select('id, assigned_to')
