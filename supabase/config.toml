@@ -81,8 +81,12 @@ verify_jwt = true
 [functions.delete-user]
 verify_jwt = true
 
+# Invoked internally by wallet-alert-check + the billing crons (offline payment,
+# subscription status) which present the sb_secret_ service key — rejected by the
+# gateway on verify_jwt=true (so billing/wallet emails were silently 401ing). Open
+# the gateway; it takes only org_id + template_type and just sends a templated email.
 [functions.send-subscription-email]
-verify_jwt = true
+verify_jwt = false
 
 [functions.automation-trigger-handler]
 verify_jwt = false
