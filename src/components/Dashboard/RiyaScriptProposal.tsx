@@ -4,12 +4,15 @@ import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { CheckCircle2, XCircle, RefreshCw, FileText, Sparkles, Check, X } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { CheckCircle2, XCircle, RefreshCw, FileText, Sparkles, Check, X, Bot } from "lucide-react";
 import { useNotification } from "@/hooks/useNotification";
 import { cn } from "@/lib/utils";
+import { metaFor, agentNameFor } from "@/lib/aiAgents";
 
 interface Script {
   id: string;
+  product_name: string | null;
   opening: string | null;
   objective: string | null;
   key_points: string[] | null;
@@ -52,22 +55,42 @@ export function RiyaScriptProposal({ orgId }: { orgId: string | undefined }) {
   const qc = useQueryClient();
   const notify = useNotification();
 
-  const { data: script } = useQuery({
-    queryKey: ["riya-script-current", orgId],
+  // All active scripts for the org — one per AI agent. The card lets you pick
+  // which agent's pitch to review, so every agent (Riya, Anushree, …) gets the
+  // same approve-and-deploy surface, not just the most-recently-created script.
+  const { data: scripts } = useQuery({
+    queryKey: ["ai-scripts-active", orgId],
     queryFn: async () => {
-      if (!orgId) return null;
+      if (!orgId) return [];
       const { data } = await supabase
         .from("ai_call_scripts")
-        .select("id, opening, objective, key_points, closing, objection_handling, behavioral_guidelines")
+        .select("id, product_name, opening, objective, key_points, closing, objection_handling, behavioral_guidelines")
         .eq("org_id", orgId)
         .eq("is_active", true)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      return data as Script | null;
+        .order("product_name", { ascending: true });
+      return (data || []) as Script[];
     },
     enabled: !!orgId,
   });
+
+  const [selectedScriptId, setSelectedScriptId] = useState<string | null>(null);
+
+  // Default to Riya (WorkSync) when present so the existing view is unchanged;
+  // otherwise the first agent. Keeps the current selection if still valid.
+  useEffect(() => {
+    if (!scripts || scripts.length === 0) {
+      setSelectedScriptId(null);
+      return;
+    }
+    setSelectedScriptId((prev) => {
+      if (prev && scripts.some((s) => s.id === prev)) return prev;
+      const riya = scripts.find((s) => metaFor(s.product_name || "").agent === "Riya");
+      return (riya ?? scripts[0]).id;
+    });
+  }, [scripts]);
+
+  const script = scripts?.find((s) => s.id === selectedScriptId) || null;
+  const agentName = agentNameFor(script?.product_name);
 
   const { data: proposal } = useQuery<Proposal | null>({
     queryKey: ["riya-proposal-pending", script?.id],
@@ -135,7 +158,8 @@ export function RiyaScriptProposal({ orgId }: { orgId: string | undefined }) {
 
   const regenerate = useMutation({
     mutationFn: async () => {
-      const { data, error } = await supabase.functions.invoke("ai-script-propose", { body: {} });
+      if (!script?.id) throw new Error("No script selected");
+      const { data, error } = await supabase.functions.invoke("ai-script-propose", { body: { script_id: script.id } });
       if (error) throw error;
       if (!(data as any)?.ok) throw new Error((data as any)?.error || "Could not generate proposal");
       return data;
@@ -245,9 +269,9 @@ export function RiyaScriptProposal({ orgId }: { orgId: string | undefined }) {
       return data;
     },
     onSuccess: () => {
-      notify.success("Applied & deployed", `${approvedCount} change(s) live on Riya's next call.`);
+      notify.success("Applied & deployed", `${approvedCount} change(s) live on ${agentName}'s next call.`);
       qc.invalidateQueries({ queryKey: ["riya-proposal-pending", script?.id] });
-      qc.invalidateQueries({ queryKey: ["riya-script-current", orgId] });
+      qc.invalidateQueries({ queryKey: ["ai-scripts-active", orgId] });
       qc.invalidateQueries({ queryKey: ["cd-ai-script", orgId] });
     },
     onError: (e: unknown) => notify.error("Apply failed", e instanceof Error ? e.message : "Could not apply"),
@@ -290,7 +314,7 @@ export function RiyaScriptProposal({ orgId }: { orgId: string | undefined }) {
 
   return (
     <Card>
-      <CardHeader className="pb-3">
+      <CardHeader className="pb-3 space-y-3">
         <CardTitle className="flex items-center gap-2 text-base">
           <FileText className="h-4 w-4" />
           Active Script
@@ -306,6 +330,24 @@ export function RiyaScriptProposal({ orgId }: { orgId: string | undefined }) {
             </Button>
           </span>
         </CardTitle>
+        {scripts && scripts.length > 1 && (
+          <div className="flex items-center gap-2">
+            <Bot className="h-4 w-4 text-muted-foreground" />
+            <Select value={selectedScriptId ?? undefined} onValueChange={setSelectedScriptId}>
+              <SelectTrigger className="w-[280px] h-8"><SelectValue placeholder="Pick an agent" /></SelectTrigger>
+              <SelectContent>
+                {scripts.map((s) => {
+                  const m = metaFor(s.product_name || "");
+                  return (
+                    <SelectItem key={s.id} value={s.id}>
+                      {m.agent !== "—" ? `${m.agent} — ${m.label}` : m.label}
+                    </SelectItem>
+                  );
+                })}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
       </CardHeader>
       <CardContent className="space-y-4">
         {/* Two columns */}
