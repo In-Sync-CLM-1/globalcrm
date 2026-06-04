@@ -6,66 +6,77 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+const SCRIPT_COLS =
+  "id, org_id, product_name, opening, objective, key_points, closing, objection_handling, behavioral_guidelines, language";
 
-  const supabase = createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-  );
-  const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY");
-  if (!anthropicKey) {
-    return new Response(JSON.stringify({ ok: false, error: "ANTHROPIC_API_KEY missing" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-  }
+// Compact a product name to a join key. "Vendor Verification" (ai_call_scripts)
+// and "Vendorverification" (contacts / ai_daily_insights) both collapse to the
+// same key, so each script pairs with its OWN product's learnings.
+const norm = (p: string | null | undefined) => (p || "").toLowerCase().replace(/\s+/g, "");
 
-  // Optional override: orgId, for_date
-  let orgIdInput: string | null = null;
-  let forDate: string | null = null;
-  try {
-    const body = req.method === "POST" ? await req.json() : {};
-    if (typeof body.org_id === "string") orgIdInput = body.org_id;
-    if (typeof body.for_date === "string") forDate = body.for_date;
-  } catch { /* default */ }
+type ScriptRow = {
+  id: string;
+  org_id: string;
+  product_name: string | null;
+  opening: string | null;
+  objective: string | null;
+  key_points: unknown;
+  closing: string | null;
+  objection_handling: unknown;
+  behavioral_guidelines: string | null;
+  language: string | null;
+};
 
-  // 1) Latest insights row (today by default)
-  let insightsQuery = supabase
+type Result = {
+  script_id: string;
+  product: string | null;
+  ok: boolean;
+  skipped?: boolean;
+  error?: string;
+  proposal_id?: string;
+  based_on_date?: string;
+  rationale?: string;
+};
+
+// Generate (and persist) one script proposal for a single agent's script,
+// based on that product's most recent daily learnings.
+async function generateForScript(
+  supabase: ReturnType<typeof createClient>,
+  anthropicKey: string,
+  script: ScriptRow,
+  forDate: string | null,
+): Promise<Result> {
+  const base: Result = { script_id: script.id, product: script.product_name, ok: false };
+  const productKey = norm(script.product_name);
+
+  // Latest learnings for THIS product (newest first), org-scoped.
+  let insQuery = supabase
     .from("ai_daily_insights")
-    .select("org_id, for_date, insights, completed_count")
+    .select("for_date, insights, completed_count, product")
+    .eq("org_id", script.org_id)
     .order("for_date", { ascending: false })
-    .limit(1);
-  if (forDate) insightsQuery = supabase.from("ai_daily_insights").select("org_id, for_date, insights, completed_count").eq("for_date", forDate).limit(1);
-  const { data: insightRow, error: insErr } = await insightsQuery.maybeSingle();
-  if (insErr || !insightRow) {
-    return new Response(JSON.stringify({ ok: false, error: "No daily insights available to propose from" }),
-      { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-  }
-  const orgId = orgIdInput ?? insightRow.org_id;
-  const basedOnDate = insightRow.for_date;
-  const tweaks = (insightRow.insights as any)?.tweaks || [];
-  const wins = (insightRow.insights as any)?.wins || [];
-  const losses = (insightRow.insights as any)?.losses || [];
+    .limit(60);
+  if (forDate) insQuery = insQuery.eq("for_date", forDate);
+  const { data: insRows, error: insErr } = await insQuery;
+  if (insErr) return { ...base, error: insErr.message };
 
-  // 2) Current active script
-  const { data: script, error: scriptErr } = await supabase
-    .from("ai_call_scripts")
-    .select("id, opening, objective, key_points, closing, objection_handling, behavioral_guidelines, product_name, language")
-    .eq("org_id", orgId)
-    .eq("is_active", true)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (scriptErr || !script) {
-    return new Response(JSON.stringify({ ok: false, error: "No active script for org" }),
-      { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  const insightRow = (insRows || []).find(
+    (r: any) => r.product !== "__all__" && norm(r.product) === productKey,
+  );
+  if (!insightRow) {
+    return { ...base, skipped: true, error: `No learnings yet for ${script.product_name || "this agent"} to propose from` };
   }
 
-  const objHandlingObj = (script as any).objection_handling && typeof (script as any).objection_handling === "object"
-    ? (script as any).objection_handling as Record<string, string>
+  const basedOnDate = (insightRow as any).for_date;
+  const tweaks = ((insightRow as any).insights)?.tweaks || [];
+  const wins = ((insightRow as any).insights)?.wins || [];
+  const losses = ((insightRow as any).insights)?.losses || [];
+
+  const objHandlingObj = script.objection_handling && typeof script.objection_handling === "object"
+    ? script.objection_handling as Record<string, string>
     : {};
   const objHandlingLines = Object.entries(objHandlingObj).map(([k, v]) => `  • ${k} → ${v}`).join("\n") || "  (none)";
 
-  // 3) Build prompt — ask for full new version + rationale
   const prompt = `You are editing a sales-call playbook used by an AI voice agent. The playbook has three layers:
 1) Script content — what to say (opening, objective, key points, closing)
 2) Objection handling — keyed rebuttals: "if prospect raises X, respond with Y"
@@ -80,9 +91,9 @@ ${(Array.isArray(script.key_points) ? script.key_points : []).map((p: string) =>
 - Objection handling:
 ${objHandlingLines}
 - Behavioral guidelines:
-${(script as any).behavioral_guidelines || "(none)"}
+${script.behavioral_guidelines || "(none)"}
 
-TODAY'S CALL-ANALYSIS FINDINGS (based on ${insightRow.completed_count} completed calls on ${basedOnDate}):
+TODAY'S CALL-ANALYSIS FINDINGS (based on ${(insightRow as any).completed_count} completed calls on ${basedOnDate}):
 
 What worked:
 ${wins.map((w: any, i: number) => `${i + 1}. ${w.title} — ${w.detail}`).join("\n") || "(none)"}
@@ -113,7 +124,6 @@ Return ONLY this JSON (no markdown, no commentary):
   "rationale": "<2-3 plain-English lines explaining what you changed and which layer each change went to>"
 }`;
 
-  // 4) Call Claude
   const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -129,8 +139,7 @@ Return ONLY this JSON (no markdown, no commentary):
   });
   if (!anthropicRes.ok) {
     const err = await anthropicRes.text();
-    return new Response(JSON.stringify({ ok: false, error: `Anthropic error: ${err.slice(0, 500)}` }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return { ...base, error: `Anthropic error: ${err.slice(0, 500)}` };
   }
   const anthropicJson = await anthropicRes.json();
   const text = anthropicJson.content?.[0]?.text || "{}";
@@ -139,25 +148,23 @@ Return ONLY this JSON (no markdown, no commentary):
     const m = text.match(/\{[\s\S]*\}/);
     parsed = JSON.parse(m ? m[0] : text);
   } catch {
-    return new Response(JSON.stringify({ ok: false, error: "Could not parse model output as JSON", raw: text.slice(0, 800) }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return { ...base, error: "Could not parse model output as JSON" };
   }
 
   const proposed = parsed.proposed || {};
   const rationale: string = parsed.rationale || "";
 
-  // 5) Supersede any earlier pending proposal for this script
+  // Supersede any earlier pending proposal for this script.
   await supabase
     .from("ai_script_proposals")
     .update({ status: "superseded" })
     .eq("script_id", script.id)
     .eq("status", "pending");
 
-  // 6) Upsert today's proposal
   const { data: row, error: upErr } = await supabase
     .from("ai_script_proposals")
     .upsert({
-      org_id: orgId,
+      org_id: script.org_id,
       script_id: script.id,
       based_on_date: basedOnDate,
       proposed_opening: proposed.opening || null,
@@ -173,15 +180,65 @@ Return ONLY this JSON (no markdown, no commentary):
     .select()
     .maybeSingle();
 
-  if (upErr) {
-    return new Response(JSON.stringify({ ok: false, error: upErr.message }),
+  if (upErr) return { ...base, error: upErr.message };
+
+  return { ...base, ok: true, proposal_id: (row as any)?.id, based_on_date: basedOnDate, rationale };
+}
+
+serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  const supabase = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+  );
+  const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY");
+  if (!anthropicKey) {
+    return new Response(JSON.stringify({ ok: false, error: "ANTHROPIC_API_KEY missing" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 
-  return new Response(JSON.stringify({
+  let scriptId: string | null = null;
+  let orgId: string | null = null;
+  let forDate: string | null = null;
+  try {
+    const body = req.method === "POST" ? await req.json() : {};
+    if (typeof body.script_id === "string") scriptId = body.script_id;
+    if (typeof body.org_id === "string") orgId = body.org_id;
+    if (typeof body.for_date === "string") forDate = body.for_date;
+  } catch { /* default */ }
+
+  const json = (obj: unknown, status = 200) =>
+    new Response(JSON.stringify(obj), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+
+  // --- Single agent (UI "Generate proposal" / "Regenerate") ---
+  if (scriptId) {
+    const { data: script, error } = await supabase
+      .from("ai_call_scripts")
+      .select(SCRIPT_COLS)
+      .eq("id", scriptId)
+      .maybeSingle();
+    if (error || !script) return json({ ok: false, error: "Script not found" }, 404);
+    const result = await generateForScript(supabase, anthropicKey, script as ScriptRow, forDate);
+    // 200 even for "no learnings yet" so the UI can surface the friendly message.
+    return json(result, result.ok || result.skipped ? 200 : 500);
+  }
+
+  // --- Batch (daily cron): one proposal per active agent, from its own learnings ---
+  let sq = supabase.from("ai_call_scripts").select(SCRIPT_COLS).eq("is_active", true);
+  if (orgId) sq = sq.eq("org_id", orgId);
+  const { data: allScripts, error: listErr } = await sq;
+  if (listErr) return json({ ok: false, error: listErr.message }, 500);
+
+  const results: Result[] = [];
+  for (const s of (allScripts || []) as ScriptRow[]) {
+    results.push(await generateForScript(supabase, anthropicKey, s, forDate));
+  }
+
+  return json({
     ok: true,
-    proposal_id: row?.id,
-    based_on_date: basedOnDate,
-    rationale,
-  }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    generated: results.filter((r) => r.ok).length,
+    skipped: results.filter((r) => r.skipped).length,
+    results,
+  });
 });

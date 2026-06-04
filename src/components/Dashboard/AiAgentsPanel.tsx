@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { RefreshCw, Phone, PhoneCall, UserCheck, CalendarCheck, Clock, TrendingUp, Voicemail } from "lucide-react";
 import { useNotification } from "@/hooks/useNotification";
 import { RiyaDailyLearnings } from "@/components/Dashboard/RiyaDailyLearnings";
+import { metaFor } from "@/lib/aiAgents";
 
 // One row per product (= one AI agent), straight from get_ai_agent_analytics.
 interface AgentRow {
@@ -30,21 +31,6 @@ interface AgentRow {
   not_qualified: number;
   dnc: number;
 }
-
-// Friendly labels. New products fall back to the raw name + "—" agent, so the
-// panel keeps working as the 7 new agents come online without code changes.
-const PRODUCT_META: Record<string, { label: string; agent: string }> = {
-  worksync: { label: "WorkSync", agent: "Riya" },
-  vendorverification: { label: "Vendor Verification", agent: "Anushree" },
-  globalcrm: { label: "GlobalCRM", agent: "—" },
-  whatsapp: { label: "WhatsApp", agent: "—" },
-  email: { label: "Email", agent: "—" },
-  fieldsync: { label: "FieldSync", agent: "—" },
-  event: { label: "Event", agent: "—" },
-  expense: { label: "Expense", agent: "—" },
-  ats: { label: "ATS", agent: "—" },
-};
-const metaFor = (p: string) => PRODUCT_META[p.toLowerCase().replace(/\s+/g, "")] ?? { label: p, agent: "—" };
 
 type Verdict = { label: string; tone: "good" | "warn" | "bad" | "muted"; note: string };
 
