@@ -403,8 +403,27 @@ async function processOrg(
 
     const slotsToFill = Math.max(0, concurrency - inFlight);
     let dispatched = 0;
-    for (let i = 0; i < slotsToFill; i++) {
-      const { data: nextRow } = await supabase
+    let skippedBusy = 0;
+    if (slotsToFill > 0) {
+      // Per-number guard: never place a second AI call to a line this org is
+      // already on. Seeded from every in-flight AI call (any script) and grown as
+      // we dispatch this tick, so two duplicate contacts sharing one phone number
+      // cannot be dialed simultaneously — the failure mode behind the 2026-06-03
+      // merged-call "goodbye" loop (see migration 20260604120000).
+      const { data: liveRows } = await supabase
+        .from("call_logs")
+        .select("to_number")
+        .eq("org_id", orgId)
+        .eq("caller_type", "ai")
+        .eq("status", "in_progress");
+      const busy = new Set<string>(
+        (liveRows || [])
+          .map((r: any) => lastTen(r.to_number))
+          .filter((d: string) => d.length === 10),
+      );
+
+      // Pull a batch wide enough to skip past duplicate lines and still fill slots.
+      const { data: queuedRows } = await supabase
         .from("call_logs")
         .select("id, contact_id, to_number")
         .eq("org_id", orgId)
@@ -413,40 +432,53 @@ async function processOrg(
         .eq("status", "queued")
         .order("created_at", { ascending: true })
         .order("bolna_queue_position", { ascending: true })
-        .limit(1)
-        .maybeSingle();
-      if (!nextRow) break;
+        .limit(slotsToFill * 4 + 20);
 
-      const { data: contact } = await supabase
-        .from("contacts")
-        .select("id, first_name, last_name, name_hi, company, job_title")
-        .eq("id", nextRow.contact_id)
-        .maybeSingle();
-      if (!contact) {
-        await supabase.from("call_logs").update({ status: "error" }).eq("id", nextRow.id);
-        continue;
+      for (const nextRow of (queuedRows || [])) {
+        if (dispatched >= slotsToFill) break;
+        const d10 = lastTen(nextRow.to_number);
+        if (d10.length === 10 && busy.has(d10)) { skippedBusy++; continue; }
+
+        // Atomic claim: flip queued→in_progress guarded on status so an overlapping
+        // cron tick can never grab the same row and double-dial it.
+        const { data: claimed } = await supabase
+          .from("call_logs")
+          .update({ status: "in_progress", started_at: new Date().toISOString() })
+          .eq("id", nextRow.id)
+          .eq("status", "queued")
+          .select("id")
+          .maybeSingle();
+        if (!claimed) continue; // another tick claimed it first
+
+        // Reserve the line for the remainder of this tick the moment we own the row.
+        if (d10.length === 10) busy.add(d10);
+
+        const { data: contact } = await supabase
+          .from("contacts")
+          .select("id, first_name, last_name, name_hi, company, job_title")
+          .eq("id", nextRow.contact_id)
+          .maybeSingle();
+        if (!contact) {
+          await supabase.from("call_logs").update({ status: "error" }).eq("id", nextRow.id);
+          continue;
+        }
+
+        const result = await triggerBolnaCall(bolnaKey, {
+          agentId,
+          toNumber: nextRow.to_number,
+          callLogId: nextRow.id,
+          contact,
+        });
+        if (result.error) {
+          await supabase.from("call_logs").update({ status: "error" }).eq("id", nextRow.id);
+          continue;
+        }
+        await supabase
+          .from("call_logs")
+          .update({ bolna_execution_id: result.execution_id })
+          .eq("id", nextRow.id);
+        dispatched++;
       }
-
-      const result = await triggerBolnaCall(bolnaKey, {
-        agentId,
-        toNumber: nextRow.to_number,
-        callLogId: nextRow.id,
-        contact,
-      });
-
-      if (result.error) {
-        await supabase.from("call_logs").update({ status: "error" }).eq("id", nextRow.id);
-        continue;
-      }
-      await supabase
-        .from("call_logs")
-        .update({
-          status: "in_progress",
-          bolna_execution_id: result.execution_id,
-          started_at: new Date().toISOString(),
-        })
-        .eq("id", nextRow.id);
-      dispatched++;
     }
 
     perScript.push({
@@ -456,6 +488,7 @@ async function processOrg(
       queued_before: queued,
       queued_now: queuedNow,
       dispatched,
+      skipped_busy_line: skippedBusy,
     });
   }
 
@@ -543,6 +576,12 @@ async function queueUntouchedContacts(
     .select("id");
 
   return (inserted || []) as Array<{ id: string }>;
+}
+
+// Normalized last-10-digits of a phone number — the key used to dedupe a line
+// across duplicate contact rows.
+function lastTen(p: string | null | undefined): string {
+  return (p || "").replace(/\D/g, "").slice(-10);
 }
 
 function done(status: number, body: unknown): Response {
