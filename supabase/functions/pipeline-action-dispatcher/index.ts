@@ -102,7 +102,7 @@ async function processOrg(supabase: any, orgId: string): Promise<unknown> {
   // Window is read live from the saved org setting — fully configurable.
   const { data: os } = await supabase
     .from("organization_settings")
-    .select("calling_windows, act_today_only, enforce_wallet_in_trial")
+    .select("calling_windows, act_today_only, enforce_wallet_in_trial, dialing_active")
     .eq("org_id", orgId)
     .maybeSingle();
 
@@ -243,7 +243,15 @@ async function processOrg(supabase: any, orgId: string): Promise<unknown> {
   }
 
   // ---- Calls (concurrency-capped) ------------------------------------------
-  const callRows = activeQueue.filter((r) => r.action_type === "call");
+  // AI-call kill switch: when an org's dialing is explicitly paused
+  // (organization_settings.dialing_active = false), defer ALL pipeline call
+  // actions — leave the rows pending so they fire automatically once dialing is
+  // re-enabled. Only orgs with the flag explicitly false are affected; orgs that
+  // never set it (null) behave exactly as before. WhatsApp actions are untouched.
+  const callsPaused = os?.dialing_active === false;
+  const callRows = callsPaused
+    ? []
+    : activeQueue.filter((r) => r.action_type === "call");
   if (callRows.length > 0) {
     const bolnaKey = Deno.env.get("BOLNA_API_KEY");
     const { data: script } = await supabase
