@@ -21,7 +21,10 @@ const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
 const OPS_EMAIL = "a@in-sync.co.in";
 const ALERT_FROM = "In-Sync Attendance <notifications@globalcrm.in-sync.co.in>";
 
-const BATCH = 200;
+// Small enough that a run finishes well inside the edge-function wall clock:
+// a cut-off run leaves its in-flight row 'processing', and a retried row risks
+// a duplicate insert into the insert-only UPSMF table (see dedup check below).
+const BATCH = 50;
 
 function mssqlConfig() {
   return {
@@ -91,6 +94,26 @@ Deno.serve(async () => {
 
     for (const r of rows) {
       try {
+        // Retried row (attempts > 1): a prior run may have inserted it into
+        // UPSMF and died before marking it synced. Re-inserting would create a
+        // permanent duplicate (UPSMF is insert-only), so adopt the existing
+        // row's EntryId if one matches.
+        if (r.attempts > 1) {
+          const dup = await pool.request()
+            .input("en", sql.VarChar(50), r.upsmf_identifier)
+            .input("dev", sql.VarChar(20), r.device_id)
+            .input("pt", sql.VarChar(19), toIstLiteral(r.punch_time))
+            .query(`SELECT TOP 1 EntryId FROM Biomatric_Punch_Details_Combined
+                    WHERE EnrollmentNo = @en AND DeviceId = @dev AND PunchTime = @pt`);
+          const existingId = dup.recordset?.[0]?.EntryId;
+          if (existingId) {
+            await supabase.from("edu_attendance_punches")
+              .update({ sync_status: "synced", upsmf_entry_id: existingId, pushed_at: new Date().toISOString(), last_error: null })
+              .eq("id", r.id);
+            pushed++;
+            continue;
+          }
+        }
         const res = await pool.request()
           .input("en", sql.VarChar(50), r.upsmf_identifier)
           .input("dev", sql.VarChar(20), r.device_id)
