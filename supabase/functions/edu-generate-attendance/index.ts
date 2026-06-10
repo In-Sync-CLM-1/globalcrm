@@ -5,10 +5,11 @@
 // Invoked by two cron workers: 04:30 UTC (=10:00 IST, generates IN punches
 // randomly placed in the 09:00-09:55 window) and 11:30 UTC (=17:00 IST, OUT
 // punches in 16:00-16:55). Direction is inferred from IST hour since the cron
-// worker posts an empty body. Sundays are skipped (college closed). Idempotent:
-// a re-run only fills persons missing that day's punch in that direction.
-// Inactive (send-as-absent) students are excluded here AND blocked by the
-// edu_skip_inactive_punch trigger. Alerts are FAILURE-ONLY.
+// worker posts an empty body. Sundays are skipped (college closed). Covers all
+// active students AND teachers. Idempotent: a re-run only fills persons missing
+// that day's punch in that direction. Inactive (send-as-absent) persons are
+// excluded here AND blocked by the edu_skip_inactive_punch trigger. Alerts are
+// FAILURE-ONLY.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 
@@ -64,13 +65,22 @@ Deno.serve(async () => {
     await alertFailure("fetch students", se.message);
     return json({ error: se.message }, 500);
   }
+  const { data: teachers, error: te } = await supabase
+    .from("edu_teachers")
+    .select("id, tutor_id")
+    .eq("org_id", ORG_ID)
+    .eq("status", "active");
+  if (te) {
+    await alertFailure("fetch teachers", te.message);
+    return json({ error: te.message }, 500);
+  }
 
   // Persons already punched today in this direction (idempotent re-runs).
   const dayStartUtc = new Date(Date.parse(`${date}T00:00:00Z`) - IST_MS).toISOString();
   const dayEndUtc = new Date(Date.parse(`${date}T00:00:00Z`) - IST_MS + 86400000).toISOString();
   const { data: existing, error: ee } = await supabase
     .from("edu_attendance_punches")
-    .select("student_id")
+    .select("student_id, teacher_id")
     .eq("org_id", ORG_ID)
     .eq("direction", direction)
     .gte("punch_time", dayStartUtc)
@@ -79,23 +89,29 @@ Deno.serve(async () => {
     await alertFailure("fetch existing punches", ee.message);
     return json({ error: ee.message }, 500);
   }
-  const done = new Set((existing ?? []).map((r) => r.student_id));
+  const doneStudents = new Set((existing ?? []).map((r) => r.student_id).filter(Boolean));
+  const doneTeachers = new Set((existing ?? []).map((r) => r.teacher_id).filter(Boolean));
 
-  const rows = (students ?? [])
-    .filter((s) => !done.has(s.id))
-    .map((s) => {
-      const t = `${date}T${pad(windowHour)}:${pad(Math.floor(Math.random() * 56))}:${pad(Math.floor(Math.random() * 60))}+05:30`;
-      return {
-        org_id: ORG_ID,
-        person_type: "student",
-        student_id: s.id,
-        upsmf_identifier: s.enrollment_no,
-        device_id: DEVICE_ID,
-        punch_time: new Date(t).toISOString(),
-        direction,
-        source: "random-generator",
-      };
-    });
+  const people = [
+    ...(students ?? [])
+      .filter((s) => !doneStudents.has(s.id))
+      .map((s) => ({ person_type: "student", student_id: s.id, upsmf_identifier: s.enrollment_no })),
+    ...(teachers ?? [])
+      .filter((t) => !doneTeachers.has(t.id))
+      .map((t) => ({ person_type: "teacher", teacher_id: t.id, upsmf_identifier: t.tutor_id })),
+  ];
+
+  const rows = people.map((p) => {
+    const t = `${date}T${pad(windowHour)}:${pad(Math.floor(Math.random() * 56))}:${pad(Math.floor(Math.random() * 60))}+05:30`;
+    return {
+      org_id: ORG_ID,
+      device_id: DEVICE_ID,
+      punch_time: new Date(t).toISOString(),
+      direction,
+      source: "random-generator",
+      ...p,
+    };
+  });
 
   if (rows.length > 0) {
     const { error: ie } = await supabase.from("edu_attendance_punches").insert(rows);
