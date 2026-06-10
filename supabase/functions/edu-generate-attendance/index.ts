@@ -1,15 +1,27 @@
 // edu-generate-attendance — TEMPORARY random attendance generator for the
-// BSR one-week stability test (2026-06-11 .. 2026-06-17, inclusive). After the
+// BSR one-week stability test (2026-06-10 .. 2026-06-17, inclusive). After the
 // window it no-ops; the daily CSV upload takes over as the real punch source.
 //
-// Invoked by two cron workers: 04:30 UTC (=10:00 IST, generates IN punches
-// randomly placed in the 09:00-09:55 window) and 11:30 UTC (=17:00 IST, OUT
-// punches in 16:00-16:55). Direction is inferred from IST hour since the cron
-// worker posts an empty body. Sundays are skipped (college closed). Covers all
-// active students AND teachers. Idempotent: a re-run only fills persons missing
-// that day's punch in that direction. Inactive (send-as-absent) persons are
-// excluded here AND blocked by the edu_skip_inactive_punch trigger. Alerts are
-// FAILURE-ONLY.
+// Invoked by two cron workers at WINDOW START: 03:30 UTC (=09:00 IST, IN) and
+// 10:30 UTC (=16:00 IST, OUT). Direction is inferred from IST hour since the
+// cron worker posts an empty body. The whole window is planned up front with
+// punch times spread randomly across it; the 5-min pusher only uploads punches
+// whose time has passed (claim_edu_punches), so punches trickle to UPSMF
+// sequentially like a real device — never one bulk batch.
+//
+// Random attendance, per user spec (2026-06-10):
+//   - IN run: a random 5-15% of active students (0-8% of teachers) are absent
+//     for the day — no punches at all. Everyone else gets an IN punch.
+//   - OUT run: an OUT punch for exactly the persons who punched IN today.
+//   - Sundays skipped (college closed).
+//
+// Upload history: every run writes one edu_upload_log row (date, direction,
+// present/absent counts, named absentee list). The log's UNIQUE constraint is
+// also the idempotency gate — a window is generated at most once, so absences
+// are never re-rolled by a retry.
+//
+// Inactive (send-as-absent) persons are excluded here AND blocked by the
+// edu_skip_inactive_punch trigger. Alerts are FAILURE-ONLY.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 
@@ -21,6 +33,7 @@ const ALERT_FROM = "In-Sync Attendance <notifications@globalcrm.in-sync.co.in>";
 
 const ORG_ID = "421eb87f-6bc9-409b-91c4-b5aa7022f37a"; // Baba Sadhav Ram Paramedical College
 const DEVICE_ID = "BSRBIO01";
+const SOURCE = "random-generator";
 const START = "2026-06-10";
 const END = "2026-06-17";
 const IST_MS = 5.5 * 3600 * 1000;
@@ -45,6 +58,12 @@ async function alertFailure(step: string, detail: string) {
   }).catch(() => {});
 }
 
+// Random punch time spread across the window (e.g. 09:00:00-09:55:59 IST).
+function randomPunchTime(date: string, windowHour: number): string {
+  const t = `${date}T${pad(windowHour)}:${pad(Math.floor(Math.random() * 56))}:${pad(Math.floor(Math.random() * 60))}+05:30`;
+  return new Date(t).toISOString();
+}
+
 Deno.serve(async () => {
   const ist = new Date(Date.now() + IST_MS);
   const date = ist.toISOString().slice(0, 10);
@@ -56,9 +75,22 @@ Deno.serve(async () => {
 
   const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
 
+  // Idempotency gate: each (date, direction) is generated at most once.
+  const { data: gate, error: ge } = await supabase
+    .from("edu_upload_log")
+    .insert({ org_id: ORG_ID, upload_date: date, direction, source: SOURCE, total_active: 0, present: 0, absent: 0 })
+    .select("id")
+    .maybeSingle();
+  if (ge) {
+    if (ge.code === "23505") return json({ skipped: "already generated", date, direction });
+    await alertFailure("upload-log gate", ge.message);
+    return json({ error: ge.message }, 500);
+  }
+  const logId = gate!.id;
+
   const { data: students, error: se } = await supabase
     .from("edu_students")
-    .select("id, enrollment_no")
+    .select("id, enrollment_no, name")
     .eq("org_id", ORG_ID)
     .eq("status", "active");
   if (se) {
@@ -67,7 +99,7 @@ Deno.serve(async () => {
   }
   const { data: teachers, error: te } = await supabase
     .from("edu_teachers")
-    .select("id, tutor_id")
+    .select("id, tutor_id, name")
     .eq("org_id", ORG_ID)
     .eq("status", "active");
   if (te) {
@@ -75,51 +107,75 @@ Deno.serve(async () => {
     return json({ error: te.message }, 500);
   }
 
-  // Persons already punched today in this direction (idempotent re-runs).
-  const dayStartUtc = new Date(Date.parse(`${date}T00:00:00Z`) - IST_MS).toISOString();
-  const dayEndUtc = new Date(Date.parse(`${date}T00:00:00Z`) - IST_MS + 86400000).toISOString();
-  const { data: existing, error: ee } = await supabase
-    .from("edu_attendance_punches")
-    .select("student_id, teacher_id")
-    .eq("org_id", ORG_ID)
-    .eq("direction", direction)
-    .gte("punch_time", dayStartUtc)
-    .lt("punch_time", dayEndUtc);
-  if (ee) {
-    await alertFailure("fetch existing punches", ee.message);
-    return json({ error: ee.message }, 500);
-  }
-  const doneStudents = new Set((existing ?? []).map((r) => r.student_id).filter(Boolean));
-  const doneTeachers = new Set((existing ?? []).map((r) => r.teacher_id).filter(Boolean));
-
-  const people = [
-    ...(students ?? [])
-      .filter((s) => !doneStudents.has(s.id))
-      .map((s) => ({ person_type: "student", student_id: s.id, upsmf_identifier: s.enrollment_no })),
-    ...(teachers ?? [])
-      .filter((t) => !doneTeachers.has(t.id))
-      .map((t) => ({ person_type: "teacher", teacher_id: t.id, upsmf_identifier: t.tutor_id })),
+  const all = [
+    ...(students ?? []).map((s) => ({ person_type: "student", key: s.id, identifier: s.enrollment_no, name: s.name })),
+    ...(teachers ?? []).map((t) => ({ person_type: "teacher", key: t.id, identifier: t.tutor_id, name: t.name })),
   ];
 
-  const rows = people.map((p) => {
-    const t = `${date}T${pad(windowHour)}:${pad(Math.floor(Math.random() * 56))}:${pad(Math.floor(Math.random() * 60))}+05:30`;
-    return {
-      org_id: ORG_ID,
-      device_id: DEVICE_ID,
-      punch_time: new Date(t).toISOString(),
-      direction,
-      source: "random-generator",
-      ...p,
-    };
-  });
+  let present: typeof all = [];
+  let absentees: typeof all = [];
+
+  if (direction === "IN") {
+    // Daily random absence: students 5-15%, teachers 0-8%.
+    const studentRate = 0.05 + Math.random() * 0.10;
+    const teacherRate = Math.random() * 0.08;
+    for (const p of all) {
+      const rate = p.person_type === "student" ? studentRate : teacherRate;
+      (Math.random() < rate ? absentees : present).push(p);
+    }
+  } else {
+    // OUT goes to exactly those who punched IN today.
+    const dayStartUtc = new Date(Date.parse(`${date}T00:00:00Z`) - IST_MS).toISOString();
+    const dayEndUtc = new Date(Date.parse(`${date}T00:00:00Z`) - IST_MS + 86400000).toISOString();
+    const { data: ins, error: ie } = await supabase
+      .from("edu_attendance_punches")
+      .select("student_id, teacher_id")
+      .eq("org_id", ORG_ID)
+      .eq("direction", "IN")
+      .neq("sync_status", "skipped")
+      .gte("punch_time", dayStartUtc)
+      .lt("punch_time", dayEndUtc);
+    if (ie) {
+      await alertFailure("fetch IN punches", ie.message);
+      return json({ error: ie.message }, 500);
+    }
+    const punchedIn = new Set((ins ?? []).flatMap((r) => [r.student_id, r.teacher_id]).filter(Boolean));
+    present = all.filter((p) => punchedIn.has(p.key));
+    absentees = all.filter((p) => !punchedIn.has(p.key));
+  }
+
+  const rows = present.map((p) => ({
+    org_id: ORG_ID,
+    person_type: p.person_type,
+    student_id: p.person_type === "student" ? p.key : null,
+    teacher_id: p.person_type === "teacher" ? p.key : null,
+    upsmf_identifier: p.identifier,
+    device_id: DEVICE_ID,
+    punch_time: randomPunchTime(date, windowHour),
+    direction,
+    source: SOURCE,
+  }));
 
   if (rows.length > 0) {
-    const { error: ie } = await supabase.from("edu_attendance_punches").insert(rows);
-    if (ie) {
-      await alertFailure("insert punches", ie.message);
-      return json({ error: ie.message }, 500);
+    const { error: pe } = await supabase.from("edu_attendance_punches").insert(rows);
+    if (pe) {
+      // Roll back the gate so a retry can regenerate this window.
+      await supabase.from("edu_upload_log").delete().eq("id", logId);
+      await alertFailure("insert punches", pe.message);
+      return json({ error: pe.message }, 500);
     }
   }
 
-  return json({ date, direction, generated: rows.length, already_punched: done.size });
+  const { error: le } = await supabase
+    .from("edu_upload_log")
+    .update({
+      total_active: all.length,
+      present: present.length,
+      absent: absentees.length,
+      absentees: absentees.map((p) => ({ type: p.person_type, id: p.identifier, name: p.name })),
+    })
+    .eq("id", logId);
+  if (le) await alertFailure("update upload log", le.message);
+
+  return json({ date, direction, total_active: all.length, present: present.length, absent: absentees.length });
 });
