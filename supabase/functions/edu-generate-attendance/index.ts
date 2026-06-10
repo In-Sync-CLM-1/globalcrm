@@ -20,7 +20,7 @@ const ALERT_FROM = "In-Sync Attendance <notifications@globalcrm.in-sync.co.in>";
 
 const ORG_ID = "421eb87f-6bc9-409b-91c4-b5aa7022f37a"; // Baba Sadhav Ram Paramedical College
 const DEVICE_ID = "BSRBIO01";
-const START = "2026-06-11";
+const START = "2026-06-10";
 const END = "2026-06-17";
 const IST_MS = 5.5 * 3600 * 1000;
 
