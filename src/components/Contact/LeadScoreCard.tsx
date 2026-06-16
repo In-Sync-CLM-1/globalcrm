@@ -1,165 +1,147 @@
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { 
-  TrendingUp, TrendingDown, Minus, 
-  Flame, Snowflake, ThermometerSun 
-} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { TrendingUp, Minus, Flame, Snowflake, ThermometerSun, Sparkles, RefreshCw, Loader2 } from "lucide-react";
 
 interface LeadScoreCardProps {
   contactId: string;
   orgId: string;
 }
 
-export function LeadScoreCard({ contactId, orgId }: LeadScoreCardProps) {
-  const { data: leadScore, isLoading } = useQuery({
-    queryKey: ['contact-lead-score', contactId],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('contact_lead_scores')
-        .select('*')
-        .eq('contact_id', contactId)
-        .maybeSingle();
-      
+interface ScoreResult {
+  score: number;
+  category: string;
+  breakdown: Record<string, number>;
+  reasoning: string;
+  last_calculated?: string;
+  cached?: boolean;
+}
+
+export function LeadScoreCard({ contactId }: LeadScoreCardProps) {
+  const [result, setResult] = useState<ScoreResult | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const run = useCallback(async (force: boolean) => {
+    setLoading(true);
+    setError(null);
+    try {
+      // On-demand, cached scoring: the function returns instantly when the
+      // lead's parameters are unchanged, and only re-scores with Claude Haiku
+      // when something that matters has changed (or when force=true).
+      const { data, error } = await supabase.functions.invoke("lead-score", {
+        body: { contact_id: contactId, force },
+      });
       if (error) throw error;
-      return data;
-    },
-  });
+      if ((data as any)?.error) throw new Error((data as any).error);
+      setResult(data as ScoreResult);
+    } catch (e: any) {
+      setError(e?.message || "Could not score this lead");
+    } finally {
+      setLoading(false);
+    }
+  }, [contactId]);
 
-  if (isLoading) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <TrendingUp className="h-5 w-5" />
-            Lead Score
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="text-center py-4 text-muted-foreground">
-            Loading...
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
+  useEffect(() => { void run(false); }, [run]);
 
-  if (!leadScore) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <TrendingUp className="h-5 w-5" />
-            Lead Score
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="text-center py-4 text-muted-foreground">
-            <Minus className="h-8 w-8 mx-auto mb-2 opacity-20" />
-            <p className="text-sm">No score calculated yet</p>
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  const getCategoryIcon = () => {
-    switch (leadScore.score_category) {
-      case 'hot':
-        return <Flame className="h-6 w-6 text-red-500" />;
-      case 'warm':
-        return <ThermometerSun className="h-6 w-6 text-orange-500" />;
-      case 'cold':
-        return <Snowflake className="h-6 w-6 text-blue-500" />;
-      default:
-        return <Minus className="h-6 w-6 text-muted-foreground" />;
+  const category = result?.category;
+  const categoryIcon = () => {
+    switch (category) {
+      case "hot": return <Flame className="h-6 w-6 text-red-500" />;
+      case "warm": return <ThermometerSun className="h-6 w-6 text-orange-500" />;
+      case "cool": return <ThermometerSun className="h-6 w-6 text-amber-500" />;
+      case "cold": return <Snowflake className="h-6 w-6 text-blue-500" />;
+      default: return <Minus className="h-6 w-6 text-muted-foreground" />;
     }
   };
-
-  const getCategoryColor = () => {
-    switch (leadScore.score_category) {
-      case 'hot':
-        return 'destructive';
-      case 'warm':
-        return 'secondary';
-      case 'cold':
-        return 'outline';
-      default:
-        return 'outline';
+  const categoryColor = (): "destructive" | "secondary" | "outline" => {
+    switch (category) {
+      case "hot": return "destructive";
+      case "warm": case "cool": return "secondary";
+      default: return "outline";
     }
   };
-
-  // Flatten nested score breakdown for display
-  const flattenBreakdown = (breakdown: any): Record<string, number> => {
-    const flattened: Record<string, number> = {};
-    
-    if (!breakdown || typeof breakdown !== 'object') return flattened;
-    
-    Object.entries(breakdown).forEach(([category, value]) => {
-      if (typeof value === 'number') {
-        flattened[category] = value;
-      } else if (typeof value === 'object' && value !== null) {
-        // For nested objects, show the total
-        const total = Object.values(value as Record<string, number>)
-          .reduce((sum, val) => sum + (typeof val === 'number' ? val : 0), 0);
-        flattened[category] = total;
-      }
-    });
-    
-    return flattened;
-  };
-
-  const breakdown = flattenBreakdown(leadScore.score_breakdown);
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <TrendingUp className="h-5 w-5" />
-          Lead Score
-        </CardTitle>
-        <CardDescription>
-          Pipeline and engagement-based scoring
-        </CardDescription>
+      <CardHeader className="flex flex-row items-start justify-between space-y-0">
+        <div>
+          <CardTitle className="flex items-center gap-2">
+            <TrendingUp className="h-5 w-5" />Lead Score
+          </CardTitle>
+          <CardDescription className="flex items-center gap-1">
+            <Sparkles className="h-3 w-3" /> AI-scored from stage, engagement & profile
+          </CardDescription>
+        </div>
+        {result && (
+          <Button variant="ghost" size="sm" onClick={() => run(true)} disabled={loading} title="Recalculate">
+            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+          </Button>
+        )}
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            {getCategoryIcon()}
-            <div>
-              <div className="text-3xl font-bold">{leadScore.score}</div>
-              <div className="text-sm text-muted-foreground">out of 100</div>
+        {loading && !result && (
+          <div className="flex items-center justify-center gap-2 py-6 text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" /> Scoring this lead…
+          </div>
+        )}
+
+        {error && !result && (
+          <div className="text-center py-4 text-sm text-muted-foreground">
+            <Minus className="h-8 w-8 mx-auto mb-2 opacity-20" />
+            {error}
+            <div className="mt-2">
+              <Button variant="outline" size="sm" onClick={() => run(true)}>Try again</Button>
             </div>
           </div>
-          <Badge variant={getCategoryColor()} className="text-lg px-4 py-2">
-            {leadScore.score_category?.toUpperCase()}
-          </Badge>
-        </div>
+        )}
 
-        <Progress value={leadScore.score} className="h-2" />
-
-        <div className="text-xs text-muted-foreground">
-          Last updated: {new Date(leadScore.last_calculated).toLocaleString()}
-        </div>
-
-        {Object.keys(breakdown).length > 0 && (
-          <div className="pt-4 border-t space-y-2">
-            <div className="text-sm font-medium mb-2">Score Breakdown</div>
-            {Object.entries(breakdown)
-              .sort(([, a], [, b]) => b - a)
-              .map(([category, points]) => (
-                <div key={category} className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground capitalize">
-                    {category.replace(/_/g, ' ')}
-                  </span>
-                  <span className="font-medium">
-                    {points > 0 ? '+' : ''}{points}
-                  </span>
+        {result && (
+          <>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                {categoryIcon()}
+                <div>
+                  <div className="text-3xl font-bold">{result.score}</div>
+                  <div className="text-sm text-muted-foreground">out of 100</div>
                 </div>
-              ))}
-          </div>
+              </div>
+              <Badge variant={categoryColor()} className="text-lg px-4 py-2">
+                {result.category?.toUpperCase()}
+              </Badge>
+            </div>
+
+            <Progress value={result.score} className="h-2" />
+
+            {result.reasoning && (
+              <p className="text-sm text-muted-foreground bg-muted/50 rounded-md p-3 leading-relaxed">
+                {result.reasoning}
+              </p>
+            )}
+
+            {result.breakdown && Object.keys(result.breakdown).length > 0 && (
+              <div className="pt-2 border-t space-y-2">
+                <div className="text-sm font-medium">Score breakdown</div>
+                {Object.entries(result.breakdown)
+                  .sort(([, a], [, b]) => (b as number) - (a as number))
+                  .map(([k, v]) => (
+                    <div key={k} className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">{k}</span>
+                      <span className="font-medium">{(v as number) > 0 ? "+" : ""}{v as number}</span>
+                    </div>
+                  ))}
+              </div>
+            )}
+
+            {result.last_calculated && (
+              <div className="text-xs text-muted-foreground">
+                {result.cached ? "Scored" : "Updated"} {new Date(result.last_calculated).toLocaleString()}
+              </div>
+            )}
+          </>
         )}
       </CardContent>
     </Card>

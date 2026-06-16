@@ -84,6 +84,9 @@ const OnboardingWizard = lazyRetry(() => import("./pages/OnboardingWizard"));
 
 // Lazy loaded pages - Other
 const DataExport = lazyRetry(() => import("./pages/admin/DataExport"));
+const DataProtection = lazyRetry(() => import("./pages/admin/DataProtection"));
+const PrivacyPolicy = lazyRetry(() => import("./pages/PrivacyPolicy"));
+const DataRights = lazyRetry(() => import("./pages/DataRights"));
 const PlatformAdmin = lazyRetry(() => import("./pages/PlatformAdmin"));
 const Calendar = lazyRetry(() => import("./pages/Calendar"));
 const Chat = lazyRetry(() => import("./pages/Chat"));
@@ -114,6 +117,8 @@ const App = () => (
           <Route path="/demo" element={<Demo />} />
           <Route path="/landing-demo" element={<LandingDemo />} />
           <Route path="/form/:formId" element={<PublicForm />} />
+          <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+          <Route path="/data-rights" element={<DataRights />} />
 
           {/* Onboarding */}
           <Route path="/onboarding" element={
@@ -149,6 +154,12 @@ const App = () => (
           <Route path="/billing" element={
             <ProtectedRoute>
               <Billing />
+            </ProtectedRoute>
+          } />
+
+          <Route path="/admin/data-protection" element={
+            <ProtectedRoute requiredRole="admin">
+              <DataProtection />
             </ProtectedRoute>
           } />
           
