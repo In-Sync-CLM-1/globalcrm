@@ -49,16 +49,20 @@ serve(async (req) => {
 
     for (const sub of subscriptions || []) {
       try {
-        // Check if invoice already exists for this month
+        // Determine billing period - default to monthly
+        const billingPeriod = 'monthly'; // Could be quarterly or annual based on subscription
+
+        // Check if proforma invoice already exists for this period
         const { data: existingInvoice } = await supabase
           .from('subscription_invoices')
           .select('id')
           .eq('org_id', sub.org_id)
+          .eq('invoice_type', 'proforma')
           .eq('billing_period_start', billingPeriodStart.toISOString().split('T')[0])
           .single();
 
         if (existingInvoice) {
-          console.log(`Invoice already exists for org ${sub.org_id}`);
+          console.log(`Proforma invoice already exists for org ${sub.org_id}`);
           continue;
         }
 
@@ -66,10 +70,10 @@ serve(async (req) => {
         const gstAmount = baseAmount * (pricing.gst_percentage / 100);
         const totalAmount = baseAmount + gstAmount;
 
-        // Generate invoice number
-        const invoiceNumber = `INV-${now.getFullYear()}${(now.getMonth() + 1).toString().padStart(2, '0')}-${sub.org_id.substring(0, 8).toUpperCase()}`;
+        // Generate proforma invoice number
+        const invoiceNumber = `PRO-${now.getFullYear()}${(now.getMonth() + 1).toString().padStart(2, '0')}-${sub.org_id.substring(0, 8).toUpperCase()}`;
 
-        // Create invoice
+        // Create PROFORMA invoice (for due/outstanding amounts)
         const { error: invoiceError } = await supabase
           .from('subscription_invoices')
           .insert({
@@ -79,10 +83,14 @@ serve(async (req) => {
             due_date: dueDate.toISOString().split('T')[0],
             billing_period_start: billingPeriodStart.toISOString().split('T')[0],
             billing_period_end: billingPeriodEnd.toISOString().split('T')[0],
-            base_amount: baseAmount,
+            base_subscription_amount: baseAmount,
+            subtotal: baseAmount,
             gst_amount: gstAmount,
             total_amount: totalAmount,
             payment_status: 'pending',
+            invoice_type: 'proforma',
+            billing_period: billingPeriod,
+            user_count: sub.user_count || 0,
           });
 
         if (invoiceError) {

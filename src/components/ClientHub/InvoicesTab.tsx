@@ -63,12 +63,30 @@ export function InvoicesTab() {
   const [editPaymentDate, setEditPaymentDate] = useState("");
   const [editActualPayment, setEditActualPayment] = useState("");
 
+  // Fetch organization issuer details
+  const { data: orgDetails } = useQuery({
+    queryKey: ["org-issuer-details", effectiveOrgId],
+    queryFn: async () => {
+      if (!effectiveOrgId) return null;
+
+      const { data, error } = await supabase
+        .from("organizations")
+        .select("issuer_company_name, issuer_gst_number, banking_details")
+        .eq("id", effectiveOrgId)
+        .single();
+
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!effectiveOrgId,
+  });
+
   // Fetch all invoices with entity info
   const { data: invoices, isLoading } = useQuery({
     queryKey: ["all-invoices", effectiveOrgId],
     queryFn: async () => {
       if (!effectiveOrgId) return [];
-      
+
       const { data, error } = await supabase
         .from("client_invoices")
         .select(`
@@ -79,7 +97,7 @@ export function InvoicesTab() {
         `)
         .eq("org_id", effectiveOrgId)
         .order("invoice_date", { ascending: false });
-      
+
       if (error) throw error;
       return data;
     },
@@ -405,6 +423,34 @@ export function InvoicesTab() {
 
   return (
     <div className="space-y-4">
+      {/* Issuer & Banking Details Card */}
+      {orgDetails && (
+        <Card className="bg-blue-50 border-blue-200">
+          <CardContent className="pt-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <h3 className="font-semibold text-sm mb-2">Issued By</h3>
+                <p className="text-sm text-gray-700">{orgDetails.issuer_company_name}</p>
+                {orgDetails.issuer_gst_number && (
+                  <p className="text-xs text-gray-600 mt-1">GST: {orgDetails.issuer_gst_number}</p>
+                )}
+              </div>
+              <div>
+                <h3 className="font-semibold text-sm mb-2">Banking Details</h3>
+                {orgDetails.banking_details && (
+                  <div className="text-sm text-gray-700 space-y-1">
+                    <p><strong>Bank:</strong> {orgDetails.banking_details.bank_name}</p>
+                    <p><strong>Branch:</strong> {orgDetails.banking_details.branch}</p>
+                    <p><strong>Account:</strong> {orgDetails.banking_details.account_number}</p>
+                    <p><strong>IFSC:</strong> {orgDetails.banking_details.ifsc_code}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Revenue Analytics */}
       <RevenueAnalytics invoices={invoices || []} />
 

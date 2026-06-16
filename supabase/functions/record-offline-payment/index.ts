@@ -155,6 +155,37 @@ Deno.serve(async (req) => {
             updated_at: nowIso,
           })
           .eq('id', invoice_id);
+      } else {
+        // Create an actual invoice when payment is recorded (payment received)
+        const invoiceNumber = `INV-${nowIso.split('T')[0].replace(/-/g, '')}-${org_id.substring(0, 8).toUpperCase()}`;
+        const invoiceDate = nowIso.split('T')[0];
+        const dueDate = new Date(nowIso);
+        dueDate.setDate(dueDate.getDate() + 30); // 30 days payment terms
+
+        const { error: createInvoiceError } = await db
+          .from('subscription_invoices')
+          .insert({
+            org_id,
+            invoice_number: invoiceNumber,
+            invoice_date: invoiceDate,
+            due_date: dueDate.toISOString().split('T')[0],
+            billing_period_start: invoiceDate,
+            billing_period_end: invoiceDate,
+            base_subscription_amount: baseAmount,
+            user_count: 1,
+            subtotal: baseAmount,
+            gst_amount: gstAmount,
+            total_amount: amount,
+            paid_amount: amount,
+            payment_status: 'paid',
+            paid_at: nowIso,
+            invoice_type: 'invoice',
+            billing_period: billing_period || 'monthly',
+          });
+
+        if (createInvoiceError) {
+          console.error(`Error creating invoice for payment:`, createInvoiceError);
+        }
       }
 
       // Restore the subscription and advance the next billing date by the cadence.
