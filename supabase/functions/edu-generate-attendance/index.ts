@@ -1,27 +1,18 @@
-// edu-generate-attendance — TEMPORARY random attendance generator for the
-// BSR one-week stability test (2026-06-10 .. 2026-06-17, inclusive). After the
-// window it no-ops; the daily CSV upload takes over as the real punch source.
+// edu-generate-attendance — daily random attendance generator for BSR.
 //
-// Invoked by two cron workers at WINDOW START: 03:30 UTC (=09:00 IST, IN) and
-// 10:30 UTC (=16:00 IST, OUT). Direction is inferred from IST hour since the
-// cron worker posts an empty body. The whole window is planned up front with
-// punch times spread randomly across it; the 5-min pusher only uploads punches
-// whose time has passed (claim_edu_punches), so punches trickle to UPSMF
-// sequentially like a real device — never one bulk batch.
+// Invoked by two cron workers: 03:30 UTC (=09:00 IST, IN) and
+// 10:30 UTC (=16:00 IST, OUT). Direction is inferred from IST hour.
+// For backfill, POST { "date": "YYYY-MM-DD" } to override today's date
+// (direction is still inferred from the hour the request arrives).
 //
-// Random attendance, per user spec (2026-06-10):
-//   - IN run: a random 5-15% of active students (0-8% of teachers) are absent
-//     for the day — no punches at all. Everyone else gets an IN punch.
+// Random attendance:
+//   - IN run: a random 5-15% of active students (0-8% of teachers) are absent.
 //   - OUT run: an OUT punch for exactly the persons who punched IN today.
 //   - Sundays skipped (college closed).
 //
-// Upload history: every run writes one edu_upload_log row (date, direction,
-// present/absent counts, named absentee list). The log's UNIQUE constraint is
-// also the idempotency gate — a window is generated at most once, so absences
-// are never re-rolled by a retry.
-//
-// Inactive (send-as-absent) persons are excluded here AND blocked by the
-// edu_skip_inactive_punch trigger. Alerts are FAILURE-ONLY.
+// Idempotency: edu_upload_log has a UNIQUE constraint on (org_id, upload_date,
+// direction) — duplicate runs silently no-op.
+// Inactive persons are excluded here AND blocked by edu_skip_inactive_punch.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 
@@ -35,7 +26,7 @@ const ORG_ID = "421eb87f-6bc9-409b-91c4-b5aa7022f37a"; // Baba Sadhav Ram Parame
 const DEVICE_ID = "BSRBIO01";
 const SOURCE = "random-generator";
 const START = "2026-06-10";
-const END = "2026-06-17";
+const END = "2026-12-31";
 const IST_MS = 5.5 * 3600 * 1000;
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -64,13 +55,20 @@ function randomPunchTime(date: string, windowHour: number): string {
   return new Date(t).toISOString();
 }
 
-Deno.serve(async () => {
-  const ist = new Date(Date.now() + IST_MS);
-  const date = ist.toISOString().slice(0, 10);
-  if (date < START || date > END) return json({ skipped: `outside test window ${START}..${END}`, date });
-  if (ist.getUTCDay() === 0) return json({ skipped: "sunday", date });
+Deno.serve(async (req) => {
+  let body: Record<string, unknown> = {};
+  try { body = await req.json(); } catch { /* empty or non-JSON body is fine */ }
 
-  const direction = ist.getUTCHours() < 12 ? "IN" : "OUT";
+  const ist = new Date(Date.now() + IST_MS);
+  // Allow backfill calls to override today's date via { "date": "YYYY-MM-DD" }.
+  const date: string = typeof body.date === "string" ? body.date : ist.toISOString().slice(0, 10);
+  if (date < START || date > END) return json({ skipped: `outside window ${START}..${END}`, date });
+  const dayOfWeek = new Date(date + "T12:00:00Z").getUTCDay();
+  if (dayOfWeek === 0) return json({ skipped: "sunday", date });
+
+  const direction: "IN" | "OUT" = body.direction === "IN" || body.direction === "OUT"
+    ? body.direction
+    : (ist.getUTCHours() < 12 ? "IN" : "OUT");
   const windowHour = direction === "IN" ? 9 : 16;
 
   const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
