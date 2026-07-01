@@ -26,7 +26,7 @@ const EXHAUSTED_BUFFER = 1;
 // override; all numbers sit under the one shared WABA, so the approved admin
 // templates work from any of them. Other orgs fall back to EXOTEL_SENDER_NUMBER.
 const WA_SENDER_BY_ORG: Record<string, string> = {
-  "6dcf4229-6902-4cd4-9c7f-2d6ed4a6045d": "+918808359820", // IEDUP
+  "6dcf4229-6902-4cd4-9c7f-2d6ed4a6045d": "+918178798930", // IEDUP
 };
 
 const WA_TEMPLATE: Record<"low" | "exhausted", string> = {

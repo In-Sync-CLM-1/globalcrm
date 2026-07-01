@@ -43,7 +43,7 @@ const POST_CALL_WA_BY_ORG: Record<string, {
     // billing ₹1 vs ₹0.20). Same single name variable. v4 is being retired.
     template_name: "iedup_cmyuva_training_link_v5",
     language_code: "hi",
-    from_number: "+918808359820",
+    from_number: "+918178798930",
     cost_per_msg: WHATSAPP_UTILITY_COST_PER_MSG,
     body_params: ({ firstName }) => [firstName],
   },
