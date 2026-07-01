@@ -175,9 +175,9 @@ serve(async (req) => {
       throw new Error('CSV file is empty');
     }
 
-    // Validate row count for redefine_repository before processing
+    // Validate row count for redefine_repository / fervent_repository before processing
     const dataRowCount = lines.length - 1; // Exclude header row
-    if (importJob.import_type === 'redefine_repository' && dataRowCount > 5000) {
+    if ((importJob.import_type === 'redefine_repository' || importJob.import_type === 'fervent_repository') && dataRowCount > 5000) {
       throw new Error('CSV file contains too many rows. Maximum allowed is 5,000 records.');
     }
 
@@ -207,6 +207,20 @@ serve(async (req) => {
       console.log('[VALIDATE] Organization validated for redefine repository');
     }
 
+    // Validate org for fervent_repository ONCE before processing
+    if (importJob.import_type === 'fervent_repository') {
+      const { data: org } = await supabase
+        .from('organizations')
+        .select('slug')
+        .eq('id', importJob.org_id)
+        .single();
+
+      if (org?.slug !== 'fervent-communication') {
+        throw new Error('This import type is exclusive to Fervent Communication');
+      }
+      console.log('[VALIDATE] Organization validated for fervent repository');
+    }
+
     // Validate required columns based on import type
     let requiredColumns: string[];
     switch (importJob.import_type) {
@@ -215,6 +229,9 @@ serve(async (req) => {
         break;
       case 'redefine_repository':
         requiredColumns = ['name'];
+        break;
+      case 'fervent_repository':
+        requiredColumns = ['full_name'];
         break;
       case 'inventory':
         requiredColumns = ['item_id_sku'];
@@ -378,6 +395,42 @@ serve(async (req) => {
             employee_size: row.emp_size || row.employee_size || null,
             erp_name: row.erp_name || null,
             erp_vendor: row.erp_vendor || null,
+            created_by: importJob.user_id
+          };
+        } else if (importJob.import_type === 'fervent_repository') {
+          record = {
+            org_id: importJob.org_id,
+            sr_no: row.sr_no ? parseInt(row.sr_no) : null,
+            unique_id: row.unique_id || null,
+            db_sourced_year: row.db_sourced_year ? parseInt(row.db_sourced_year) : null,
+            ucdb_status: row.ucdb_status || null,
+            company_name: row.company_name || null,
+            first_name: row.first_name || null,
+            last_name: row.last_name || null,
+            full_name: row.full_name,
+            designation: row.designation || null,
+            department: row.department || null,
+            designation_level: row.designation_level || null,
+            city: row.city || null,
+            state: row.state || null,
+            country: row.country || null,
+            isd_code: row.isd_code || null,
+            std_code: row.std_code || null,
+            mobile_number_1: row.mobile_number_1 || null,
+            mobile_number_2: row.mobile_number_2 || null,
+            direct_number: row.direct_number || null,
+            phone_number: row.phone_number || null,
+            official_email: row.official_email_id || row.official_email || null,
+            personal_email_1: row.personal_email_id_1 || row.personal_email_1 || null,
+            personal_email_2: row.personal_email_id_2 || row.personal_email_2 || null,
+            linkedin_url: row.contact_linkedin_id || row.linkedin_url || null,
+            domain_name: row.domain_name || null,
+            website: row.website || null,
+            industry: row.industry || null,
+            sub_industry: row.subindustry || row.sub_industry || null,
+            employee_size: row.employee_size || null,
+            turnover: row.turnover || null,
+            company_linkedin_url: row.company_linkedin_id || row.company_linkedin_url || null,
             created_by: importJob.user_id
           };
         } else if (importJob.import_type === 'inventory') {
@@ -732,6 +785,45 @@ async function processBatch(
       }
       
       upsertOptions = {};
+    } else if (importJob.import_type === 'fervent_repository') {
+      tableName = 'fervent_data_repository';
+
+      // Dedupe by unique_id (the source DB's own record key) when present
+      const idsToCheck = batch
+        .map(r => r.unique_id)
+        .filter((id: string | null) => id && String(id).trim() !== '');
+
+      let existingIds = new Set<string>();
+      if (idsToCheck.length > 0) {
+        const { data: existingByUniqueId } = await supabase
+          .from('fervent_data_repository')
+          .select('unique_id')
+          .eq('org_id', importJob.org_id)
+          .in('unique_id', idsToCheck);
+
+        existingIds = new Set((existingByUniqueId || []).map((r: any) => r.unique_id));
+      }
+
+      const seenInBatch = new Set<string>();
+      const originalLength = batch.length;
+      batch = batch.filter(record => {
+        const uniqueId = record.unique_id;
+        if (!uniqueId || String(uniqueId).trim() === '') return true; // allow rows without a unique_id
+        if (existingIds.has(uniqueId) || seenInBatch.has(uniqueId)) return false;
+        seenInBatch.add(uniqueId);
+        return true;
+      });
+
+      skippedCount = originalLength - batch.length;
+      if (batch.length === 0) {
+        console.log(`[DB] Batch ${batchNumber}: All ${originalLength} records are duplicates, skipping`);
+        return { inserted: 0, skipped: originalLength };
+      }
+      if (skippedCount > 0) {
+        console.log(`[DB] Batch ${batchNumber}: Filtered ${skippedCount} duplicate unique_id records, inserting ${batch.length} records`);
+      }
+
+      upsertOptions = {};
     } else if (importJob.import_type === 'inventory') {
       tableName = 'inventory_items';
       
@@ -761,8 +853,8 @@ async function processBatch(
       batch = batch.map(record => ({ ...record, import_job_id: importJob.id }));
     }
 
-    // Use insert for redefine_repository and contacts, upsert for campaign recipients
-    const { error } = (importJob.import_type === 'redefine_repository' || importJob.import_type === 'contacts')
+    // Use insert for redefine_repository, fervent_repository and contacts, upsert for campaign recipients
+    const { error } = (importJob.import_type === 'redefine_repository' || importJob.import_type === 'fervent_repository' || importJob.import_type === 'contacts')
       ? await supabase.from(tableName).insert(batch)
       : await supabase.from(tableName).upsert(batch, upsertOptions);
 

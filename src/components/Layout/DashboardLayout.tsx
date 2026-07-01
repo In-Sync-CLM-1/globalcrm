@@ -341,6 +341,17 @@ function DashboardLayout({ children }: DashboardLayoutProps) {
                 </Link>
               )}
 
+              {canAccessFeature("fervent_data_repository") && (
+                <Link
+                  to="/data-repository"
+                  className="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-primary transition-colors"
+                  onClick={() => setSidebarOpen(false)}
+                >
+                  <List size={16} className="shrink-0 text-sidebar-muted" />
+                  <span>Data Repository</span>
+                </Link>
+              )}
+
               {(canAccessFeature("campaigns_whatsapp") || canAccessFeature("campaigns_email")) && (
                 <>
                   <div className="pt-3 pb-1 px-2">

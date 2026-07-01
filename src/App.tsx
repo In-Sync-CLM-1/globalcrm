@@ -42,6 +42,7 @@ const PageLoader = () => (
 const Dashboard = lazyRetry(() => import("./pages/Dashboard"));
 const Billing = lazyRetry(() => import("./pages/Billing"));
 const Contacts = lazyRetry(() => import("./pages/Contacts"));
+const FerventRepository = lazyRetry(() => import("./pages/FerventRepository"));
 const ContactDetail = lazyRetry(() => import("./pages/ContactDetail"));
 const PipelineBoard = lazyRetry(() => import("./pages/PipelineBoard"));
 const PipelineAdvancedSearch = lazyRetry(() => import("./pages/PipelineAdvancedSearch"));
@@ -144,7 +145,13 @@ const App = () => (
               <ContactDetail />
             </ProtectedRoute>
           } />
-          
+
+          <Route path="/data-repository" element={
+            <ProtectedRoute>
+              <FerventRepository />
+            </ProtectedRoute>
+          } />
+
           <Route path="/pipeline" element={
             <ProtectedRoute>
               <PipelineBoard />

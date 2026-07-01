@@ -17,7 +17,7 @@ import { useUserRole } from "@/hooks/useUserRole";
 
 interface BulkDeleteButtonProps {
   selectedIds: string[];
-  tableName: "contacts" | "inventory_items" | "redefine_data_repository";
+  tableName: "contacts" | "inventory_items" | "redefine_data_repository" | "fervent_data_repository";
   onSuccess: () => void;
   disabled?: boolean;
 }

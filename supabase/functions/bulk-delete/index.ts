@@ -6,7 +6,7 @@ const corsHeaders = {
 };
 
 interface BulkDeleteRequest {
-  tableName: 'contacts' | 'inventory_items' | 'redefine_data_repository';
+  tableName: 'contacts' | 'inventory_items' | 'redefine_data_repository' | 'fervent_data_repository';
   recordIds: string[];
 }
 
