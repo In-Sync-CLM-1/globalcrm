@@ -21,7 +21,7 @@ const corsHeaders = {
 // Per-org Exotel WhatsApp sender (WABA from-number). Mirrors the IEDUP override
 // used by the post-call WA auto-send in ai-bolna-webhook.
 const WA_SENDER_BY_ORG: Record<string, string> = {
-  "6dcf4229-6902-4cd4-9c7f-2d6ed4a6045d": "+918808359820", // IEDUP
+  "6dcf4229-6902-4cd4-9c7f-2d6ed4a6045d": "+918178798930", // IEDUP
 };
 
 // How many of each action to fire per org per tick.
