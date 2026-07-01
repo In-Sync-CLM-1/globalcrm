@@ -64,7 +64,7 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "fervent_data_repository_template.csv";
+    a.download = "fervent_database_template.csv";
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -146,7 +146,7 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>
-          <DialogTitle>Bulk Upload Data Repository</DialogTitle>
+          <DialogTitle>Bulk Upload Fervent Database</DialogTitle>
           <DialogDescription>
             Upload a CSV file with your database. Maximum 5,000 records and 10MB file size.
           </DialogDescription>

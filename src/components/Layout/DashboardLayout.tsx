@@ -348,7 +348,7 @@ function DashboardLayout({ children }: DashboardLayoutProps) {
                   onClick={() => setSidebarOpen(false)}
                 >
                   <List size={16} className="shrink-0 text-sidebar-muted" />
-                  <span>Data Repository</span>
+                  <span>Fervent Database</span>
                 </Link>
               )}
 

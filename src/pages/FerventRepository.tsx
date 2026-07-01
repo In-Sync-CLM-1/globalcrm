@@ -211,7 +211,7 @@ export default function FerventRepository() {
         { key: "employee_size", label: "Employee Size" },
         { key: "turnover", label: "Turnover" },
         { key: "company_linkedin_url", label: "Company LinkedIn ID" },
-      ], `fervent-data-repository-${new Date().toISOString().slice(0, 10)}.csv`);
+      ], `fervent-database-${new Date().toISOString().slice(0, 10)}.csv`);
 
       notify.success("Export ready", `${rows.length} record(s) exported.`);
     } catch (err: any) {
@@ -246,7 +246,7 @@ export default function FerventRepository() {
       <div className="space-y-4">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div>
-            <h1 className="text-2xl font-semibold">Data Repository</h1>
+            <h1 className="text-2xl font-semibold">Fervent Database</h1>
             <p className="text-sm text-muted-foreground">
               Your vendor/lead database — import, filter, and export. Calling and pipeline actions are shown below but not active on your plan.
             </p>
