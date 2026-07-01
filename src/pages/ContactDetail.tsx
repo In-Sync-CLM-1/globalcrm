@@ -212,7 +212,7 @@ export default function ContactDetail() {
   return (
     <DashboardLayout>
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between sticky top-0 z-10 bg-background py-2 -mt-2">
           <div className="flex items-center gap-4">
             <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
               <ArrowLeft className="h-4 w-4" />
@@ -228,32 +228,37 @@ export default function ContactDetail() {
               )}
             </div>
           </div>
-          <div className="flex gap-2 flex-wrap">
-            <ConvertToClientButton 
-              contact={contact}
-              isWonStage={contact.pipeline_stages?.name?.toLowerCase() === 'won'}
-              onConverted={() => refreshContact()}
-            />
-            <Button 
-              variant="outline" 
-              onClick={handleEnrichContact}
-              disabled={enriching || !contact.email}
-            >
-              <Sparkles className="mr-2 h-4 w-4" />
-              {enriching ? "Enriching..." : "Enrich with Apollo"}
-            </Button>
-            <Button variant="outline" onClick={() => setIsEditOpen(true)}>
-              <Edit className="mr-2 h-4 w-4" />
-              Edit
-            </Button>
-            <Button variant="outline" onClick={() => setIsFillFormOpen(true)}>
-              <FileText className="mr-2 h-4 w-4" />
-              Fill Form
-            </Button>
-            <Button onClick={() => { setActivityType("note"); setIsLogActivityOpen(true); }}>
-              <Plus className="mr-2 h-4 w-4" />
-              Log Activity
-            </Button>
+          <div className="flex flex-col items-end gap-2">
+            <p className="text-xs text-muted-foreground">
+              Created {new Date(contact.created_at).toLocaleDateString()}
+            </p>
+            <div className="flex gap-2 flex-wrap justify-end">
+              <ConvertToClientButton
+                contact={contact}
+                isWonStage={contact.pipeline_stages?.name?.toLowerCase() === 'won'}
+                onConverted={() => refreshContact()}
+              />
+              <Button
+                variant="outline"
+                onClick={handleEnrichContact}
+                disabled={enriching || !contact.email}
+              >
+                <Sparkles className="mr-2 h-4 w-4" />
+                {enriching ? "Enriching..." : "Enrich with Apollo"}
+              </Button>
+              <Button variant="outline" onClick={() => setIsEditOpen(true)}>
+                <Edit className="mr-2 h-4 w-4" />
+                Edit
+              </Button>
+              <Button variant="outline" onClick={() => setIsFillFormOpen(true)}>
+                <FileText className="mr-2 h-4 w-4" />
+                Fill Form
+              </Button>
+              <Button onClick={() => { setActivityType("note"); setIsLogActivityOpen(true); }}>
+                <Plus className="mr-2 h-4 w-4" />
+                Log Activity
+              </Button>
+            </div>
           </div>
         </div>
 
