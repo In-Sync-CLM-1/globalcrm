@@ -8,6 +8,13 @@ import { setupErrorLogging } from "./lib/errorLogger";
 // Set up global error logging
 setupErrorLogging();
 
+// lazyRetry (App.tsx) sets this before forcing a reload to recover from a
+// stale chunk after a deploy, but only allows one reload per tab lifetime.
+// Clear it on every fresh page load so a later deploy (same long-lived tab)
+// can still trigger its own one-time recovery reload instead of getting
+// stuck failing forever.
+sessionStorage.removeItem("chunk_reload");
+
 // When a fresh service worker takes control after a deploy, force a one-time reload
 // so the open tab/PWA picks up the new JS bundle instead of serving the cached one.
 if ("serviceWorker" in navigator && navigator.serviceWorker.controller) {
