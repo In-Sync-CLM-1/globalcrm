@@ -89,34 +89,6 @@ function normalizeHeader(header: string): string {
     .replace(/[^a-z0-9_]/g, '');
 }
 
-// Special mapping for inventory columns to handle variations in CSV headers
-function mapInventoryColumn(normalizedHeader: string): string {
-  const inventoryColumnMap: Record<string, string> = {
-    'item_id__sku': 'item_id_sku',
-    'item_id': 'item_id_sku',
-    'sku': 'item_id_sku',
-    'item_name__description': 'item_name',
-    'item_name': 'item_name',
-    'name': 'item_name',
-    'available_quantity': 'available_qty',
-    'quantity': 'available_qty',
-    'qty': 'available_qty',
-    'unit_of_measure_uom': 'uom',
-    'unit': 'uom',
-    'pending_po': 'pending_po',
-    'pending_purchase_order': 'pending_po',
-    'pending_so': 'pending_so',
-    'pending_sales_order': 'pending_so',
-    'selling_price_inr': 'selling_price',
-    'selling_price': 'selling_price',
-    'price': 'selling_price',
-    'amount': 'amount',
-    'total': 'amount'
-  };
-  
-  return inventoryColumnMap[normalizedHeader] || normalizedHeader;
-}
-
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -175,9 +147,9 @@ serve(async (req) => {
       throw new Error('CSV file is empty');
     }
 
-    // Validate row count for redefine_repository / fervent_repository before processing
+    // Validate row count for fervent_repository before processing
     const dataRowCount = lines.length - 1; // Exclude header row
-    if ((importJob.import_type === 'redefine_repository' || importJob.import_type === 'fervent_repository') && dataRowCount > 5000) {
+    if (importJob.import_type === 'fervent_repository' && dataRowCount > 5000) {
       throw new Error('CSV file contains too many rows. Maximum allowed is 5,000 records.');
     }
 
@@ -187,25 +159,8 @@ serve(async (req) => {
       file_size_kb: fileSizeKB
     });
 
-    const headers = parseCSVLine(lines[0]).map(h => {
-      const normalized = normalizeHeader(h);
-      return importJob.import_type === 'inventory' ? mapInventoryColumn(normalized) : normalized;
-    });
+    const headers = parseCSVLine(lines[0]).map(h => normalizeHeader(h));
     console.log('[PARSE] Headers detected:', headers);
-    
-    // Validate org for redefine_repository ONCE before processing
-    if (importJob.import_type === 'redefine_repository') {
-      const { data: org } = await supabase
-        .from('organizations')
-        .select('slug')
-        .eq('id', importJob.org_id)
-        .single();
-      
-      if (org?.slug !== 'redefine-marcom-pvt-ltd') {
-        throw new Error('This import type is exclusive to Redefine organization');
-      }
-      console.log('[VALIDATE] Organization validated for redefine repository');
-    }
 
     // Validate org for fervent_repository ONCE before processing
     if (importJob.import_type === 'fervent_repository') {
@@ -227,14 +182,8 @@ serve(async (req) => {
       case 'contacts':
         requiredColumns = ['first_name', 'email'];
         break;
-      case 'redefine_repository':
-        requiredColumns = ['name'];
-        break;
       case 'fervent_repository':
         requiredColumns = ['full_name'];
-        break;
-      case 'inventory':
-        requiredColumns = ['item_id_sku'];
         break;
       case 'email_recipients':
       case 'whatsapp_recipients':
@@ -366,37 +315,6 @@ serve(async (req) => {
             custom_data: row,
             status: 'pending'
           };
-        } else if (importJob.import_type === 'redefine_repository') {
-          // No validation needed here - already validated once at start
-          record = {
-            org_id: importJob.org_id,
-            name: row.name,
-            designation: row.designation || null,
-            department: row.deppt || row.department || null,
-            job_level: row.job_levelupdated || row.job_level_updated || row.job_level || null,
-            linkedin_url: row.linkedin || null,
-            mobile_number: row.mobilenumb || row.mobile_number || null,
-            mobile_2: row.mobile2 || null,
-            official_email: row.official || null,
-            personal_email: row.personalemailid || row.personal_email || null,
-            generic_email: row.generic_email_id || row.generic_email || null,
-            industry_type: row.industry_type || null,
-            sub_industry: row.sub_industry || null,
-            company_name: row.company_name || null,
-            address: row.address || null,
-            location: row.location || null,
-            city: row.city || null,
-            state: row.state || null,
-            zone: row.zone || null,
-            tier: row.tier || null,
-            pincode: row.pincode || null,
-            website: row.website || null,
-            turnover: row.turnover || null,
-            employee_size: row.emp_size || row.employee_size || null,
-            erp_name: row.erp_name || null,
-            erp_vendor: row.erp_vendor || null,
-            created_by: importJob.user_id
-          };
         } else if (importJob.import_type === 'fervent_repository') {
           record = {
             org_id: importJob.org_id,
@@ -432,21 +350,6 @@ serve(async (req) => {
             turnover: row.turnover || null,
             company_linkedin_url: row.company_linkedin_id || row.company_linkedin_url || null,
             created_by: importJob.user_id
-          };
-        } else if (importJob.import_type === 'inventory') {
-          // Simplified inventory structure
-          record = {
-            org_id: importJob.org_id,
-            item_id_sku: row.item_id_sku || row.item_id,
-            item_name: row.item_name || row.name || null,
-            available_qty: row.available_qty ? parseFloat(row.available_qty) : 0,
-            uom: row.uom || null,
-            pending_po: row.pending_po ? parseInt(row.pending_po) : 0,
-            pending_so: row.pending_so ? parseInt(row.pending_so) : 0,
-            selling_price: row.selling_price || row.price ? parseFloat(row.selling_price || row.price) : null,
-            amount: row.amount ? parseFloat(row.amount) : 0,
-            created_by: importJob.user_id,
-            import_job_id: importJobId
           };
         }
 
@@ -708,83 +611,6 @@ async function processBatch(
         onConflict: 'phone_number',
         ignoreDuplicates: false
       };
-    } else if (importJob.import_type === 'redefine_repository') {
-      tableName = 'redefine_data_repository';
-      
-      // Collect both official_email and personal_email for duplicate checking
-      const officialEmails = batch
-        .map(r => r.official_email)
-        .filter(email => email && email.trim() !== '');
-      
-      const personalEmails = batch
-        .map(r => r.personal_email)
-        .filter(email => email && email.trim() !== '');
-      
-      const allEmails = [...new Set([...officialEmails, ...personalEmails])];
-      
-      if (allEmails.length > 0) {
-        // Check which emails already exist in the database (both fields)
-        const { data: existingByOfficial } = await supabase
-          .from('redefine_data_repository')
-          .select('official_email')
-          .eq('org_id', importJob.org_id)
-          .in('official_email', allEmails);
-
-        const { data: existingByPersonal } = await supabase
-          .from('redefine_data_repository')
-          .select('personal_email')
-          .eq('org_id', importJob.org_id)
-          .in('personal_email', allEmails);
-
-        const existingOfficialEmails = new Set(
-          (existingByOfficial || []).map((r: any) => r.official_email?.toLowerCase())
-        );
-        
-        const existingPersonalEmails = new Set(
-          (existingByPersonal || []).map((r: any) => r.personal_email?.toLowerCase())
-        );
-
-        // Track emails in current batch to detect within-batch duplicates
-        const batchOfficialEmails = new Set<string>();
-        const batchPersonalEmails = new Set<string>();
-        
-        const originalLength = batch.length;
-        batch = batch.filter(record => {
-          const officialEmail = record.official_email?.toLowerCase();
-          const personalEmail = record.personal_email?.toLowerCase();
-          
-          // Check official_email duplicates
-          if (officialEmail && officialEmail !== '') {
-            if (existingOfficialEmails.has(officialEmail) || batchOfficialEmails.has(officialEmail)) {
-              return false; // Skip duplicate official email
-            }
-            batchOfficialEmails.add(officialEmail);
-          }
-          
-          // Check personal_email duplicates
-          if (personalEmail && personalEmail !== '') {
-            if (existingPersonalEmails.has(personalEmail) || batchPersonalEmails.has(personalEmail)) {
-              return false; // Skip duplicate personal email
-            }
-            batchPersonalEmails.add(personalEmail);
-          }
-          
-          return true;
-        });
-
-        skippedCount = originalLength - batch.length;
-        
-        if (batch.length === 0) {
-          console.log(`[DB] Batch ${batchNumber}: All ${originalLength} records are duplicates, skipping`);
-          return { inserted: 0, skipped: originalLength };
-        }
-
-        if (skippedCount > 0) {
-          console.log(`[DB] Batch ${batchNumber}: Filtered ${skippedCount} duplicates (by official_email and personal_email), inserting ${batch.length} records`);
-        }
-      }
-      
-      upsertOptions = {};
     } else if (importJob.import_type === 'fervent_repository') {
       tableName = 'fervent_data_repository';
 
@@ -824,37 +650,12 @@ async function processBatch(
       }
 
       upsertOptions = {};
-    } else if (importJob.import_type === 'inventory') {
-      tableName = 'inventory_items';
-      
-      // Deduplicate by SKU within the batch
-      const deduped = [];
-      const seen = new Set();
-      for (let i = batch.length - 1; i >= 0; i--) {
-        const record = batch[i];
-        if (!seen.has(record.item_id_sku)) {
-          seen.add(record.item_id_sku);
-          deduped.unshift(record);
-        }
-      }
-      batch = deduped;
-      
-      // Use composite key for upsert (org_id + item_id_sku - column order matters!)
-      upsertOptions = {
-        onConflict: 'org_id,item_id_sku',
-        ignoreDuplicates: false
-      };
     } else {
       throw new Error(`Unknown import type: ${importJob.import_type}`);
     }
 
-    // Add import_job_id to inventory items for precise rollback tracking
-    if (importJob.import_type === 'inventory') {
-      batch = batch.map(record => ({ ...record, import_job_id: importJob.id }));
-    }
-
-    // Use insert for redefine_repository, fervent_repository and contacts, upsert for campaign recipients
-    const { error } = (importJob.import_type === 'redefine_repository' || importJob.import_type === 'fervent_repository' || importJob.import_type === 'contacts')
+    // Use insert for fervent_repository and contacts, upsert for campaign recipients
+    const { error } = (importJob.import_type === 'fervent_repository' || importJob.import_type === 'contacts')
       ? await supabase.from(tableName).insert(batch)
       : await supabase.from(tableName).upsert(batch, upsertOptions);
 

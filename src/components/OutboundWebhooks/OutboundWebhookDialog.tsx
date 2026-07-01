@@ -110,9 +110,6 @@ const TARGET_TABLES = [
     { value: "form_fields", label: "Form Fields" },
     { value: "communication_templates", label: "Communication Templates" },
   ]},
-  { group: "Inventory", items: [
-    { value: "inventory_items", label: "Inventory Items" },
-  ]},
   { group: "Approvals & Automation", items: [
     { value: "approval_rules", label: "Approval Rules" },
     { value: "automation_approvals", label: "Automation Approvals" },

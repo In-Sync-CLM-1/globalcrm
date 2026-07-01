@@ -1,6 +1,6 @@
 import { Card } from "@/components/ui/card";
 import { DataSourceType, reportDataSources } from "@/config/reportDataSources";
-import { Users, Phone, BarChart3, Package, BookOpen, UserCheck } from "lucide-react";
+import { Users, Phone, BarChart3, UserCheck } from "lucide-react";
 import { useFeatureAccess } from "@/hooks/useFeatureAccess";
 
 interface DataSourceSelectorProps {
@@ -14,8 +14,6 @@ const dataSourceFeatureMap: Record<DataSourceType, string> = {
   call_logs: 'calling',
   activities: 'contacts',
   pipeline_stages: 'pipeline_stages',
-  inventory: 'inventory',
-  data_repository: 'redefine_data_repository',
   clients: 'clients',
 };
 
@@ -24,8 +22,6 @@ const iconMap: Record<DataSourceType, any> = {
   call_logs: Phone,
   activities: BarChart3,
   pipeline_stages: BarChart3,
-  inventory: Package,
-  data_repository: BookOpen,
   clients: UserCheck,
 };
 

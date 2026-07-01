@@ -83,9 +83,9 @@ const EXPORT_TABLES: { category: string; tables: string[] }[] = [
   {
     category: "Other",
     tables: [
-      "inventory_items", "blog_posts", "bulk_import_history", "notifications",
+      "blog_posts", "bulk_import_history", "notifications",
       "external_entities", "approval_types", "approval_rules",
-      "redefine_data_repository", "redefine_repository_audit",
+      "fervent_data_repository",
       "chat_conversations", "chat_messages", "chat_participants",
       "monthly_actuals_snapshot", "revenue_goals", "carry_forward_snapshot",
       "contact_lead_scores", "email_suppression_list", "email_unsubscribes",

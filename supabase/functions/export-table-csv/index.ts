@@ -42,8 +42,6 @@ const ALLOWED_TABLES = [
   "teams", "team_members", "designations", "reporting_hierarchy",
   // Custom Fields
   "custom_fields",
-  // Inventory
-  "inventory_items",
   // Blog
   "blog_posts",
   // API Keys
@@ -59,8 +57,8 @@ const ALLOWED_TABLES = [
   "external_entities",
   // Approvals
   "approval_types", "approval_rules",
-  // Redefine Repository
-  "redefine_data_repository", "redefine_repository_audit",
+  // Fervent Repository
+  "fervent_data_repository",
   // Chat
   "chat_conversations", "chat_messages", "chat_participants",
   // Revenue
