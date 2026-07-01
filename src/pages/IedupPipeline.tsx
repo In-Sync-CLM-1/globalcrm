@@ -86,8 +86,9 @@ const IEDUP_ACTIONS = [
   "Send WhatsApp - Payment failed",
   "Send WhatsApp - Add help desk number",
   "Send WhatsApp - Photo rejected",
+  "Send WhatsApp - Short Attendance",
+  "Send WhatsApp - Assessment Link",
   "Attendance",
-  "Short Attendance",
 ];
 
 const CSV_TEMPLATE = `name,number,action\nVibhu Dixit,+917607359820,Call\n`;
