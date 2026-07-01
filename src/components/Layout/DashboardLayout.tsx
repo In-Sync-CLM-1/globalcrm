@@ -56,6 +56,7 @@ import { useQuery } from "@tanstack/react-query";
  import { FloatingChatWidget } from "@/components/chat/FloatingChatWidget";
 import { useTotalUnreadCount } from "@/hooks/useConversations";
 import { IEDUP_ORG_ID } from "@/hooks/useIsIedup";
+import { FERVENT_ORG_ID } from "@/hooks/useIsFervent";
 
 interface DashboardLayoutProps {
   children: ReactNode;
@@ -124,6 +125,7 @@ function DashboardLayout({ children }: DashboardLayoutProps) {
   const orgName = userData?.org?.name || "";
   const onboardingCompleted = userData?.profile?.onboarding_completed || false;
   const isIedup = userData?.profile?.org_id === IEDUP_ORG_ID;
+  const isFervent = userData?.profile?.org_id === FERVENT_ORG_ID;
 
   // Check if user needs onboarding
   useEffect(() => {
@@ -278,8 +280,38 @@ function DashboardLayout({ children }: DashboardLayoutProps) {
                 </>
               )}
 
+              {/* Fervent-only minimal navigation: Dashboard + Fervent Database + Users */}
+              {!isPlatformAdmin && isFervent && (
+                <>
+                  <Link
+                    to="/dashboard"
+                    className="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-primary transition-colors"
+                    onClick={() => setSidebarOpen(false)}
+                  >
+                    <LayoutDashboard size={16} className="shrink-0 text-sidebar-muted" />
+                    <span>Dashboard</span>
+                  </Link>
+                  <Link
+                    to="/data-repository"
+                    className="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-primary transition-colors"
+                    onClick={() => setSidebarOpen(false)}
+                  >
+                    <List size={16} className="shrink-0 text-sidebar-muted" />
+                    <span>Fervent Database</span>
+                  </Link>
+                  <Link
+                    to="/users"
+                    className="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-primary transition-colors"
+                    onClick={() => setSidebarOpen(false)}
+                  >
+                    <UserCog size={16} className="shrink-0 text-sidebar-muted" />
+                    <span>Users</span>
+                  </Link>
+                </>
+              )}
+
               {/* Regular user navigation */}
-              {!isPlatformAdmin && !isIedup && (
+              {!isPlatformAdmin && !isIedup && !isFervent && (
                 <>
               {/* Dashboards & Reports Section */}
               {showDashboardsSection && (
@@ -338,17 +370,6 @@ function DashboardLayout({ children }: DashboardLayoutProps) {
                 >
                   <Contact size={16} className="shrink-0 text-sidebar-muted" />
                   <span>Contacts</span>
-                </Link>
-              )}
-
-              {canAccessFeature("fervent_data_repository") && (
-                <Link
-                  to="/data-repository"
-                  className="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-primary transition-colors"
-                  onClick={() => setSidebarOpen(false)}
-                >
-                  <List size={16} className="shrink-0 text-sidebar-muted" />
-                  <span>Fervent Database</span>
                 </Link>
               )}
 
