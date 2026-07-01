@@ -314,38 +314,82 @@ export default function FerventRepository() {
                 No records found. Import a CSV to get started.
               </div>
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-10">
-                      <Checkbox checked={selectedIds.length === records.length} onCheckedChange={toggleSelectAll} />
-                    </TableHead>
-                    <TableHead>Full Name</TableHead>
-                    <TableHead>Company</TableHead>
-                    <TableHead>Designation</TableHead>
-                    <TableHead>City</TableHead>
-                    <TableHead>Industry</TableHead>
-                    <TableHead>UCDB Status</TableHead>
-                    <TableHead>DB Year</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {records.map((r) => (
-                    <TableRow key={r.id} className="cursor-pointer hover:bg-muted/50" onClick={() => setSelectedRecord(r)}>
-                      <TableCell onClick={(e) => e.stopPropagation()}>
-                        <Checkbox checked={selectedIds.includes(r.id)} onCheckedChange={() => toggleSelect(r.id)} />
-                      </TableCell>
-                      <TableCell className="font-medium">{r.full_name || "—"}</TableCell>
-                      <TableCell>{r.company_name || "—"}</TableCell>
-                      <TableCell>{r.designation || "—"}</TableCell>
-                      <TableCell>{r.city || "—"}</TableCell>
-                      <TableCell>{r.industry || "—"}</TableCell>
-                      <TableCell>{r.ucdb_status ? <Badge variant="outline">{r.ucdb_status}</Badge> : "—"}</TableCell>
-                      <TableCell>{r.db_sourced_year || "—"}</TableCell>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-10 sticky left-0 bg-card">
+                        <Checkbox checked={selectedIds.length === records.length} onCheckedChange={toggleSelectAll} />
+                      </TableHead>
+                      <TableHead className="whitespace-nowrap">Unique ID</TableHead>
+                      <TableHead className="whitespace-nowrap">DB Sourced Year</TableHead>
+                      <TableHead className="whitespace-nowrap">UCDB Status</TableHead>
+                      <TableHead className="whitespace-nowrap">Company Name</TableHead>
+                      <TableHead className="whitespace-nowrap">Full Name</TableHead>
+                      <TableHead className="whitespace-nowrap">Designation</TableHead>
+                      <TableHead className="whitespace-nowrap">Department</TableHead>
+                      <TableHead className="whitespace-nowrap">Designation Level</TableHead>
+                      <TableHead className="whitespace-nowrap">City</TableHead>
+                      <TableHead className="whitespace-nowrap">State</TableHead>
+                      <TableHead className="whitespace-nowrap">Country</TableHead>
+                      <TableHead className="whitespace-nowrap">ISD Code</TableHead>
+                      <TableHead className="whitespace-nowrap">STD Code</TableHead>
+                      <TableHead className="whitespace-nowrap">Mobile Number 1</TableHead>
+                      <TableHead className="whitespace-nowrap">Mobile Number 2</TableHead>
+                      <TableHead className="whitespace-nowrap">Direct Number</TableHead>
+                      <TableHead className="whitespace-nowrap">Phone Number</TableHead>
+                      <TableHead className="whitespace-nowrap">Official Email</TableHead>
+                      <TableHead className="whitespace-nowrap">Personal Email 1</TableHead>
+                      <TableHead className="whitespace-nowrap">Personal Email 2</TableHead>
+                      <TableHead className="whitespace-nowrap">Contact LinkedIn</TableHead>
+                      <TableHead className="whitespace-nowrap">Domain Name</TableHead>
+                      <TableHead className="whitespace-nowrap">Website</TableHead>
+                      <TableHead className="whitespace-nowrap">Industry</TableHead>
+                      <TableHead className="whitespace-nowrap">Sub Industry</TableHead>
+                      <TableHead className="whitespace-nowrap">Employee Size</TableHead>
+                      <TableHead className="whitespace-nowrap">Turnover</TableHead>
+                      <TableHead className="whitespace-nowrap">Company LinkedIn</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {records.map((r) => (
+                      <TableRow key={r.id} className="cursor-pointer hover:bg-muted/50" onClick={() => setSelectedRecord(r)}>
+                        <TableCell onClick={(e) => e.stopPropagation()} className="sticky left-0 bg-card">
+                          <Checkbox checked={selectedIds.includes(r.id)} onCheckedChange={() => toggleSelect(r.id)} />
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap">{r.unique_id || "—"}</TableCell>
+                        <TableCell className="whitespace-nowrap">{r.db_sourced_year || "—"}</TableCell>
+                        <TableCell className="whitespace-nowrap">{r.ucdb_status ? <Badge variant="outline">{r.ucdb_status}</Badge> : "—"}</TableCell>
+                        <TableCell className="whitespace-nowrap">{r.company_name || "—"}</TableCell>
+                        <TableCell className="whitespace-nowrap font-medium">{r.full_name || "—"}</TableCell>
+                        <TableCell className="whitespace-nowrap">{r.designation || "—"}</TableCell>
+                        <TableCell className="whitespace-nowrap">{r.department || "—"}</TableCell>
+                        <TableCell className="whitespace-nowrap">{r.designation_level || "—"}</TableCell>
+                        <TableCell className="whitespace-nowrap">{r.city || "—"}</TableCell>
+                        <TableCell className="whitespace-nowrap">{r.state || "—"}</TableCell>
+                        <TableCell className="whitespace-nowrap">{r.country || "—"}</TableCell>
+                        <TableCell className="whitespace-nowrap">{r.isd_code || "—"}</TableCell>
+                        <TableCell className="whitespace-nowrap">{r.std_code || "—"}</TableCell>
+                        <TableCell className="whitespace-nowrap">{r.mobile_number_1 || "—"}</TableCell>
+                        <TableCell className="whitespace-nowrap">{r.mobile_number_2 || "—"}</TableCell>
+                        <TableCell className="whitespace-nowrap">{r.direct_number || "—"}</TableCell>
+                        <TableCell className="whitespace-nowrap">{r.phone_number || "—"}</TableCell>
+                        <TableCell className="whitespace-nowrap">{r.official_email || "—"}</TableCell>
+                        <TableCell className="whitespace-nowrap">{r.personal_email_1 || "—"}</TableCell>
+                        <TableCell className="whitespace-nowrap">{r.personal_email_2 || "—"}</TableCell>
+                        <TableCell className="whitespace-nowrap">{r.linkedin_url || "—"}</TableCell>
+                        <TableCell className="whitespace-nowrap">{r.domain_name || "—"}</TableCell>
+                        <TableCell className="whitespace-nowrap">{r.website || "—"}</TableCell>
+                        <TableCell className="whitespace-nowrap">{r.industry || "—"}</TableCell>
+                        <TableCell className="whitespace-nowrap">{r.sub_industry || "—"}</TableCell>
+                        <TableCell className="whitespace-nowrap">{r.employee_size || "—"}</TableCell>
+                        <TableCell className="whitespace-nowrap">{r.turnover || "—"}</TableCell>
+                        <TableCell className="whitespace-nowrap">{r.company_linkedin_url || "—"}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
             )}
           </CardContent>
         </Card>
