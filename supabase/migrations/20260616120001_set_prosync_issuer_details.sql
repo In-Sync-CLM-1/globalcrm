@@ -25,5 +25,8 @@ SET
     'ifsc_code', 'IDFB0022461'
   ),
   updated_at = NOW()
-WHERE name LIKE '%IEDUP%' OR name LIKE '%prosync%' OR name LIKE '%Prosync%'
-LIMIT 1;
+WHERE id = (
+  SELECT id FROM public.organizations
+  WHERE name LIKE '%IEDUP%' OR name LIKE '%prosync%' OR name LIKE '%Prosync%'
+  LIMIT 1
+);
