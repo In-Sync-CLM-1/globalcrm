@@ -67,7 +67,6 @@ export default function Forms() {
     "forms",
     {
       orderBy: { column: "created_at", ascending: false },
-      filter: { connector_type: "manual" },
     }
   );
 
