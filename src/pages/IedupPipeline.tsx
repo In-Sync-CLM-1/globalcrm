@@ -86,8 +86,9 @@ const IEDUP_ACTIONS = [
   "Send WhatsApp - Payment failed",
   "Send WhatsApp - Add help desk number",
   "Send WhatsApp - Photo rejected",
+  "Send WhatsApp - Short Attendance",
+  "Send WhatsApp - Assessment Link",
   "Attendance",
-  "Short Attendance",
 ];
 
 const CSV_TEMPLATE = `name,number,action\nVibhu Dixit,+917607359820,Call\n`;
@@ -270,14 +271,35 @@ export default function IedupPipeline() {
 
       // Resolve the chosen Action to its pipeline stage so the import sets the
       // stage (which fires that stage's automation via the enqueue trigger).
-      const { data: stages } = await supabase
+      const { data: stages, error: stagesError } = await supabase
         .from("pipeline_stages")
         .select("id, name")
         .eq("org_id", IEDUP_ORG_ID)
         .eq("is_active", true);
+      if (stagesError || !stages || stages.length === 0) {
+        throw new Error(
+          "Could not load the Action list. Nothing was imported — please try again.",
+        );
+      }
       const stageMap = new Map(
         (stages || []).map((s: any) => [String(s.name).trim().toLowerCase(), s.id as string]),
       );
+
+      // An action that doesn't match a known Action would import the row with
+      // nothing to send — refuse the whole file so it never fails silently.
+      const unmatched = [
+        ...new Set(
+          uploadRows
+            .map((r) => r.action.trim())
+            .filter((a) => a && !stageMap.has(a.toLowerCase())),
+        ),
+      ];
+      if (unmatched.length > 0) {
+        throw new Error(
+          `Unrecognized Action(s): ${unmatched.join(", ")}. ` +
+            "Fix the Action column (or pick one from the dropdown for each row) and import again. Nothing was imported.",
+        );
+      }
 
       const inserts = uploadRows.map((r) => {
         const parts = r.name_en.trim().split(/\s+/);

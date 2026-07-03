@@ -379,10 +379,11 @@ async function sendWhatsAppTemplate(
 
   const cleanTo = phone.replace(/^\+/, "").replace(/^0+/, "");
 
-  // Only the help-desk template carries a {{1}} name variable; the rest are generic.
-  // Match by prefix so the name is filled across help-desk versions (v1, v2, …).
+  // Help-desk and assessment-link templates carry a {{1}} name variable; the rest
+  // are generic. Match by prefix so the name is filled across versions (v1, v2, …).
   const name = contact.name_hi || contact.first_name || "प्रतिभागी";
-  const params: string[] = (row.template_name || "").startsWith("iedup_cmyuva_training_helpdesk") ? [name] : [];
+  const NAME_PARAM_PREFIXES = ["iedup_cmyuva_training_helpdesk", "iedup_cmyuva_assessment_link"];
+  const params: string[] = NAME_PARAM_PREFIXES.some((p) => (row.template_name || "").startsWith(p)) ? [name] : [];
   const components = params.length > 0
     ? [{ type: "body", parameters: params.map((p) => ({ type: "text", text: p })) }]
     : [];
