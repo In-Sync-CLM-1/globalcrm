@@ -34,13 +34,21 @@ export default function FerventDashboard() {
   const { data: rows = [], isLoading } = useQuery({
     queryKey: ["fervent-dashboard-data"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("fervent_data_repository")
-        .select("id, company_name, industry, designation_level, ucdb_status, city, state, official_email, mobile_number_1, created_at")
-        .eq("org_id", FERVENT_ORG_ID)
-        .range(0, 9999);
-      if (error) throw error;
-      return (data || []) as RepoRow[];
+      const pageSize = 1000;
+      let from = 0;
+      const all: RepoRow[] = [];
+      while (true) {
+        const { data, error } = await supabase
+          .from("fervent_data_repository")
+          .select("id, company_name, industry, designation_level, ucdb_status, city, state, official_email, mobile_number_1, created_at")
+          .eq("org_id", FERVENT_ORG_ID)
+          .range(from, from + pageSize - 1);
+        if (error) throw error;
+        all.push(...((data || []) as RepoRow[]));
+        if (!data || data.length < pageSize) break;
+        from += pageSize;
+      }
+      return all;
     },
   });
 
