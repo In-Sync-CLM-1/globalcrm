@@ -225,6 +225,8 @@ serve(async (req) => {
     let processedRows = 0;
     let successCount = 0;
     let errorCount = 0;
+    let duplicateCount = 0;
+    const duplicateSamples: Array<{ matched_on: string; value: string }> = [];
     const errors: Array<{row?: number; field?: string; message: string; sample?: string}> = [];
     let batch: any[] = [];
     let batchNumber = 0;
@@ -388,11 +390,15 @@ serve(async (req) => {
           
           const result = await processBatch(supabase, importJob, batch, batchNumber);
           successCount += result.inserted;
-          
+
           if (result.skipped > 0) {
             console.log(`[BATCH] Skipped ${result.skipped} duplicate records in batch ${batchNumber}`);
+            duplicateCount += result.skipped;
+            if (result.duplicateSamples) {
+              duplicateSamples.push(...result.duplicateSamples.slice(0, Math.max(0, 200 - duplicateSamples.length)));
+            }
           }
-          
+
           batch = [];
 
           // Update progress after each batch WITH error details for real-time visibility
@@ -401,10 +407,11 @@ serve(async (req) => {
             processed_rows: processedRows,
             success_count: successCount,
             error_count: errorCount,
+            duplicate_count: duplicateCount,
             error_details: errors.slice(-100), // Save last 100 errors in real-time
             current_stage: 'inserting',
             stage_details: {
-              message: `Inserted batch ${batchNumber} (${successCount} records inserted, ${errorCount} errors)`,
+              message: `Inserted batch ${batchNumber} (${successCount} records inserted, ${errorCount} errors, ${duplicateCount} duplicates skipped)`,
               batches_completed: batchNumber,
               total_batches: Math.ceil(totalRows / BATCH_SIZE)
             }
@@ -430,6 +437,12 @@ serve(async (req) => {
       batchNumber++;
       const result = await processBatch(supabase, importJob, batch, batchNumber);
       successCount += result.inserted;
+      if (result.skipped > 0) {
+        duplicateCount += result.skipped;
+        if (result.duplicateSamples) {
+          duplicateSamples.push(...result.duplicateSamples.slice(0, Math.max(0, 200 - duplicateSamples.length)));
+        }
+      }
     }
 
     console.log('[COMPLETE] Processed:', successCount, 'success,', errorCount, 'errors');
@@ -461,6 +474,7 @@ serve(async (req) => {
       processed_rows: processedRows,
       success_count: successCount,
       error_count: errorCount,
+      duplicate_count: duplicateCount,
       error_details: errors.slice(-500), // Store up to 500 errors for better debugging
       completed_at: new Date().toISOString(),
       file_cleaned_up: !deleteError,
@@ -468,7 +482,9 @@ serve(async (req) => {
       stage_details: {
         message: `Import completed in ${duration}s`,
         total_success: successCount,
-        total_errors: errorCount
+        total_errors: errorCount,
+        total_duplicates: duplicateCount,
+        duplicate_samples: duplicateSamples
       }
     }).eq('id', importJobId);
 
@@ -533,17 +549,18 @@ async function updateJobProgress(supabase: any, jobId: string, progress: any) {
 }
 
 async function processBatch(
-  supabase: any, 
-  importJob: ImportJob, 
-  batch: any[], 
+  supabase: any,
+  importJob: ImportJob,
+  batch: any[],
   batchNumber: number
-): Promise<{ inserted: number; skipped: number }> {
+): Promise<{ inserted: number; skipped: number; duplicateSamples?: Array<{ matched_on: string; value: string }> }> {
   console.log('[DB] Inserting batch', batchNumber, 'with', batch.length, 'records');
 
   try {
     let tableName: string;
     let upsertOptions: any = {};
     let skippedCount = 0;
+    const duplicateSamples: Array<{ matched_on: string; value: string }> = [];
 
     if (importJob.import_type === 'contacts') {
       tableName = 'contacts';
@@ -615,39 +632,90 @@ async function processBatch(
     } else if (importJob.import_type === 'fervent_repository') {
       tableName = 'fervent_data_repository';
 
-      // Dedupe by unique_id (the source DB's own record key) when present
+      // Duplicate rule: match on Unique ID first. For rows with no Unique ID
+      // match, fall back to Mobile Number 1, then Official Email, against
+      // both existing records and the rest of this batch.
       const idsToCheck = batch
         .map(r => r.unique_id)
         .filter((id: string | null) => id && String(id).trim() !== '');
+      const mobilesToCheck = batch
+        .map(r => r.mobile_number_1)
+        .filter((v: string | null) => v && String(v).trim() !== '');
+      const emailsToCheck = batch
+        .map(r => (r.official_email ? String(r.official_email).trim().toLowerCase() : null))
+        .filter((v: string | null): v is string => !!v);
 
       let existingIds = new Set<string>();
+      let existingMobiles = new Set<string>();
+      let existingEmails = new Set<string>();
+
       if (idsToCheck.length > 0) {
         const { data: existingByUniqueId } = await supabase
           .from('fervent_data_repository')
           .select('unique_id')
           .eq('org_id', importJob.org_id)
           .in('unique_id', idsToCheck);
-
         existingIds = new Set((existingByUniqueId || []).map((r: any) => r.unique_id));
       }
+      if (mobilesToCheck.length > 0) {
+        const { data: existingByMobile } = await supabase
+          .from('fervent_data_repository')
+          .select('mobile_number_1')
+          .eq('org_id', importJob.org_id)
+          .in('mobile_number_1', mobilesToCheck);
+        existingMobiles = new Set((existingByMobile || []).map((r: any) => r.mobile_number_1));
+      }
+      if (emailsToCheck.length > 0) {
+        const { data: existingByEmail } = await supabase
+          .from('fervent_data_repository')
+          .select('official_email')
+          .eq('org_id', importJob.org_id)
+          .in('official_email', emailsToCheck);
+        existingEmails = new Set((existingByEmail || []).map((r: any) => String(r.official_email).trim().toLowerCase()));
+      }
 
-      const seenInBatch = new Set<string>();
+      const seenIds = new Set<string>();
+      const seenMobiles = new Set<string>();
+      const seenEmails = new Set<string>();
       const originalLength = batch.length;
-      batch = batch.filter(record => {
-        const uniqueId = record.unique_id;
-        if (!uniqueId || String(uniqueId).trim() === '') return true; // allow rows without a unique_id
-        if (existingIds.has(uniqueId) || seenInBatch.has(uniqueId)) return false;
-        seenInBatch.add(uniqueId);
+
+      batch = batch.filter((record: any) => {
+        const uniqueId = record.unique_id && String(record.unique_id).trim() !== '' ? String(record.unique_id) : null;
+        const mobile = record.mobile_number_1 && String(record.mobile_number_1).trim() !== '' ? String(record.mobile_number_1) : null;
+        const email = record.official_email && String(record.official_email).trim() !== '' ? String(record.official_email).trim().toLowerCase() : null;
+
+        if (uniqueId) {
+          if (existingIds.has(uniqueId) || seenIds.has(uniqueId)) {
+            if (duplicateSamples.length < 20) duplicateSamples.push({ matched_on: 'unique_id', value: uniqueId });
+            return false;
+          }
+          seenIds.add(uniqueId);
+        } else {
+          // No Unique ID on this row: fall back to Mobile OR Email — either
+          // one matching an existing record (or another row in this batch)
+          // counts as a duplicate.
+          if (mobile && (existingMobiles.has(mobile) || seenMobiles.has(mobile))) {
+            if (duplicateSamples.length < 20) duplicateSamples.push({ matched_on: 'mobile_number_1', value: mobile });
+            return false;
+          }
+          if (email && (existingEmails.has(email) || seenEmails.has(email))) {
+            if (duplicateSamples.length < 20) duplicateSamples.push({ matched_on: 'official_email', value: email });
+            return false;
+          }
+        }
+
+        if (mobile) seenMobiles.add(mobile);
+        if (email) seenEmails.add(email);
         return true;
       });
 
       skippedCount = originalLength - batch.length;
       if (batch.length === 0) {
         console.log(`[DB] Batch ${batchNumber}: All ${originalLength} records are duplicates, skipping`);
-        return { inserted: 0, skipped: originalLength };
+        return { inserted: 0, skipped: originalLength, duplicateSamples };
       }
       if (skippedCount > 0) {
-        console.log(`[DB] Batch ${batchNumber}: Filtered ${skippedCount} duplicate unique_id records, inserting ${batch.length} records`);
+        console.log(`[DB] Batch ${batchNumber}: Filtered ${skippedCount} duplicate records (unique ID / mobile / email), inserting ${batch.length} records`);
       }
 
       upsertOptions = {};
@@ -666,7 +734,7 @@ async function processBatch(
     }
 
     console.log('[DB] Batch', batchNumber, 'inserted successfully');
-    return { inserted: batch.length, skipped: skippedCount };
+    return { inserted: batch.length, skipped: skippedCount, duplicateSamples };
   } catch (error) {
     console.error('[DB] Batch processing error:', error);
     throw error;

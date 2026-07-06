@@ -5759,6 +5759,7 @@ export type Database = {
           completed_at: string | null
           created_at: string | null
           current_stage: string | null
+          duplicate_count: number | null
           error_count: number | null
           error_details: Json | null
           file_cleaned_up: boolean | null
@@ -5782,6 +5783,7 @@ export type Database = {
           completed_at?: string | null
           created_at?: string | null
           current_stage?: string | null
+          duplicate_count?: number | null
           error_count?: number | null
           error_details?: Json | null
           file_cleaned_up?: boolean | null
@@ -5805,6 +5807,7 @@ export type Database = {
           completed_at?: string | null
           created_at?: string | null
           current_stage?: string | null
+          duplicate_count?: number | null
           error_count?: number | null
           error_details?: Json | null
           file_cleaned_up?: boolean | null
