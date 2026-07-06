@@ -21,9 +21,12 @@ import { exportToCSV } from "@/utils/exportUtils";
 import { FerventBulkUploadDialog } from "@/components/FerventRepository/FerventBulkUploadDialog";
 import { FerventRecordActivity } from "@/components/FerventRepository/FerventRecordActivity";
 import { FerventExportHistory } from "@/components/FerventRepository/FerventExportHistory";
-import { Upload, Download, Search, X, Phone, MessageSquare, GitBranch, Lock, History } from "lucide-react";
+import { FerventImportHistory } from "@/components/FerventRepository/FerventImportHistory";
+import { FerventEditRecordDialog } from "@/components/FerventRepository/FerventEditRecordDialog";
+import { FerventBulkEditDialog } from "@/components/FerventRepository/FerventBulkEditDialog";
+import { Upload, Download, Search, X, Phone, MessageSquare, GitBranch, Lock, History, Pencil } from "lucide-react";
 
-interface RepositoryRecord {
+export interface RepositoryRecord {
   id: string;
   unique_id: string | null;
   db_sourced_year: number | null;
@@ -119,6 +122,9 @@ export default function FerventRepository() {
   const [selectedRecord, setSelectedRecord] = useState<RepositoryRecord | null>(null);
   const [exporting, setExporting] = useState(false);
   const [showExportHistory, setShowExportHistory] = useState(false);
+  const [showImportHistory, setShowImportHistory] = useState(false);
+  const [showBulkEdit, setShowBulkEdit] = useState(false);
+  const [editingRecord, setEditingRecord] = useState<RepositoryRecord | null>(null);
 
   const pagination = usePagination({ defaultPageSize: 25 });
 
@@ -185,30 +191,36 @@ export default function FerventRepository() {
   const handleExport = async () => {
     setExporting(true);
     try {
+      const exportingSelection = selectedIds.length > 0;
       let query = supabase.from("fervent_data_repository").select("*").eq("org_id", effectiveOrgId);
-      if (appliedFilters.search) {
-        const s = escapeOrValue(appliedFilters.search);
-        query = query.or(`full_name.ilike.%${s}%,company_name.ilike.%${s}%`);
+
+      if (exportingSelection) {
+        query = query.in("id", selectedIds);
+      } else {
+        if (appliedFilters.search) {
+          const s = escapeOrValue(appliedFilters.search);
+          query = query.or(`full_name.ilike.%${s}%,company_name.ilike.%${s}%`);
+        }
+        if (appliedFilters.city) query = query.ilike("city", `%${appliedFilters.city}%`);
+        if (appliedFilters.state) query = query.ilike("state", `%${appliedFilters.state}%`);
+        if (appliedFilters.country) query = query.ilike("country", `%${appliedFilters.country}%`);
+        if (appliedFilters.industry) query = query.ilike("industry", `%${appliedFilters.industry}%`);
+        if (appliedFilters.subIndustry) query = query.ilike("sub_industry", `%${appliedFilters.subIndustry}%`);
+        if (appliedFilters.designation) query = query.ilike("designation", `%${appliedFilters.designation}%`);
+        if (appliedFilters.designationLevel) query = query.ilike("designation_level", `%${appliedFilters.designationLevel}%`);
+        if (appliedFilters.department) query = query.ilike("department", `%${appliedFilters.department}%`);
+        if (appliedFilters.dbSourcedYear) query = query.eq("db_sourced_year", parseInt(appliedFilters.dbSourcedYear));
+        if (appliedFilters.ucdbStatus) query = query.ilike("ucdb_status", `%${appliedFilters.ucdbStatus}%`);
+        if (appliedFilters.website) query = query.ilike("website", `%${appliedFilters.website}%`);
+        if (appliedFilters.domainName) query = query.ilike("domain_name", `%${appliedFilters.domainName}%`);
+        if (appliedFilters.employeeSize) query = query.ilike("employee_size", `%${appliedFilters.employeeSize}%`);
+        if (appliedFilters.turnover) query = query.ilike("turnover", `%${appliedFilters.turnover}%`);
       }
-      if (appliedFilters.city) query = query.ilike("city", `%${appliedFilters.city}%`);
-      if (appliedFilters.state) query = query.ilike("state", `%${appliedFilters.state}%`);
-      if (appliedFilters.country) query = query.ilike("country", `%${appliedFilters.country}%`);
-      if (appliedFilters.industry) query = query.ilike("industry", `%${appliedFilters.industry}%`);
-      if (appliedFilters.subIndustry) query = query.ilike("sub_industry", `%${appliedFilters.subIndustry}%`);
-      if (appliedFilters.designation) query = query.ilike("designation", `%${appliedFilters.designation}%`);
-      if (appliedFilters.designationLevel) query = query.ilike("designation_level", `%${appliedFilters.designationLevel}%`);
-      if (appliedFilters.department) query = query.ilike("department", `%${appliedFilters.department}%`);
-      if (appliedFilters.dbSourcedYear) query = query.eq("db_sourced_year", parseInt(appliedFilters.dbSourcedYear));
-      if (appliedFilters.ucdbStatus) query = query.ilike("ucdb_status", `%${appliedFilters.ucdbStatus}%`);
-      if (appliedFilters.website) query = query.ilike("website", `%${appliedFilters.website}%`);
-      if (appliedFilters.domainName) query = query.ilike("domain_name", `%${appliedFilters.domainName}%`);
-      if (appliedFilters.employeeSize) query = query.ilike("employee_size", `%${appliedFilters.employeeSize}%`);
-      if (appliedFilters.turnover) query = query.ilike("turnover", `%${appliedFilters.turnover}%`);
 
       const { data: rows, error } = await query.order("created_at", { ascending: false });
       if (error) throw error;
       if (!rows || rows.length === 0) {
-        notify.error("Nothing to export", "No records match the current filters.");
+        notify.error("Nothing to export", exportingSelection ? "No selected records found." : "No records match the current filters.");
         return;
       }
 
@@ -241,9 +253,9 @@ export default function FerventRepository() {
         { key: "employee_size", label: "Employee Size" },
         { key: "turnover", label: "Turnover" },
         { key: "company_linkedin_url", label: "Company LinkedIn ID" },
-      ], `fervent-database-${new Date().toISOString().slice(0, 10)}.csv`);
+      ], `fervent-database-${exportingSelection ? "selected" : "filtered"}-${new Date().toISOString().slice(0, 10)}.csv`);
 
-      notify.success("Export ready", `${rows.length} record(s) exported.`);
+      notify.success("Export ready", `${rows.length} record(s) exported${exportingSelection ? " (selected rows)" : ""}.`);
 
       const { data: { user } } = await supabase.auth.getUser();
       if (user && effectiveOrgId) {
@@ -252,7 +264,9 @@ export default function FerventRepository() {
           record_id: null,
           actor_id: user.id,
           action: "exported",
-          detail: { count: rows.length, filters: appliedFilters },
+          detail: exportingSelection
+            ? { count: rows.length, filters: { selection: `${rows.length} manually selected record(s)` } }
+            : { count: rows.length, filters: appliedFilters },
         });
       }
     } catch (err: any) {
@@ -293,13 +307,17 @@ export default function FerventRepository() {
             </p>
           </div>
           <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => setShowImportHistory(true)}>
+              <History className="h-4 w-4 mr-2" />
+              Import History
+            </Button>
             <Button variant="outline" size="sm" onClick={() => setShowExportHistory(true)}>
               <History className="h-4 w-4 mr-2" />
               Export History
             </Button>
             <Button variant="outline" size="sm" onClick={handleExport} disabled={exporting}>
               <Download className="h-4 w-4 mr-2" />
-              {exporting ? "Exporting..." : "Export"}
+              {exporting ? "Exporting..." : selectedIds.length > 0 ? `Export Selected (${selectedIds.length})` : "Export"}
             </Button>
             <Button size="sm" onClick={() => setShowUpload(true)}>
               <Upload className="h-4 w-4 mr-2" />
@@ -344,6 +362,10 @@ export default function FerventRepository() {
         {selectedIds.length > 0 && (
           <div className="flex items-center gap-2">
             <span className="text-sm text-muted-foreground">{selectedIds.length} selected</span>
+            <Button variant="outline" size="sm" onClick={() => setShowBulkEdit(true)}>
+              <Pencil className="h-3.5 w-3.5 mr-1.5" />
+              Bulk Edit
+            </Button>
             <BulkDeleteButton
               selectedIds={selectedIds}
               tableName="fervent_data_repository"
@@ -473,6 +495,10 @@ export default function FerventRepository() {
           {selectedRecord && (
             <div className="space-y-4">
               <div className="flex flex-wrap gap-2 p-3 bg-muted/50 rounded-lg">
+                <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setEditingRecord(selectedRecord)}>
+                  <Pencil className="h-3.5 w-3.5" />
+                  Edit
+                </Button>
                 <DisabledAction icon={Phone} label="Call" />
                 <DisabledAction icon={MessageSquare} label="WhatsApp" />
                 <DisabledAction icon={GitBranch} label="Add to Pipeline" />
@@ -531,6 +557,37 @@ export default function FerventRepository() {
         onOpenChange={setShowExportHistory}
         orgId={effectiveOrgId || ""}
       />
+
+      <FerventImportHistory
+        open={showImportHistory}
+        onOpenChange={setShowImportHistory}
+        orgId={effectiveOrgId || ""}
+      />
+
+      <FerventBulkEditDialog
+        open={showBulkEdit}
+        onOpenChange={setShowBulkEdit}
+        selectedIds={selectedIds}
+        orgId={effectiveOrgId || ""}
+        onSaved={() => {
+          setSelectedIds([]);
+          queryClient.invalidateQueries({ queryKey: ["fervent-repository"] });
+        }}
+      />
+
+      {editingRecord && (
+        <FerventEditRecordDialog
+          open={!!editingRecord}
+          onOpenChange={(open) => !open && setEditingRecord(null)}
+          record={editingRecord}
+          orgId={effectiveOrgId || ""}
+          onSaved={(updated) => {
+            setSelectedRecord(updated);
+            queryClient.invalidateQueries({ queryKey: ["fervent-repository"] });
+            queryClient.invalidateQueries({ queryKey: ["fervent-record-activity", updated.id] });
+          }}
+        />
+      )}
     </DashboardLayout>
   );
 }
