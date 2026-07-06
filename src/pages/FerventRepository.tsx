@@ -24,6 +24,15 @@ import { FerventExportHistory } from "@/components/FerventRepository/FerventExpo
 import { FerventImportHistory } from "@/components/FerventRepository/FerventImportHistory";
 import { FerventEditRecordDialog } from "@/components/FerventRepository/FerventEditRecordDialog";
 import { FerventBulkEditDialog } from "@/components/FerventRepository/FerventBulkEditDialog";
+import { FerventAdvancedSearch } from "@/components/FerventRepository/FerventAdvancedSearch";
+import { FerventSavedSearches } from "@/components/FerventRepository/FerventSavedSearches";
+import {
+  applyBooleanQuery,
+  emptyBooleanQuery,
+  isBooleanQueryEmpty,
+  type BooleanQuery,
+  type SavedSearchDefinition,
+} from "@/components/FerventRepository/ferventBooleanSearch";
 import { Upload, Download, Search, X, Phone, MessageSquare, GitBranch, Lock, History, Pencil } from "lucide-react";
 
 export interface RepositoryRecord {
@@ -125,11 +134,14 @@ export default function FerventRepository() {
   const [showImportHistory, setShowImportHistory] = useState(false);
   const [showBulkEdit, setShowBulkEdit] = useState(false);
   const [editingRecord, setEditingRecord] = useState<RepositoryRecord | null>(null);
+  const [searchMode, setSearchMode] = useState<"basic" | "advanced">("basic");
+  const [advancedQuery, setAdvancedQuery] = useState<BooleanQuery>(emptyBooleanQuery);
+  const [appliedAdvancedQuery, setAppliedAdvancedQuery] = useState<BooleanQuery | null>(null);
 
   const pagination = usePagination({ defaultPageSize: 25 });
 
   const { data, isLoading } = useQuery({
-    queryKey: ["fervent-repository", effectiveOrgId, pagination.currentPage, pagination.pageSize, appliedFilters],
+    queryKey: ["fervent-repository", effectiveOrgId, pagination.currentPage, pagination.pageSize, appliedFilters, appliedAdvancedQuery],
     queryFn: async () => {
       const offset = (pagination.currentPage - 1) * pagination.pageSize;
       let query = supabase
@@ -137,24 +149,28 @@ export default function FerventRepository() {
         .select("*", { count: "exact" })
         .eq("org_id", effectiveOrgId);
 
-      if (appliedFilters.search) {
-        const s = escapeOrValue(appliedFilters.search);
-        query = query.or(`full_name.ilike.%${s}%,company_name.ilike.%${s}%`);
+      if (appliedAdvancedQuery) {
+        query = applyBooleanQuery(query, appliedAdvancedQuery);
+      } else {
+        if (appliedFilters.search) {
+          const s = escapeOrValue(appliedFilters.search);
+          query = query.or(`full_name.ilike.%${s}%,company_name.ilike.%${s}%`);
+        }
+        if (appliedFilters.city) query = query.ilike("city", `%${appliedFilters.city}%`);
+        if (appliedFilters.state) query = query.ilike("state", `%${appliedFilters.state}%`);
+        if (appliedFilters.country) query = query.ilike("country", `%${appliedFilters.country}%`);
+        if (appliedFilters.industry) query = query.ilike("industry", `%${appliedFilters.industry}%`);
+        if (appliedFilters.subIndustry) query = query.ilike("sub_industry", `%${appliedFilters.subIndustry}%`);
+        if (appliedFilters.designation) query = query.ilike("designation", `%${appliedFilters.designation}%`);
+        if (appliedFilters.designationLevel) query = query.ilike("designation_level", `%${appliedFilters.designationLevel}%`);
+        if (appliedFilters.department) query = query.ilike("department", `%${appliedFilters.department}%`);
+        if (appliedFilters.dbSourcedYear) query = query.eq("db_sourced_year", parseInt(appliedFilters.dbSourcedYear));
+        if (appliedFilters.ucdbStatus) query = query.ilike("ucdb_status", `%${appliedFilters.ucdbStatus}%`);
+        if (appliedFilters.website) query = query.ilike("website", `%${appliedFilters.website}%`);
+        if (appliedFilters.domainName) query = query.ilike("domain_name", `%${appliedFilters.domainName}%`);
+        if (appliedFilters.employeeSize) query = query.ilike("employee_size", `%${appliedFilters.employeeSize}%`);
+        if (appliedFilters.turnover) query = query.ilike("turnover", `%${appliedFilters.turnover}%`);
       }
-      if (appliedFilters.city) query = query.ilike("city", `%${appliedFilters.city}%`);
-      if (appliedFilters.state) query = query.ilike("state", `%${appliedFilters.state}%`);
-      if (appliedFilters.country) query = query.ilike("country", `%${appliedFilters.country}%`);
-      if (appliedFilters.industry) query = query.ilike("industry", `%${appliedFilters.industry}%`);
-      if (appliedFilters.subIndustry) query = query.ilike("sub_industry", `%${appliedFilters.subIndustry}%`);
-      if (appliedFilters.designation) query = query.ilike("designation", `%${appliedFilters.designation}%`);
-      if (appliedFilters.designationLevel) query = query.ilike("designation_level", `%${appliedFilters.designationLevel}%`);
-      if (appliedFilters.department) query = query.ilike("department", `%${appliedFilters.department}%`);
-      if (appliedFilters.dbSourcedYear) query = query.eq("db_sourced_year", parseInt(appliedFilters.dbSourcedYear));
-      if (appliedFilters.ucdbStatus) query = query.ilike("ucdb_status", `%${appliedFilters.ucdbStatus}%`);
-      if (appliedFilters.website) query = query.ilike("website", `%${appliedFilters.website}%`);
-      if (appliedFilters.domainName) query = query.ilike("domain_name", `%${appliedFilters.domainName}%`);
-      if (appliedFilters.employeeSize) query = query.ilike("employee_size", `%${appliedFilters.employeeSize}%`);
-      if (appliedFilters.turnover) query = query.ilike("turnover", `%${appliedFilters.turnover}%`);
 
       const { data, error, count } = await query
         .order("created_at", { ascending: false })
@@ -171,14 +187,46 @@ export default function FerventRepository() {
 
   const applyFilters = () => {
     setAppliedFilters(filters);
+    setAppliedAdvancedQuery(null);
     pagination.setPage(1);
   };
 
   const clearFilters = () => {
     setFilters(emptyFilters);
     setAppliedFilters(emptyFilters);
+    setAppliedAdvancedQuery(null);
     pagination.setPage(1);
   };
+
+  const applyAdvancedSearch = () => {
+    if (isBooleanQueryEmpty(advancedQuery)) return;
+    setAppliedAdvancedQuery(advancedQuery);
+    pagination.setPage(1);
+  };
+
+  const clearAdvancedSearch = () => {
+    setAdvancedQuery(emptyBooleanQuery);
+    setAppliedAdvancedQuery(null);
+    pagination.setPage(1);
+  };
+
+  const loadSavedSearch = (definition: SavedSearchDefinition) => {
+    if (definition.mode === "advanced") {
+      setSearchMode("advanced");
+      setAdvancedQuery(definition.query);
+      setAppliedAdvancedQuery(isBooleanQueryEmpty(definition.query) ? null : definition.query);
+    } else {
+      setSearchMode("basic");
+      const loaded = { ...emptyFilters, ...definition.filters } as RepositoryFilters;
+      setFilters(loaded);
+      setAppliedFilters(loaded);
+      setAppliedAdvancedQuery(null);
+    }
+    pagination.setPage(1);
+  };
+
+  const currentSavedSearchDefinition: SavedSearchDefinition =
+    searchMode === "advanced" ? { mode: "advanced", query: advancedQuery } : { mode: "basic", filters };
 
   const toggleSelectAll = () => {
     setSelectedIds(selectedIds.length === records.length ? [] : records.map((r) => r.id));
@@ -196,6 +244,8 @@ export default function FerventRepository() {
 
       if (exportingSelection) {
         query = query.in("id", selectedIds);
+      } else if (appliedAdvancedQuery) {
+        query = applyBooleanQuery(query, appliedAdvancedQuery);
       } else {
         if (appliedFilters.search) {
           const s = escapeOrValue(appliedFilters.search);
@@ -266,7 +316,9 @@ export default function FerventRepository() {
           action: "exported",
           detail: exportingSelection
             ? { count: rows.length, filters: { selection: `${rows.length} manually selected record(s)` } }
-            : { count: rows.length, filters: appliedFilters },
+            : appliedAdvancedQuery
+              ? { count: rows.length, filters: { advanced: JSON.stringify(appliedAdvancedQuery) } }
+              : { count: rows.length, filters: appliedFilters },
         });
       }
     } catch (err: any) {
@@ -307,6 +359,11 @@ export default function FerventRepository() {
             </p>
           </div>
           <div className="flex gap-2">
+            <FerventSavedSearches
+              orgId={effectiveOrgId || ""}
+              currentDefinition={currentSavedSearchDefinition}
+              onLoad={loadSavedSearch}
+            />
             <Button variant="outline" size="sm" onClick={() => setShowImportHistory(true)}>
               <History className="h-4 w-4 mr-2" />
               Import History
@@ -328,34 +385,63 @@ export default function FerventRepository() {
 
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <Search className="h-4 w-4" /> Filters
-            </CardTitle>
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                <Search className="h-4 w-4" /> {searchMode === "advanced" ? "Advanced Search" : "Filters"}
+              </CardTitle>
+              <div className="flex gap-1">
+                <Button
+                  size="sm"
+                  variant={searchMode === "basic" ? "secondary" : "ghost"}
+                  onClick={() => setSearchMode("basic")}
+                >
+                  Filters
+                </Button>
+                <Button
+                  size="sm"
+                  variant={searchMode === "advanced" ? "secondary" : "ghost"}
+                  onClick={() => setSearchMode("advanced")}
+                >
+                  Advanced Search
+                </Button>
+              </div>
+            </div>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <Input placeholder="Name or company" value={filters.search} onChange={(e) => setFilters({ ...filters, search: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
-              <Input placeholder="City" value={filters.city} onChange={(e) => setFilters({ ...filters, city: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
-              <Input placeholder="State" value={filters.state} onChange={(e) => setFilters({ ...filters, state: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
-              <Input placeholder="Country" value={filters.country} onChange={(e) => setFilters({ ...filters, country: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
-              <Input placeholder="Industry" value={filters.industry} onChange={(e) => setFilters({ ...filters, industry: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
-              <Input placeholder="Sub Industry" value={filters.subIndustry} onChange={(e) => setFilters({ ...filters, subIndustry: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
-              <Input placeholder="Designation" value={filters.designation} onChange={(e) => setFilters({ ...filters, designation: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
-              <Input placeholder="Designation Level" value={filters.designationLevel} onChange={(e) => setFilters({ ...filters, designationLevel: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
-              <Input placeholder="Department" value={filters.department} onChange={(e) => setFilters({ ...filters, department: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
-              <Input placeholder="DB Sourced Year" type="number" value={filters.dbSourcedYear} onChange={(e) => setFilters({ ...filters, dbSourcedYear: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
-              <Input placeholder="UCDB Status" value={filters.ucdbStatus} onChange={(e) => setFilters({ ...filters, ucdbStatus: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
-              <Input placeholder="Website" value={filters.website} onChange={(e) => setFilters({ ...filters, website: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
-              <Input placeholder="Domain Name" value={filters.domainName} onChange={(e) => setFilters({ ...filters, domainName: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
-              <Input placeholder="Employee Size" value={filters.employeeSize} onChange={(e) => setFilters({ ...filters, employeeSize: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
-              <Input placeholder="Turnover" value={filters.turnover} onChange={(e) => setFilters({ ...filters, turnover: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
-            </div>
-            <div className="flex gap-2 mt-3">
-              <Button size="sm" onClick={applyFilters}>Apply Filters</Button>
-              <Button size="sm" variant="ghost" onClick={clearFilters}>
-                <X className="h-3.5 w-3.5 mr-1" /> Clear
-              </Button>
-            </div>
+            {searchMode === "advanced" ? (
+              <FerventAdvancedSearch
+                query={advancedQuery}
+                onChange={setAdvancedQuery}
+                onApply={applyAdvancedSearch}
+                onClear={clearAdvancedSearch}
+              />
+            ) : (
+              <>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <Input placeholder="Name or company" value={filters.search} onChange={(e) => setFilters({ ...filters, search: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
+                  <Input placeholder="City" value={filters.city} onChange={(e) => setFilters({ ...filters, city: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
+                  <Input placeholder="State" value={filters.state} onChange={(e) => setFilters({ ...filters, state: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
+                  <Input placeholder="Country" value={filters.country} onChange={(e) => setFilters({ ...filters, country: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
+                  <Input placeholder="Industry" value={filters.industry} onChange={(e) => setFilters({ ...filters, industry: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
+                  <Input placeholder="Sub Industry" value={filters.subIndustry} onChange={(e) => setFilters({ ...filters, subIndustry: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
+                  <Input placeholder="Designation" value={filters.designation} onChange={(e) => setFilters({ ...filters, designation: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
+                  <Input placeholder="Designation Level" value={filters.designationLevel} onChange={(e) => setFilters({ ...filters, designationLevel: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
+                  <Input placeholder="Department" value={filters.department} onChange={(e) => setFilters({ ...filters, department: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
+                  <Input placeholder="DB Sourced Year" type="number" value={filters.dbSourcedYear} onChange={(e) => setFilters({ ...filters, dbSourcedYear: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
+                  <Input placeholder="UCDB Status" value={filters.ucdbStatus} onChange={(e) => setFilters({ ...filters, ucdbStatus: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
+                  <Input placeholder="Website" value={filters.website} onChange={(e) => setFilters({ ...filters, website: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
+                  <Input placeholder="Domain Name" value={filters.domainName} onChange={(e) => setFilters({ ...filters, domainName: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
+                  <Input placeholder="Employee Size" value={filters.employeeSize} onChange={(e) => setFilters({ ...filters, employeeSize: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
+                  <Input placeholder="Turnover" value={filters.turnover} onChange={(e) => setFilters({ ...filters, turnover: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
+                </div>
+                <div className="flex gap-2 mt-3">
+                  <Button size="sm" onClick={applyFilters}>Apply Filters</Button>
+                  <Button size="sm" variant="ghost" onClick={clearFilters}>
+                    <X className="h-3.5 w-3.5 mr-1" /> Clear
+                  </Button>
+                </div>
+              </>
+            )}
           </CardContent>
         </Card>
 
