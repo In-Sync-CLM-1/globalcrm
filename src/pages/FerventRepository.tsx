@@ -19,7 +19,9 @@ import PaginationControls from "@/components/common/PaginationControls";
 import { BulkDeleteButton } from "@/components/common/BulkDeleteButton";
 import { exportToCSV } from "@/utils/exportUtils";
 import { FerventBulkUploadDialog } from "@/components/FerventRepository/FerventBulkUploadDialog";
-import { Upload, Download, Search, X, Phone, MessageSquare, GitBranch, Lock } from "lucide-react";
+import { FerventRecordActivity } from "@/components/FerventRepository/FerventRecordActivity";
+import { FerventExportHistory } from "@/components/FerventRepository/FerventExportHistory";
+import { Upload, Download, Search, X, Phone, MessageSquare, GitBranch, Lock, History } from "lucide-react";
 
 interface RepositoryRecord {
   id: string;
@@ -51,6 +53,7 @@ interface RepositoryRecord {
   employee_size: string | null;
   turnover: string | null;
   company_linkedin_url: string | null;
+  import_job_id: string | null;
   created_at: string;
 }
 
@@ -115,6 +118,7 @@ export default function FerventRepository() {
   const [showUpload, setShowUpload] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState<RepositoryRecord | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [showExportHistory, setShowExportHistory] = useState(false);
 
   const pagination = usePagination({ defaultPageSize: 25 });
 
@@ -240,6 +244,17 @@ export default function FerventRepository() {
       ], `fervent-database-${new Date().toISOString().slice(0, 10)}.csv`);
 
       notify.success("Export ready", `${rows.length} record(s) exported.`);
+
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user && effectiveOrgId) {
+        await supabase.from("fervent_activity_log").insert({
+          org_id: effectiveOrgId,
+          record_id: null,
+          actor_id: user.id,
+          action: "exported",
+          detail: { count: rows.length, filters: appliedFilters },
+        });
+      }
     } catch (err: any) {
       notify.error("Export failed", err.message);
     } finally {
@@ -278,6 +293,10 @@ export default function FerventRepository() {
             </p>
           </div>
           <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => setShowExportHistory(true)}>
+              <History className="h-4 w-4 mr-2" />
+              Export History
+            </Button>
             <Button variant="outline" size="sm" onClick={handleExport} disabled={exporting}>
               <Download className="h-4 w-4 mr-2" />
               {exporting ? "Exporting..." : "Export"}
@@ -495,10 +514,23 @@ export default function FerventRepository() {
                   </div>
                 ))}
               </div>
+
+              <FerventRecordActivity
+                recordId={selectedRecord.id}
+                orgId={effectiveOrgId || ""}
+                importJobId={selectedRecord.import_job_id}
+                fallbackCreatedAt={selectedRecord.created_at}
+              />
             </div>
           )}
         </DialogContent>
       </Dialog>
+
+      <FerventExportHistory
+        open={showExportHistory}
+        onOpenChange={setShowExportHistory}
+        orgId={effectiveOrgId || ""}
+      />
     </DashboardLayout>
   );
 }
