@@ -61,16 +61,28 @@ interface RepositoryFilters {
   country: string;
   industry: string;
   subIndustry: string;
+  designation: string;
   designationLevel: string;
   department: string;
   dbSourcedYear: string;
   ucdbStatus: string;
+  website: string;
+  domainName: string;
+  employeeSize: string;
+  turnover: string;
 }
 
 const emptyFilters: RepositoryFilters = {
   search: "", city: "", state: "", country: "", industry: "",
-  subIndustry: "", designationLevel: "", department: "", dbSourcedYear: "", ucdbStatus: "",
+  subIndustry: "", designation: "", designationLevel: "", department: "", dbSourcedYear: "", ucdbStatus: "",
+  website: "", domainName: "", employeeSize: "", turnover: "",
 };
+
+// PostgREST's .or() splits on unescaped commas/parens, so a raw search value
+// like "Smith, Jones & Co" would otherwise be parsed as extra filter clauses.
+function escapeOrValue(value: string): string {
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
 
 function DisabledAction({ icon: Icon, label }: { icon: any; label: string }) {
   return (
@@ -116,17 +128,23 @@ export default function FerventRepository() {
         .eq("org_id", effectiveOrgId);
 
       if (appliedFilters.search) {
-        query = query.or(`full_name.ilike.%${appliedFilters.search}%,company_name.ilike.%${appliedFilters.search}%`);
+        const s = escapeOrValue(appliedFilters.search);
+        query = query.or(`full_name.ilike.%${s}%,company_name.ilike.%${s}%`);
       }
       if (appliedFilters.city) query = query.ilike("city", `%${appliedFilters.city}%`);
       if (appliedFilters.state) query = query.ilike("state", `%${appliedFilters.state}%`);
       if (appliedFilters.country) query = query.ilike("country", `%${appliedFilters.country}%`);
       if (appliedFilters.industry) query = query.ilike("industry", `%${appliedFilters.industry}%`);
       if (appliedFilters.subIndustry) query = query.ilike("sub_industry", `%${appliedFilters.subIndustry}%`);
+      if (appliedFilters.designation) query = query.ilike("designation", `%${appliedFilters.designation}%`);
       if (appliedFilters.designationLevel) query = query.ilike("designation_level", `%${appliedFilters.designationLevel}%`);
       if (appliedFilters.department) query = query.ilike("department", `%${appliedFilters.department}%`);
       if (appliedFilters.dbSourcedYear) query = query.eq("db_sourced_year", parseInt(appliedFilters.dbSourcedYear));
       if (appliedFilters.ucdbStatus) query = query.ilike("ucdb_status", `%${appliedFilters.ucdbStatus}%`);
+      if (appliedFilters.website) query = query.ilike("website", `%${appliedFilters.website}%`);
+      if (appliedFilters.domainName) query = query.ilike("domain_name", `%${appliedFilters.domainName}%`);
+      if (appliedFilters.employeeSize) query = query.ilike("employee_size", `%${appliedFilters.employeeSize}%`);
+      if (appliedFilters.turnover) query = query.ilike("turnover", `%${appliedFilters.turnover}%`);
 
       const { data, error, count } = await query
         .order("created_at", { ascending: false })
@@ -164,16 +182,24 @@ export default function FerventRepository() {
     setExporting(true);
     try {
       let query = supabase.from("fervent_data_repository").select("*").eq("org_id", effectiveOrgId);
-      if (appliedFilters.search) query = query.or(`full_name.ilike.%${appliedFilters.search}%,company_name.ilike.%${appliedFilters.search}%`);
+      if (appliedFilters.search) {
+        const s = escapeOrValue(appliedFilters.search);
+        query = query.or(`full_name.ilike.%${s}%,company_name.ilike.%${s}%`);
+      }
       if (appliedFilters.city) query = query.ilike("city", `%${appliedFilters.city}%`);
       if (appliedFilters.state) query = query.ilike("state", `%${appliedFilters.state}%`);
       if (appliedFilters.country) query = query.ilike("country", `%${appliedFilters.country}%`);
       if (appliedFilters.industry) query = query.ilike("industry", `%${appliedFilters.industry}%`);
       if (appliedFilters.subIndustry) query = query.ilike("sub_industry", `%${appliedFilters.subIndustry}%`);
+      if (appliedFilters.designation) query = query.ilike("designation", `%${appliedFilters.designation}%`);
       if (appliedFilters.designationLevel) query = query.ilike("designation_level", `%${appliedFilters.designationLevel}%`);
       if (appliedFilters.department) query = query.ilike("department", `%${appliedFilters.department}%`);
       if (appliedFilters.dbSourcedYear) query = query.eq("db_sourced_year", parseInt(appliedFilters.dbSourcedYear));
       if (appliedFilters.ucdbStatus) query = query.ilike("ucdb_status", `%${appliedFilters.ucdbStatus}%`);
+      if (appliedFilters.website) query = query.ilike("website", `%${appliedFilters.website}%`);
+      if (appliedFilters.domainName) query = query.ilike("domain_name", `%${appliedFilters.domainName}%`);
+      if (appliedFilters.employeeSize) query = query.ilike("employee_size", `%${appliedFilters.employeeSize}%`);
+      if (appliedFilters.turnover) query = query.ilike("turnover", `%${appliedFilters.turnover}%`);
 
       const { data: rows, error } = await query.order("created_at", { ascending: false });
       if (error) throw error;
@@ -277,10 +303,15 @@ export default function FerventRepository() {
               <Input placeholder="Country" value={filters.country} onChange={(e) => setFilters({ ...filters, country: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
               <Input placeholder="Industry" value={filters.industry} onChange={(e) => setFilters({ ...filters, industry: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
               <Input placeholder="Sub Industry" value={filters.subIndustry} onChange={(e) => setFilters({ ...filters, subIndustry: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
+              <Input placeholder="Designation" value={filters.designation} onChange={(e) => setFilters({ ...filters, designation: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
               <Input placeholder="Designation Level" value={filters.designationLevel} onChange={(e) => setFilters({ ...filters, designationLevel: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
               <Input placeholder="Department" value={filters.department} onChange={(e) => setFilters({ ...filters, department: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
               <Input placeholder="DB Sourced Year" type="number" value={filters.dbSourcedYear} onChange={(e) => setFilters({ ...filters, dbSourcedYear: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
               <Input placeholder="UCDB Status" value={filters.ucdbStatus} onChange={(e) => setFilters({ ...filters, ucdbStatus: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
+              <Input placeholder="Website" value={filters.website} onChange={(e) => setFilters({ ...filters, website: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
+              <Input placeholder="Domain Name" value={filters.domainName} onChange={(e) => setFilters({ ...filters, domainName: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
+              <Input placeholder="Employee Size" value={filters.employeeSize} onChange={(e) => setFilters({ ...filters, employeeSize: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
+              <Input placeholder="Turnover" value={filters.turnover} onChange={(e) => setFilters({ ...filters, turnover: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
             </div>
             <div className="flex gap-2 mt-3">
               <Button size="sm" onClick={applyFilters}>Apply Filters</Button>
@@ -315,8 +346,8 @@ export default function FerventRepository() {
               </div>
             ) : (
               <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
+                <Table stickyHeader>
+                  <TableHeader sticky>
                     <TableRow>
                       <TableHead className="w-10 sticky left-0 bg-card">
                         <Checkbox checked={selectedIds.length === records.length} onCheckedChange={toggleSelectAll} />
