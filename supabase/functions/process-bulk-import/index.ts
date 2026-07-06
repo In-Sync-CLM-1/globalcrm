@@ -349,7 +349,8 @@ serve(async (req) => {
             employee_size: row.employee_size || null,
             turnover: row.turnover || null,
             company_linkedin_url: row.company_linkedin_id || row.company_linkedin_url || null,
-            created_by: importJob.user_id
+            created_by: importJob.user_id,
+            import_job_id: importJob.id
           };
         }
 

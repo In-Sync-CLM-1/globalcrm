@@ -5404,6 +5404,7 @@ export type Database = {
           first_name: string | null
           full_name: string | null
           id: string
+          import_job_id: string | null
           industry: string | null
           isd_code: string | null
           last_name: string | null
@@ -5442,6 +5443,7 @@ export type Database = {
           first_name?: string | null
           full_name?: string | null
           id?: string
+          import_job_id?: string | null
           industry?: string | null
           isd_code?: string | null
           last_name?: string | null
@@ -5480,6 +5482,7 @@ export type Database = {
           first_name?: string | null
           full_name?: string | null
           id?: string
+          import_job_id?: string | null
           industry?: string | null
           isd_code?: string | null
           last_name?: string | null
@@ -5507,6 +5510,65 @@ export type Database = {
             columns: ["org_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fervent_data_repository_import_job_id_fkey"
+            columns: ["import_job_id"]
+            isOneToOne: false
+            referencedRelation: "import_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      fervent_activity_log: {
+        Row: {
+          action: string
+          actor_id: string | null
+          created_at: string | null
+          detail: Json | null
+          id: string
+          org_id: string
+          record_id: string | null
+        }
+        Insert: {
+          action: string
+          actor_id?: string | null
+          created_at?: string | null
+          detail?: Json | null
+          id?: string
+          org_id: string
+          record_id?: string | null
+        }
+        Update: {
+          action?: string
+          actor_id?: string | null
+          created_at?: string | null
+          detail?: Json | null
+          id?: string
+          org_id?: string
+          record_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fervent_activity_log_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fervent_activity_log_record_id_fkey"
+            columns: ["record_id"]
+            isOneToOne: false
+            referencedRelation: "fervent_data_repository"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fervent_activity_log_actor_id_fkey"
+            columns: ["actor_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]
