@@ -15,17 +15,25 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { format, startOfMonth, subMonths } from "date-fns";
 import { Database, Building2, Mail, Phone, TrendingUp, ArrowRight, SlidersHorizontal, Download, X, UserX, Users } from "lucide-react";
+import * as echarts from "echarts";
 import { useIsFervent, FERVENT_ORG_ID } from "@/hooks/useIsFervent";
 import { EChart } from "@/components/charts/EChart";
 import { getFerventChartTheme } from "@/components/FerventDashboard/ferventChartTheme";
 import { exportToCSV } from "@/utils/exportUtils";
+import indiaGeo from "@/assets/indiaMap.json";
+import { CITY_COORDS, canonicalCity } from "@/components/FerventDashboard/indiaCityCoords";
 import {
   buildTrendOption,
   buildIndustryTreemapOption,
   buildDesignationDonutOption,
   buildRankedBarOption,
   buildStatusSegmentOption,
+  buildDailyActivityHeatmapOption,
+  buildCityGeoMapOption,
+  UNSPECIFIED,
 } from "@/components/FerventDashboard/ferventChartOptions";
+
+echarts.registerMap("India", indiaGeo as any);
 
 interface RepoRow {
   id: string;
@@ -61,8 +69,6 @@ const emptyFilters: FilterState = {
   dateFrom: "", dateTo: "", industry: "all", designationLevel: "all",
   designation: "all", city: "all", state: "all", source: "all",
 };
-
-const UNSPECIFIED = "Unspecified";
 
 function normalizeKey(raw: string | null): string {
   return (typeof raw === "string" ? raw.trim() : "") || UNSPECIFIED;
@@ -180,6 +186,24 @@ export default function FerventDashboard() {
   const byEmployeeSize = useMemo(() => groupBy(filteredRows, "employee_size"), [filteredRows]);
   const byCompany = useMemo(() => groupBy(filteredRows, "company_name"), [filteredRows]);
 
+  // City -> map bubble. Rows whose city has no known coordinates (or is
+  // blank/"online") don't get a bubble but still count everywhere else.
+  const { cityMapPoints, unmappedCityCount } = useMemo(() => {
+    const counts = new Map<string, number>();
+    let unmapped = 0;
+    filteredRows.forEach((r) => {
+      const key = canonicalCity(r.city);
+      if (!key || !CITY_COORDS[key]) { unmapped++; return; }
+      counts.set(key, (counts.get(key) || 0) + 1);
+    });
+    const points = Array.from(counts.entries()).map(([key, count]) => ({
+      name: key.replace(/\b\w/g, (c) => c.toUpperCase()),
+      coords: CITY_COORDS[key],
+      count,
+    }));
+    return { cityMapPoints: points, unmappedCityCount: unmapped };
+  }, [filteredRows]);
+
   const missingBuckets = useMemo(() => {
     const both = filteredRows.filter((r) => !hasEmail(r) && !hasMobile(r));
     const emailOnly = filteredRows.filter((r) => !hasEmail(r) && hasMobile(r));
@@ -212,21 +236,41 @@ export default function FerventDashboard() {
     return m;
   }, [monthlyTrend]);
 
+  // Daily activity heatmap — last 3 full months, so the calendar grid stays a
+  // compact 3-row block rather than sprawling across a year.
+  const activityRange = useMemo((): [string, string] => {
+    const start = startOfMonth(subMonths(new Date(), 2));
+    return [format(start, "yyyy-MM-dd"), format(new Date(), "yyyy-MM-dd")];
+  }, []);
+
+  const dailyActivity = useMemo(() => {
+    const m = new Map<string, number>();
+    filteredRows.forEach((r) => {
+      const key = format(new Date(r.created_at), "yyyy-MM-dd");
+      m.set(key, (m.get(key) || 0) + 1);
+    });
+    return Array.from(m.entries()).map(([date, count]) => ({ date, count }));
+  }, [filteredRows]);
+
   const trendOption = useMemo(() => buildTrendOption(monthlyTrend, theme), [monthlyTrend, theme]);
   const industryOption = useMemo(() => buildIndustryTreemapOption(byIndustry, theme), [byIndustry, theme]);
   const designationLevelOption = useMemo(() => buildDesignationDonutOption(byDesignationLevel, theme), [byDesignationLevel, theme]);
-  const statesOption = useMemo(() => buildRankedBarOption(byState, theme, { topN: 8 }), [byState, theme]);
-  const cityOption = useMemo(() => buildRankedBarOption(byCity, theme, { topN: 8, color: theme.sequential[2] }), [byCity, theme]);
+  const statesOption = useMemo(() => buildRankedBarOption(byState, theme, { topN: 8, color: theme.categorical[4] }), [byState, theme]);
+  const mapOption = useMemo(() => buildCityGeoMapOption(cityMapPoints, theme), [cityMapPoints, theme]);
   const designationOption = useMemo(
-    () => buildRankedBarOption(byDesignation, theme, { topN: 10, color: theme.categorical[0], labelWidth: 120 }),
+    () => buildRankedBarOption(byDesignation, theme, { topN: 10, color: theme.categorical[6], labelWidth: 120 }),
     [byDesignation, theme]
   );
   const employeeSizeOption = useMemo(() => buildRankedBarOption(byEmployeeSize, theme, { topN: 8, color: theme.categorical[3] }), [byEmployeeSize, theme]);
   const companyOption = useMemo(
-    () => buildRankedBarOption(byCompany, theme, { topN: 12, color: theme.categorical[5], labelWidth: 130 }),
+    () => buildRankedBarOption(byCompany, theme, { topN: 12, color: theme.categorical[2], labelWidth: 130 }),
     [byCompany, theme]
   );
   const statusOption = useMemo(() => buildStatusSegmentOption(byStatus, theme), [byStatus, theme]);
+  const activityOption = useMemo(
+    () => buildDailyActivityHeatmapOption(dailyActivity, theme, activityRange),
+    [dailyActivity, theme, activityRange]
+  );
 
   const drill = (label: string, matcher: (r: RepoRow) => boolean) => {
     setDrilldown({ label, rows: filteredRows.filter(matcher) });
@@ -249,6 +293,22 @@ export default function FerventDashboard() {
       const key = monthKeyMap[p.name];
       if (!key) return;
       drill(`Added in ${p.name}`, (r) => format(new Date(r.created_at), "yyyy-MM") === key);
+    },
+  };
+
+  const activityClickEvents = {
+    click: (p: any) => {
+      const day = p.data?.[0];
+      if (!day) return;
+      drill(`Added on ${day}`, (r) => format(new Date(r.created_at), "yyyy-MM-dd") === day);
+    },
+  };
+
+  const mapClickEvents = {
+    click: (p: any) => {
+      if (!p.name) return;
+      const key = p.name.toLowerCase();
+      drill(`City: ${p.name}`, (r) => canonicalCity(r.city) === key);
     },
   };
 
@@ -406,7 +466,7 @@ export default function FerventDashboard() {
               <KpiCard icon={<Database size={16} />} label="Total Records" value={stats.total} accent={theme.categorical[0]} />
               <KpiCard icon={<Building2 size={16} />} label="Companies" value={stats.companies} accent={theme.categorical[2]} />
               <KpiCard icon={<TrendingUp size={16} />} label="Industries Tagged" value={stats.industries} accent={theme.categorical[3]} />
-              <KpiCard icon={<Database size={16} />} label="Added This Month" value={stats.addedThisMonth} accent={theme.categorical[5]} />
+              <KpiCard icon={<Database size={16} />} label="Added This Month" value={stats.addedThisMonth} accent={theme.categorical[1]} />
               <KpiCard icon={<Mail size={16} />} label="Email Coverage" value={`${stats.emailCoverage}%`} accent={theme.categorical[4]} />
               <KpiCard icon={<Phone size={16} />} label="Mobile Coverage" value={`${stats.mobileCoverage}%`} accent={theme.categorical[6]} />
               <KpiCard
@@ -440,6 +500,13 @@ export default function FerventDashboard() {
               </Card>
             </div>
 
+            <Card>
+              <ChartHeader title="Daily Activity" subtitle="Last 3 months — click a day to drill down" />
+              <CardContent className="p-1 h-[190px]">
+                <EChart option={activityOption} eventHandlers={activityClickEvents} />
+              </CardContent>
+            </Card>
+
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
               <Card className="lg:col-span-2">
                 <ChartHeader title="By Industry" subtitle="Click a tile to drill down" />
@@ -455,17 +522,11 @@ export default function FerventDashboard() {
               </Card>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
               <Card>
                 <ChartHeader title="Top States" subtitle="Click a bar to drill down" />
                 <CardContent className="p-1 h-[230px]">
                   <EChart option={statesOption} eventHandlers={fieldClickEvents("state", byState, "State")} />
-                </CardContent>
-              </Card>
-              <Card>
-                <ChartHeader title="Top Cities" subtitle="Click a bar to drill down" />
-                <CardContent className="p-1 h-[230px]">
-                  <EChart option={cityOption} eventHandlers={fieldClickEvents("city", byCity, "City")} />
                 </CardContent>
               </Card>
               <Card>
@@ -475,6 +536,20 @@ export default function FerventDashboard() {
                 </CardContent>
               </Card>
             </div>
+
+            <Card>
+              <ChartHeader
+                title="Where Your Data Is From"
+                subtitle={
+                  unmappedCityCount > 0
+                    ? `Click a city to drill down — ${unmappedCityCount} record(s) with an unrecognized/blank city aren't plotted`
+                    : "Click a city to drill down"
+                }
+              />
+              <CardContent className="p-1 h-[380px]">
+                <EChart option={mapOption} eventHandlers={mapClickEvents} />
+              </CardContent>
+            </Card>
 
             <Card>
               <ChartHeader
