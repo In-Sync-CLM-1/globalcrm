@@ -2,6 +2,8 @@ import * as echarts from "echarts";
 import type { EChartsOption } from "echarts";
 import type { FerventChartTheme } from "./ferventChartTheme";
 
+export const UNSPECIFIED = "Unspecified";
+
 // Every builder folds anything past the fixed 7-hue categorical palette into
 // a single gray "Other" slot rather than generating new hues (dataviz skill:
 // "a 9th series is never a generated hue").
@@ -9,6 +11,18 @@ function foldOther<T extends { name: string; value: number }>(items: T[], limit 
   const top = items.slice(0, limit);
   const restTotal = items.slice(limit).reduce((sum, i) => sum + i.value, 0);
   return restTotal > 0 ? [...top, { name: "Other", value: restTotal }] : top;
+}
+
+// "Unspecified" and "Other" are both "no real category here" buckets — they
+// stay neutral gray regardless of rank so a field that's mostly blank (the
+// common case in this dataset today) doesn't paint the whole chart in
+// whatever hue happens to sit first in the categorical array.
+function isNeutralSlice(name: string): boolean {
+  return name === "Other" || name === UNSPECIFIED;
+}
+
+function sliceColor(name: string, index: number, theme: FerventChartTheme): string {
+  return isNeutralSlice(name) ? theme.otherGray : theme.categorical[index];
 }
 
 const tooltipBase = (theme: FerventChartTheme) => ({
@@ -19,8 +33,8 @@ const tooltipBase = (theme: FerventChartTheme) => ({
   extraCssText: "box-shadow: 0 4px 16px rgba(0,0,0,0.12); border-radius: 8px;",
 });
 
-export function buildTrendOption(monthlyTrend: { label: string; count: number }[], theme: FerventChartTheme): EChartsOption {
-  const hue = theme.categorical[0];
+export function buildTrendOption(monthlyTrend: { label: string; count: number }[], theme: FerventChartTheme, color?: string): EChartsOption {
+  const hue = color ?? theme.categorical[2];
   return {
     grid: { left: 34, right: 12, top: 16, bottom: 24 },
     tooltip: { trigger: "axis", ...tooltipBase(theme) },
@@ -58,10 +72,10 @@ export function buildTrendOption(monthlyTrend: { label: string; count: number }[
 }
 
 export function buildIndustryTreemapOption(byIndustry: { name: string; value: number }[], theme: FerventChartTheme): EChartsOption {
-  const data = foldOther(byIndustry).map((d, i, arr) => ({
+  const data = foldOther(byIndustry).map((d, i) => ({
     name: d.name,
     value: d.value,
-    itemStyle: { color: d.name === "Other" && i === arr.length - 1 ? theme.otherGray : theme.categorical[i] },
+    itemStyle: { color: sliceColor(d.name, i, theme) },
   }));
 
   return {
@@ -91,10 +105,10 @@ export function buildIndustryTreemapOption(byIndustry: { name: string; value: nu
 export function buildDesignationDonutOption(byDesignationLevel: { name: string; value: number }[], theme: FerventChartTheme): EChartsOption {
   const folded = foldOther(byDesignationLevel);
   const total = folded.reduce((sum, d) => sum + d.value, 0) || 1;
-  const data = folded.map((d, i, arr) => ({
+  const data = folded.map((d, i) => ({
     name: d.name,
     value: d.value,
-    itemStyle: { color: d.name === "Other" && i === arr.length - 1 ? theme.otherGray : theme.categorical[i] },
+    itemStyle: { color: sliceColor(d.name, i, theme) },
   }));
 
   return {
@@ -180,7 +194,6 @@ export function buildStatusSegmentOption(byStatus: { name: string; value: number
     xAxis: { type: "value", show: false, max: total },
     yAxis: { type: "category", data: ["status"], show: false },
     series: folded.map((d, i, arr) => {
-      const isOther = d.name === "Other" && i === arr.length - 1;
       const share = d.value / total;
       return {
         name: d.name,
@@ -189,7 +202,7 @@ export function buildStatusSegmentOption(byStatus: { name: string; value: number
         barWidth: 30,
         data: [d.value],
         itemStyle: {
-          color: isOther ? theme.otherGray : theme.categorical[i],
+          color: sliceColor(d.name, i, theme),
           borderRadius: i === 0 ? [4, 0, 0, 4] : i === arr.length - 1 ? [0, 4, 4, 0] : 0,
         },
         label: {
@@ -202,5 +215,52 @@ export function buildStatusSegmentOption(byStatus: { name: string; value: number
         },
       };
     }) as EChartsOption["series"],
+  };
+}
+
+// GitHub-style calendar heatmap of daily record additions — the one chart in
+// the dashboard where color legitimately encodes magnitude on a day grid, so
+// it gets its own warm ramp instead of reusing the blue "default" or any
+// categorical hue (dataviz skill: a true heatmap needs a ramp built for it).
+export function buildDailyActivityHeatmapOption(
+  daily: { date: string; count: number }[],
+  theme: FerventChartTheme,
+  range: [string, string]
+): EChartsOption {
+  const max = Math.max(1, ...daily.map((d) => d.count));
+  return {
+    tooltip: {
+      ...tooltipBase(theme),
+      formatter: (p: any) => `${p.data[0]}: ${p.data[1]} record(s)`,
+    },
+    // Only hex stops here — theme.grid/theme.surface resolve to `hsl(...)`
+    // strings, and echarts can't lerp those for a gradient (it silently
+    // produces black at the low end instead of erroring).
+    visualMap: {
+      min: 0,
+      max,
+      show: false,
+      inRange: { color: theme.warm },
+    },
+    calendar: {
+      range,
+      cellSize: ["auto", 15],
+      left: 40,
+      right: 12,
+      top: 20,
+      bottom: 8,
+      itemStyle: { borderWidth: 2, borderColor: theme.surface, color: theme.grid },
+      splitLine: { show: false },
+      yearLabel: { show: false },
+      monthLabel: { color: theme.mutedText, fontSize: 10 },
+      dayLabel: { color: theme.mutedText, fontSize: 10, firstDay: 1 },
+    },
+    series: [
+      {
+        type: "heatmap",
+        coordinateSystem: "calendar",
+        data: daily.map((d) => [d.date, d.count]),
+      },
+    ],
   };
 }

@@ -25,6 +25,8 @@ import {
   buildDesignationDonutOption,
   buildRankedBarOption,
   buildStatusSegmentOption,
+  buildDailyActivityHeatmapOption,
+  UNSPECIFIED,
 } from "@/components/FerventDashboard/ferventChartOptions";
 
 interface RepoRow {
@@ -61,8 +63,6 @@ const emptyFilters: FilterState = {
   dateFrom: "", dateTo: "", industry: "all", designationLevel: "all",
   designation: "all", city: "all", state: "all", source: "all",
 };
-
-const UNSPECIFIED = "Unspecified";
 
 function normalizeKey(raw: string | null): string {
   return (typeof raw === "string" ? raw.trim() : "") || UNSPECIFIED;
@@ -212,21 +212,41 @@ export default function FerventDashboard() {
     return m;
   }, [monthlyTrend]);
 
+  // Daily activity heatmap — last 3 full months, so the calendar grid stays a
+  // compact 3-row block rather than sprawling across a year.
+  const activityRange = useMemo((): [string, string] => {
+    const start = startOfMonth(subMonths(new Date(), 2));
+    return [format(start, "yyyy-MM-dd"), format(new Date(), "yyyy-MM-dd")];
+  }, []);
+
+  const dailyActivity = useMemo(() => {
+    const m = new Map<string, number>();
+    filteredRows.forEach((r) => {
+      const key = format(new Date(r.created_at), "yyyy-MM-dd");
+      m.set(key, (m.get(key) || 0) + 1);
+    });
+    return Array.from(m.entries()).map(([date, count]) => ({ date, count }));
+  }, [filteredRows]);
+
   const trendOption = useMemo(() => buildTrendOption(monthlyTrend, theme), [monthlyTrend, theme]);
   const industryOption = useMemo(() => buildIndustryTreemapOption(byIndustry, theme), [byIndustry, theme]);
   const designationLevelOption = useMemo(() => buildDesignationDonutOption(byDesignationLevel, theme), [byDesignationLevel, theme]);
-  const statesOption = useMemo(() => buildRankedBarOption(byState, theme, { topN: 8 }), [byState, theme]);
-  const cityOption = useMemo(() => buildRankedBarOption(byCity, theme, { topN: 8, color: theme.sequential[2] }), [byCity, theme]);
+  const statesOption = useMemo(() => buildRankedBarOption(byState, theme, { topN: 8, color: theme.categorical[4] }), [byState, theme]);
+  const cityOption = useMemo(() => buildRankedBarOption(byCity, theme, { topN: 8, color: theme.categorical[1] }), [byCity, theme]);
   const designationOption = useMemo(
-    () => buildRankedBarOption(byDesignation, theme, { topN: 10, color: theme.categorical[0], labelWidth: 120 }),
+    () => buildRankedBarOption(byDesignation, theme, { topN: 10, color: theme.categorical[6], labelWidth: 120 }),
     [byDesignation, theme]
   );
   const employeeSizeOption = useMemo(() => buildRankedBarOption(byEmployeeSize, theme, { topN: 8, color: theme.categorical[3] }), [byEmployeeSize, theme]);
   const companyOption = useMemo(
-    () => buildRankedBarOption(byCompany, theme, { topN: 12, color: theme.categorical[5], labelWidth: 130 }),
+    () => buildRankedBarOption(byCompany, theme, { topN: 12, color: theme.categorical[2], labelWidth: 130 }),
     [byCompany, theme]
   );
   const statusOption = useMemo(() => buildStatusSegmentOption(byStatus, theme), [byStatus, theme]);
+  const activityOption = useMemo(
+    () => buildDailyActivityHeatmapOption(dailyActivity, theme, activityRange),
+    [dailyActivity, theme, activityRange]
+  );
 
   const drill = (label: string, matcher: (r: RepoRow) => boolean) => {
     setDrilldown({ label, rows: filteredRows.filter(matcher) });
@@ -249,6 +269,14 @@ export default function FerventDashboard() {
       const key = monthKeyMap[p.name];
       if (!key) return;
       drill(`Added in ${p.name}`, (r) => format(new Date(r.created_at), "yyyy-MM") === key);
+    },
+  };
+
+  const activityClickEvents = {
+    click: (p: any) => {
+      const day = p.data?.[0];
+      if (!day) return;
+      drill(`Added on ${day}`, (r) => format(new Date(r.created_at), "yyyy-MM-dd") === day);
     },
   };
 
@@ -406,7 +434,7 @@ export default function FerventDashboard() {
               <KpiCard icon={<Database size={16} />} label="Total Records" value={stats.total} accent={theme.categorical[0]} />
               <KpiCard icon={<Building2 size={16} />} label="Companies" value={stats.companies} accent={theme.categorical[2]} />
               <KpiCard icon={<TrendingUp size={16} />} label="Industries Tagged" value={stats.industries} accent={theme.categorical[3]} />
-              <KpiCard icon={<Database size={16} />} label="Added This Month" value={stats.addedThisMonth} accent={theme.categorical[5]} />
+              <KpiCard icon={<Database size={16} />} label="Added This Month" value={stats.addedThisMonth} accent={theme.categorical[1]} />
               <KpiCard icon={<Mail size={16} />} label="Email Coverage" value={`${stats.emailCoverage}%`} accent={theme.categorical[4]} />
               <KpiCard icon={<Phone size={16} />} label="Mobile Coverage" value={`${stats.mobileCoverage}%`} accent={theme.categorical[6]} />
               <KpiCard
@@ -439,6 +467,13 @@ export default function FerventDashboard() {
                 </CardContent>
               </Card>
             </div>
+
+            <Card>
+              <ChartHeader title="Daily Activity" subtitle="Last 3 months — click a day to drill down" />
+              <CardContent className="p-1 h-[190px]">
+                <EChart option={activityOption} eventHandlers={activityClickEvents} />
+              </CardContent>
+            </Card>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
               <Card className="lg:col-span-2">
