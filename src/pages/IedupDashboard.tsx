@@ -13,7 +13,7 @@ import {
 } from "recharts";
 import { format, eachDayOfInterval, startOfDay, differenceInCalendarDays, startOfWeek } from "date-fns";
 import {
-  Users as UsersIcon, PhoneCall, MessageSquare, IndianRupee, Clock,
+  Users as UsersIcon, PhoneCall, MessageSquare, IndianRupee,
   AlertTriangle, CheckCircle2, XCircle, Eye, Send,
 } from "lucide-react";
 import { useIsIedup, IEDUP_ORG_ID } from "@/hooks/useIsIedup";
@@ -50,15 +50,8 @@ export default function IedupDashboard() {
   const { data: dataCounts } = useQuery({
     queryKey: ["iedup-data-counts"],
     queryFn: async () => {
-      const [total, dnc, calledRows] = await Promise.all([
-        supabase.from("contacts").select("id", { count: "exact", head: true }).eq("org_id", IEDUP_ORG_ID),
-        supabase.from("contacts").select("id", { count: "exact", head: true }).eq("org_id", IEDUP_ORG_ID).eq("do_not_call", true),
-        supabase.from("call_logs").select("contact_id").eq("org_id", IEDUP_ORG_ID).not("contact_id", "is", null).not("started_at", "is", null),
-      ]);
-      const totalN = total.count || 0;
-      const dncN = dnc.count || 0;
-      const calledN = new Set((calledRows.data || []).map((r: any) => r.contact_id)).size;
-      return { total: totalN, called: calledN, pending: Math.max(0, totalN - calledN - dncN), dnc: dncN };
+      const total = await supabase.from("contacts").select("id", { count: "exact", head: true }).eq("org_id", IEDUP_ORG_ID);
+      return { total: total.count || 0 };
     },
     refetchInterval: REFRESH_MS,
   });
@@ -192,9 +185,8 @@ export default function IedupDashboard() {
         </div>
 
         {/* Headline KPIs */}
-        <div className="grid shrink-0 grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        <div className="grid shrink-0 grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
           <KpiCard icon={<UsersIcon size={16} />} label="Beneficiaries" value={dataCounts?.total ?? "—"} tone="slate" />
-          <KpiCard icon={<Clock size={16} />} label="Pending" value={dataCounts?.pending ?? "—"} tone="amber" />
           <KpiCard icon={<Send size={16} />} label="Messages sent" value={wa.sent} tone="blue" />
           <KpiCard icon={<CheckCircle2 size={16} />} label="Delivery rate" value={`${wa.deliveryRate}%`} tone="emerald" />
           <KpiCard icon={<Eye size={16} />} label="Open rate" value={`${wa.openRate}%`} tone="violet" />
