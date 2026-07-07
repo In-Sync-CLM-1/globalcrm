@@ -478,23 +478,30 @@ export default function FerventDashboard() {
               />
             </div>
 
-            {/* Bento grid — hero designation ranking, trend, and data source mix */}
+            {/* Bento grid — the map is the centerpiece, same hero treatment RMPL gives its geo chart */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
               <Card className="lg:col-span-2 lg:row-span-2">
-                <ChartHeader title="By Designation" subtitle="Top job titles — click to drill down" />
-                <CardContent className="p-1 h-[350px]">
-                  <EChart option={designationOption} eventHandlers={fieldClickEvents("designation", byDesignation, "Designation")} />
+                <ChartHeader
+                  title="Where Your Data Is From"
+                  subtitle={
+                    unmappedCityCount > 0
+                      ? `Click a city to drill down — ${unmappedCityCount} record(s) with an unrecognized/blank city aren't plotted`
+                      : "Click a city to drill down"
+                  }
+                />
+                <CardContent className="p-1 h-[420px]">
+                  <EChart option={mapOption} eventHandlers={mapClickEvents} />
                 </CardContent>
               </Card>
               <Card>
                 <ChartHeader title="Records Added" subtitle="Last 6 months — click a bar to drill down" />
-                <CardContent className="p-1 h-[160px]">
+                <CardContent className="p-1 h-[190px]">
                   <EChart option={trendOption} eventHandlers={trendClickEvents} />
                 </CardContent>
               </Card>
               <Card>
                 <ChartHeader title="By Data Source" subtitle="Click a segment to drill down" />
-                <CardContent className="p-1 h-[160px]">
+                <CardContent className="p-1 h-[190px]">
                   <EChart option={statusOption} eventHandlers={fieldClickEvents("ucdb_status", byStatus, "Source")} />
                 </CardContent>
               </Card>
@@ -508,7 +515,13 @@ export default function FerventDashboard() {
             </Card>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-              <Card className="lg:col-span-2">
+              <Card>
+                <ChartHeader title="By Designation" subtitle="Top job titles — click to drill down" />
+                <CardContent className="p-1 h-[230px]">
+                  <EChart option={designationOption} eventHandlers={fieldClickEvents("designation", byDesignation, "Designation")} />
+                </CardContent>
+              </Card>
+              <Card>
                 <ChartHeader title="By Industry" subtitle="Click a tile to drill down" />
                 <CardContent className="p-1 h-[230px]">
                   <EChart option={industryOption} eventHandlers={fieldClickEvents("industry", byIndustry, "Industry")} />
@@ -536,20 +549,6 @@ export default function FerventDashboard() {
                 </CardContent>
               </Card>
             </div>
-
-            <Card>
-              <ChartHeader
-                title="Where Your Data Is From"
-                subtitle={
-                  unmappedCityCount > 0
-                    ? `Click a city to drill down — ${unmappedCityCount} record(s) with an unrecognized/blank city aren't plotted`
-                    : "Click a city to drill down"
-                }
-              />
-              <CardContent className="p-1 h-[380px]">
-                <EChart option={mapOption} eventHandlers={mapClickEvents} />
-              </CardContent>
-            </Card>
 
             <Card>
               <ChartHeader
