@@ -103,6 +103,9 @@ export default defineConfig(({ mode }) => ({
             if (id.includes('jspdf') || id.includes('html2canvas')) {
               return 'vendor-pdf';
             }
+            if (id.includes('echarts') || id.includes('zrender')) {
+              return 'vendor-echarts';
+            }
             return 'vendor';
           }
         },
