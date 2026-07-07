@@ -732,7 +732,6 @@ export default function IedupPipeline() {
                       <TableHead>Number</TableHead>
                       <TableHead>Action</TableHead>
                       <TableHead>Uploaded</TableHead>
-                      <TableHead>Status</TableHead>
                       <TableHead>Disposition</TableHead>
                       <TableHead>Last call</TableHead>
                       <TableHead className="text-right">Actions</TableHead>
@@ -765,19 +764,6 @@ export default function IedupPipeline() {
                           </TableCell>
                           <TableCell className="text-xs text-muted-foreground">
                             {b.created_at ? new Date(b.created_at).toLocaleDateString() : "—"}
-                          </TableCell>
-                          <TableCell>
-                            {b.do_not_call ? (
-                              <Badge variant="destructive">Do not call</Badge>
-                            ) : connected ? (
-                              <Badge variant="default">Connected</Badge>
-                            ) : attempts >= 3 ? (
-                              <Badge variant="destructive">Max attempts</Badge>
-                            ) : attempts > 0 ? (
-                              <Badge variant="secondary">{attempts}/3 tried</Badge>
-                            ) : (
-                              <Badge variant="outline">Pending</Badge>
-                            )}
                           </TableCell>
                           <TableCell>
                             {b.disposition ? (
