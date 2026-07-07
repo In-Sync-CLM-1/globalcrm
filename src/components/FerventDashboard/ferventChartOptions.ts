@@ -264,3 +264,52 @@ export function buildDailyActivityHeatmapOption(
     ],
   };
 }
+
+export interface CityMapPoint {
+  name: string;
+  coords: [number, number];
+  count: number;
+}
+
+// India geo bubble map of where records are physically located. Bubble size
+// is the only encoding that matters here (place identity comes from the
+// label/tooltip), so — like the sequential ramp elsewhere — it's blue, not
+// another green, and distinct from the heatmap's warm ramp above it.
+export function buildCityGeoMapOption(points: CityMapPoint[], theme: FerventChartTheme): EChartsOption {
+  const max = Math.max(1, ...points.map((p) => p.count));
+  const blue = theme.categorical[2];
+  return {
+    tooltip: {
+      ...tooltipBase(theme),
+      formatter: (p: any) => `${p.name}<br/><b>${p.value?.[2] ?? 0}</b> record(s)`,
+    },
+    geo: {
+      map: "India",
+      roam: false,
+      layoutCenter: ["50%", "52%"],
+      layoutSize: "108%",
+      itemStyle: { areaColor: theme.grid, borderColor: theme.surface },
+      emphasis: { itemStyle: { areaColor: theme.sequential[0] }, label: { show: false } },
+    },
+    series: [
+      {
+        type: "effectScatter",
+        coordinateSystem: "geo",
+        data: points.map((p) => ({ name: p.name, value: [...p.coords, p.count] })),
+        showEffectOn: "render",
+        rippleEffect: { scale: 2.2, brushType: "stroke" },
+        zlevel: 1,
+        symbolSize: (val: number[]) => 10 + 34 * Math.sqrt((val[2] || 0) / max),
+        itemStyle: { color: blue, shadowBlur: 6, shadowColor: `${blue}66` },
+        label: {
+          show: true,
+          formatter: (p: any) => p.name,
+          position: "top",
+          color: theme.text,
+          fontSize: 10,
+          distance: 6,
+        },
+      },
+    ],
+  };
+}
