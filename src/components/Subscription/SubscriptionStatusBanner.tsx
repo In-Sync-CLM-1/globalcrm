@@ -1,8 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
+import { addDays, differenceInCalendarDays, format } from "date-fns";
+import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useOrgContext } from "@/hooks/useOrgContext";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { AlertCircle, Clock, Lock } from "lucide-react";
+import { AlertCircle, Clock, Lock, Gift } from "lucide-react";
+
+const TRIAL_DAYS = 14;
+
 export default function SubscriptionStatusBanner() {
   const { effectiveOrgId } = useOrgContext();
 
@@ -14,7 +19,7 @@ export default function SubscriptionStatusBanner() {
         .select("subscription_status, grace_period_end, readonly_period_end, lockout_date, wallet_balance, wallet_minimum_balance")
         .eq("org_id", effectiveOrgId)
         .maybeSingle();
-      
+
       if (error) throw error;
       return data;
     },
@@ -22,8 +27,40 @@ export default function SubscriptionStatusBanner() {
     refetchInterval: 60000, // Refetch every minute
   });
 
-  if (!subscription || subscription.subscription_status === "active") {
-    return null;
+  // Trial reminder — informational only, same rule as every org (no lockout
+  // when the 14 days run out; the overdue-invoice ladder below is the only
+  // thing that ever actually restricts access). Only shown once the trial
+  // has actually ended, so it reads as a nudge rather than a daily nag.
+  const { data: trialInfo } = useQuery({
+    queryKey: ["subscription-trial-check", effectiveOrgId],
+    queryFn: async () => {
+      const [{ data: org }, { data: paidInvoice }] = await Promise.all([
+        supabase.from("organizations").select("created_at").eq("id", effectiveOrgId).maybeSingle(),
+        supabase.from("subscription_invoices").select("id").eq("org_id", effectiveOrgId).eq("payment_status", "paid").limit(1).maybeSingle(),
+      ]);
+      if (!org?.created_at || paidInvoice) return null;
+      const trialEndsAt = addDays(new Date(org.created_at), TRIAL_DAYS);
+      const daysLeft = differenceInCalendarDays(trialEndsAt, new Date());
+      return daysLeft < 0 ? { trialEndsAt } : null;
+    },
+    enabled: !!effectiveOrgId && subscription?.subscription_status === "active",
+  });
+
+  if (!subscription) return null;
+
+  if (subscription.subscription_status === "active") {
+    if (!trialInfo) return null;
+    return (
+      <div className="mx-6 mt-4">
+        <Alert>
+          <Gift className="h-4 w-4" />
+          <AlertTitle>Your free trial ended {format(trialInfo.trialEndsAt, "d MMM yyyy")}</AlertTitle>
+          <AlertDescription>
+            Everything still works — <Link to="/billing" className="underline underline-offset-2">subscribe on the Billing page</Link> whenever you're ready.
+          </AlertDescription>
+        </Alert>
+      </div>
+    );
   }
 
   const getAlertConfig = () => {
