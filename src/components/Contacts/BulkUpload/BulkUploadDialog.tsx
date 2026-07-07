@@ -238,14 +238,17 @@ export function BulkUploadDialog({ open, onOpenChange, orgId, onUploadStarted }:
 
       if (jobError) {
         console.error('Job creation error:', jobError);
-        
+        await supabase.storage.from('import-files').remove([filePath]);
+
         // Provide more specific error messages
         if (jobError.code === '42501') {
           throw new Error('Permission denied. Please ensure your profile is set up correctly.');
         } else if (jobError.message?.includes('violates row-level security')) {
           throw new Error('Access denied. Please verify your organization membership.');
+        } else if (jobError.code === '23505') {
+          throw new Error('An import is already in progress for this organization. Please wait for it to finish before uploading again.');
         }
-        
+
         throw new Error(`Failed to create import job: ${jobError.message}`);
       }
 

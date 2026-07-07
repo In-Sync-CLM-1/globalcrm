@@ -116,7 +116,13 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
         .select()
         .single();
 
-      if (jobError) throw new Error(`Failed to create import job: ${jobError.message}`);
+      if (jobError) {
+        await supabase.storage.from("import-files").remove([filePath]);
+        if (jobError.code === "23505") {
+          throw new Error("An import is already in progress for this database. Please wait for it to finish before uploading again.");
+        }
+        throw new Error(`Failed to create import job: ${jobError.message}`);
+      }
 
       const { error: triggerError } = await supabase.functions.invoke("bulk-import-trigger", {
         body: { importJobId: job.id },

@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -74,6 +75,12 @@ function normalizeKey(raw: string | null): string {
   return (typeof raw === "string" ? raw.trim() : "") || UNSPECIFIED;
 }
 
+function fieldMatches(value: string | null, filterValue: string, mode: "exact" | "contains"): boolean {
+  const key = normalizeKey(value);
+  if (mode === "contains") return key.toLowerCase().includes(filterValue.toLowerCase());
+  return key === filterValue;
+}
+
 function hasEmail(r: RepoRow): boolean {
   return !!(r.official_email?.trim() || r.personal_email_1?.trim() || r.personal_email_2?.trim());
 }
@@ -106,6 +113,7 @@ export default function FerventDashboard() {
   const { isLoading: orgLoading } = useIsFervent();
   const theme = useMemo(() => getFerventChartTheme(), []);
   const [filters, setFilters] = useState<FilterState>(emptyFilters);
+  const [matchMode, setMatchMode] = useState<"exact" | "contains">("exact");
   const [drilldown, setDrilldown] = useState<{ label: string; rows: RepoRow[] } | null>(null);
 
   const { data: rows = [], isLoading } = useQuery({
@@ -153,15 +161,15 @@ export default function FerventDashboard() {
     return rows.filter((r) => {
       if (filters.dateFrom && new Date(r.created_at) < new Date(filters.dateFrom)) return false;
       if (filters.dateTo && new Date(r.created_at) > new Date(`${filters.dateTo}T23:59:59`)) return false;
-      if (filters.industry !== "all" && normalizeKey(r.industry) !== filters.industry) return false;
-      if (filters.designationLevel !== "all" && normalizeKey(r.designation_level) !== filters.designationLevel) return false;
-      if (filters.designation !== "all" && normalizeKey(r.designation) !== filters.designation) return false;
-      if (filters.city !== "all" && normalizeKey(r.city) !== filters.city) return false;
-      if (filters.state !== "all" && normalizeKey(r.state) !== filters.state) return false;
-      if (filters.source !== "all" && normalizeKey(r.ucdb_status) !== filters.source) return false;
+      if (filters.industry !== "all" && !fieldMatches(r.industry, filters.industry, matchMode)) return false;
+      if (filters.designationLevel !== "all" && !fieldMatches(r.designation_level, filters.designationLevel, matchMode)) return false;
+      if (filters.designation !== "all" && !fieldMatches(r.designation, filters.designation, matchMode)) return false;
+      if (filters.city !== "all" && !fieldMatches(r.city, filters.city, matchMode)) return false;
+      if (filters.state !== "all" && !fieldMatches(r.state, filters.state, matchMode)) return false;
+      if (filters.source !== "all" && !fieldMatches(r.ucdb_status, filters.source, matchMode)) return false;
       return true;
     });
-  }, [rows, filters]);
+  }, [rows, filters, matchMode]);
 
   const stats = useMemo(() => {
     const total = filteredRows.length;
@@ -396,6 +404,18 @@ export default function FerventDashboard() {
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent align="end" className="w-80 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs">Match mode</Label>
+                      <ToggleGroup
+                        type="single"
+                        size="sm"
+                        value={matchMode}
+                        onValueChange={(v) => v && setMatchMode(v as "exact" | "contains")}
+                      >
+                        <ToggleGroupItem value="exact" className="text-xs px-2.5 h-7">Exact</ToggleGroupItem>
+                        <ToggleGroupItem value="contains" className="text-xs px-2.5 h-7">Contains</ToggleGroupItem>
+                      </ToggleGroup>
+                    </div>
                     <div className="grid grid-cols-2 gap-2">
                       <div className="space-y-1">
                         <Label className="text-xs">Added from</Label>
