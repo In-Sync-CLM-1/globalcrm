@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Search, X, ChevronDown, ChevronUp } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
@@ -26,6 +27,7 @@ export interface PipelineFiltersState {
   whatsappOutreachStatus: string;
   assignedTo: string;
   dispositionId: string;
+  matchMode: "exact" | "contains";
 }
 
 interface PipelineDisposition {
@@ -55,6 +57,7 @@ const emptyFilters: PipelineFiltersState = {
   whatsappOutreachStatus: "",
   assignedTo: "",
   dispositionId: "",
+  matchMode: "contains",
 };
 
 const EMAIL_OUTREACH_OPTIONS = [
@@ -94,7 +97,7 @@ export function PipelineFilters({
     onFiltersChange({ ...filters, [field]: value });
   };
 
-  const hasActiveFilters = Object.values(filters).some((v) => v !== "");
+  const hasActiveFilters = Object.entries(filters).some(([key, v]) => key !== "matchMode" && v !== "");
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !isSearching) {
@@ -127,6 +130,20 @@ export function PipelineFilters({
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="p-3 pt-0 space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-muted-foreground">
+              Match mode for Name / Company / Targeted Product
+            </span>
+            <ToggleGroup
+              type="single"
+              size="sm"
+              value={filters.matchMode}
+              onValueChange={(v) => v && handleChange("matchMode", v)}
+            >
+              <ToggleGroupItem value="exact" className="text-xs px-2.5 h-7">Exact</ToggleGroupItem>
+              <ToggleGroupItem value="contains" className="text-xs px-2.5 h-7">Contains</ToggleGroupItem>
+            </ToggleGroup>
+          </div>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-2">
             <Input
               placeholder="Name"

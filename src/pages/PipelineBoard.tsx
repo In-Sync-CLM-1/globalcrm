@@ -255,10 +255,22 @@ export default function PipelineBoard() {
   });
 
   const applyServerFilters = useCallback((q: any, f: PipelineFiltersState) => {
-    if (f.name) q = q.or(`first_name.ilike.%${f.name}%,last_name.ilike.%${f.name}%`);
-    if (f.company) q = q.ilike("company", `%${f.company}%`);
+    const exact = f.matchMode === "exact";
+    if (f.name) {
+      if (exact) {
+        const [firstWord, ...rest] = f.name.trim().split(/\s+/);
+        if (rest.length > 0) {
+          q = q.ilike("first_name", firstWord).ilike("last_name", rest.join(" "));
+        } else {
+          q = q.or(`first_name.ilike.${firstWord},last_name.ilike.${firstWord}`);
+        }
+      } else {
+        q = q.or(`first_name.ilike.%${f.name}%,last_name.ilike.%${f.name}%`);
+      }
+    }
+    if (f.company) q = q.ilike("company", exact ? f.company : `%${f.company}%`);
     if (f.stageId) q = q.eq("pipeline_stage_id", f.stageId);
-    if (f.product) q = q.ilike("product", `%${f.product}%`);
+    if (f.product) q = q.ilike("product", exact ? f.product : `%${f.product}%`);
     if (f.emailOutreachStatus) q = q.ilike("source", `%-${f.emailOutreachStatus}`);
     if (f.whatsappOutreachStatus) q = q.eq("whatsapp_outreach_status", f.whatsappOutreachStatus);
     if (f.assignedTo === "unassigned") q = q.is("assigned_to", null);
@@ -822,13 +834,19 @@ export default function PipelineBoard() {
     }
 
     // Board view: filter client-side over the loaded 500 contacts
+    const exact = filters.matchMode === "exact";
+    const textMatches = (haystack: string | null | undefined, needle: string) => {
+      const h = (haystack || "").trim().toLowerCase();
+      const n = needle.trim().toLowerCase();
+      return exact ? h === n : h.includes(n);
+    };
     const filtered = baseContacts.filter((contact) => {
-      const fullName = `${contact.first_name} ${contact.last_name || ""}`.toLowerCase();
+      const fullName = `${contact.first_name} ${contact.last_name || ""}`;
 
-      if (filters.name && !fullName.includes(filters.name.toLowerCase())) return false;
-      if (filters.company && !contact.company?.toLowerCase().includes(filters.company.toLowerCase())) return false;
+      if (filters.name && !textMatches(fullName, filters.name)) return false;
+      if (filters.company && !textMatches(contact.company, filters.company)) return false;
       if (filters.stageId && contact.pipeline_stage_id !== filters.stageId) return false;
-      if (filters.product && !contact.product?.toLowerCase().includes(filters.product.toLowerCase())) return false;
+      if (filters.product && !textMatches(contact.product, filters.product)) return false;
       if (filters.emailOutreachStatus && !contact.source?.toLowerCase().endsWith(`-${filters.emailOutreachStatus.toLowerCase()}`)) return false;
       if (filters.whatsappOutreachStatus && contact.whatsapp_outreach_status !== filters.whatsappOutreachStatus) return false;
       if (filters.assignedTo === "unassigned" && contact.assigned_to) return false;
