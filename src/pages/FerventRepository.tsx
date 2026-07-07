@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -33,7 +34,7 @@ import {
   type BooleanQuery,
   type SavedSearchDefinition,
 } from "@/components/FerventRepository/ferventBooleanSearch";
-import { Upload, Download, Search, X, Phone, MessageSquare, GitBranch, Lock, History, Pencil } from "lucide-react";
+import { Upload, Download, Search, X, Phone, MessageSquare, GitBranch, Lock, History, Pencil, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
 
 export interface RepositoryRecord {
   id: string;
@@ -85,18 +86,75 @@ interface RepositoryFilters {
   domainName: string;
   employeeSize: string;
   turnover: string;
+  matchMode: "exact" | "contains";
 }
 
 const emptyFilters: RepositoryFilters = {
   search: "", city: "", state: "", country: "", industry: "",
   subIndustry: "", designation: "", designationLevel: "", department: "", dbSourcedYear: "", ucdbStatus: "",
-  website: "", domainName: "", employeeSize: "", turnover: "",
+  website: "", domainName: "", employeeSize: "", turnover: "", matchMode: "contains",
 };
 
 // PostgREST's .or() splits on unescaped commas/parens, so a raw search value
 // like "Smith, Jones & Co" would otherwise be parsed as extra filter clauses.
 function escapeOrValue(value: string): string {
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+function applyBasicFilters(query: any, f: RepositoryFilters) {
+  const exact = f.matchMode === "exact";
+  const like = (value: string) => (exact ? value : `%${value}%`);
+
+  if (f.search) {
+    const s = escapeOrValue(f.search);
+    query = exact
+      ? query.or(`full_name.ilike.${s},company_name.ilike.${s}`)
+      : query.or(`full_name.ilike.%${s}%,company_name.ilike.%${s}%`);
+  }
+  if (f.city) query = query.ilike("city", like(f.city));
+  if (f.state) query = query.ilike("state", like(f.state));
+  if (f.country) query = query.ilike("country", like(f.country));
+  if (f.industry) query = query.ilike("industry", like(f.industry));
+  if (f.subIndustry) query = query.ilike("sub_industry", like(f.subIndustry));
+  if (f.designation) query = query.ilike("designation", like(f.designation));
+  if (f.designationLevel) query = query.ilike("designation_level", like(f.designationLevel));
+  if (f.department) query = query.ilike("department", like(f.department));
+  if (f.dbSourcedYear) query = query.eq("db_sourced_year", parseInt(f.dbSourcedYear));
+  if (f.ucdbStatus) query = query.ilike("ucdb_status", like(f.ucdbStatus));
+  if (f.website) query = query.ilike("website", like(f.website));
+  if (f.domainName) query = query.ilike("domain_name", like(f.domainName));
+  if (f.employeeSize) query = query.ilike("employee_size", like(f.employeeSize));
+  if (f.turnover) query = query.ilike("turnover", like(f.turnover));
+  return query;
+}
+
+function SortableHead({
+  field,
+  label,
+  sortField,
+  sortAscending,
+  onSort,
+}: {
+  field: string;
+  label: string;
+  sortField: string;
+  sortAscending: boolean;
+  onSort: (field: string) => void;
+}) {
+  const active = sortField === field;
+  const Icon = active ? (sortAscending ? ArrowUp : ArrowDown) : ArrowUpDown;
+  return (
+    <TableHead className="whitespace-nowrap">
+      <button
+        type="button"
+        className={`flex items-center gap-1 hover:text-foreground ${active ? "text-foreground font-semibold" : "text-muted-foreground"}`}
+        onClick={() => onSort(field)}
+      >
+        {label}
+        <Icon className={`h-3 w-3 ${active ? "opacity-100" : "opacity-40"}`} />
+      </button>
+    </TableHead>
+  );
 }
 
 function DisabledAction({ icon: Icon, label }: { icon: any; label: string }) {
@@ -137,11 +195,23 @@ export default function FerventRepository() {
   const [searchMode, setSearchMode] = useState<"basic" | "advanced">("basic");
   const [advancedQuery, setAdvancedQuery] = useState<BooleanQuery>(emptyBooleanQuery);
   const [appliedAdvancedQuery, setAppliedAdvancedQuery] = useState<BooleanQuery | null>(null);
+  const [sortField, setSortField] = useState<string>("created_at");
+  const [sortAscending, setSortAscending] = useState(false);
+
+  const handleSort = (field: string) => {
+    if (sortField === field) {
+      setSortAscending((prev) => !prev);
+    } else {
+      setSortField(field);
+      setSortAscending(true);
+    }
+    pagination.setPage(1);
+  };
 
   const pagination = usePagination({ defaultPageSize: 25 });
 
   const { data, isLoading } = useQuery({
-    queryKey: ["fervent-repository", effectiveOrgId, pagination.currentPage, pagination.pageSize, appliedFilters, appliedAdvancedQuery],
+    queryKey: ["fervent-repository", effectiveOrgId, pagination.currentPage, pagination.pageSize, appliedFilters, appliedAdvancedQuery, sortField, sortAscending],
     queryFn: async () => {
       const offset = (pagination.currentPage - 1) * pagination.pageSize;
       let query = supabase
@@ -149,31 +219,10 @@ export default function FerventRepository() {
         .select("*", { count: "exact" })
         .eq("org_id", effectiveOrgId);
 
-      if (appliedAdvancedQuery) {
-        query = applyBooleanQuery(query, appliedAdvancedQuery);
-      } else {
-        if (appliedFilters.search) {
-          const s = escapeOrValue(appliedFilters.search);
-          query = query.or(`full_name.ilike.%${s}%,company_name.ilike.%${s}%`);
-        }
-        if (appliedFilters.city) query = query.ilike("city", `%${appliedFilters.city}%`);
-        if (appliedFilters.state) query = query.ilike("state", `%${appliedFilters.state}%`);
-        if (appliedFilters.country) query = query.ilike("country", `%${appliedFilters.country}%`);
-        if (appliedFilters.industry) query = query.ilike("industry", `%${appliedFilters.industry}%`);
-        if (appliedFilters.subIndustry) query = query.ilike("sub_industry", `%${appliedFilters.subIndustry}%`);
-        if (appliedFilters.designation) query = query.ilike("designation", `%${appliedFilters.designation}%`);
-        if (appliedFilters.designationLevel) query = query.ilike("designation_level", `%${appliedFilters.designationLevel}%`);
-        if (appliedFilters.department) query = query.ilike("department", `%${appliedFilters.department}%`);
-        if (appliedFilters.dbSourcedYear) query = query.eq("db_sourced_year", parseInt(appliedFilters.dbSourcedYear));
-        if (appliedFilters.ucdbStatus) query = query.ilike("ucdb_status", `%${appliedFilters.ucdbStatus}%`);
-        if (appliedFilters.website) query = query.ilike("website", `%${appliedFilters.website}%`);
-        if (appliedFilters.domainName) query = query.ilike("domain_name", `%${appliedFilters.domainName}%`);
-        if (appliedFilters.employeeSize) query = query.ilike("employee_size", `%${appliedFilters.employeeSize}%`);
-        if (appliedFilters.turnover) query = query.ilike("turnover", `%${appliedFilters.turnover}%`);
-      }
+      query = appliedAdvancedQuery ? applyBooleanQuery(query, appliedAdvancedQuery) : applyBasicFilters(query, appliedFilters);
 
       const { data, error, count } = await query
-        .order("created_at", { ascending: false })
+        .order(sortField, { ascending: sortAscending, nullsFirst: false })
         .range(offset, offset + pagination.pageSize - 1);
 
       if (error) throw error;
@@ -247,27 +296,10 @@ export default function FerventRepository() {
       } else if (appliedAdvancedQuery) {
         query = applyBooleanQuery(query, appliedAdvancedQuery);
       } else {
-        if (appliedFilters.search) {
-          const s = escapeOrValue(appliedFilters.search);
-          query = query.or(`full_name.ilike.%${s}%,company_name.ilike.%${s}%`);
-        }
-        if (appliedFilters.city) query = query.ilike("city", `%${appliedFilters.city}%`);
-        if (appliedFilters.state) query = query.ilike("state", `%${appliedFilters.state}%`);
-        if (appliedFilters.country) query = query.ilike("country", `%${appliedFilters.country}%`);
-        if (appliedFilters.industry) query = query.ilike("industry", `%${appliedFilters.industry}%`);
-        if (appliedFilters.subIndustry) query = query.ilike("sub_industry", `%${appliedFilters.subIndustry}%`);
-        if (appliedFilters.designation) query = query.ilike("designation", `%${appliedFilters.designation}%`);
-        if (appliedFilters.designationLevel) query = query.ilike("designation_level", `%${appliedFilters.designationLevel}%`);
-        if (appliedFilters.department) query = query.ilike("department", `%${appliedFilters.department}%`);
-        if (appliedFilters.dbSourcedYear) query = query.eq("db_sourced_year", parseInt(appliedFilters.dbSourcedYear));
-        if (appliedFilters.ucdbStatus) query = query.ilike("ucdb_status", `%${appliedFilters.ucdbStatus}%`);
-        if (appliedFilters.website) query = query.ilike("website", `%${appliedFilters.website}%`);
-        if (appliedFilters.domainName) query = query.ilike("domain_name", `%${appliedFilters.domainName}%`);
-        if (appliedFilters.employeeSize) query = query.ilike("employee_size", `%${appliedFilters.employeeSize}%`);
-        if (appliedFilters.turnover) query = query.ilike("turnover", `%${appliedFilters.turnover}%`);
+        query = applyBasicFilters(query, appliedFilters);
       }
 
-      const { data: rows, error } = await query.order("created_at", { ascending: false });
+      const { data: rows, error } = await query.order(sortField, { ascending: sortAscending, nullsFirst: false });
       if (error) throw error;
       if (!rows || rows.length === 0) {
         notify.error("Nothing to export", exportingSelection ? "No selected records found." : "No records match the current filters.");
@@ -417,6 +449,18 @@ export default function FerventRepository() {
               />
             ) : (
               <>
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-xs text-muted-foreground">Match mode</span>
+                  <ToggleGroup
+                    type="single"
+                    size="sm"
+                    value={filters.matchMode}
+                    onValueChange={(v) => v && setFilters({ ...filters, matchMode: v as "exact" | "contains" })}
+                  >
+                    <ToggleGroupItem value="exact" className="text-xs px-2.5 h-7">Exact</ToggleGroupItem>
+                    <ToggleGroupItem value="contains" className="text-xs px-2.5 h-7">Contains</ToggleGroupItem>
+                  </ToggleGroup>
+                </div>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   <Input placeholder="Name or company" value={filters.search} onChange={(e) => setFilters({ ...filters, search: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
                   <Input placeholder="City" value={filters.city} onChange={(e) => setFilters({ ...filters, city: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
@@ -479,34 +523,45 @@ export default function FerventRepository() {
                       <TableHead className="w-10 sticky left-0 bg-card">
                         <Checkbox checked={selectedIds.length === records.length} onCheckedChange={toggleSelectAll} />
                       </TableHead>
-                      <TableHead className="whitespace-nowrap">Unique ID</TableHead>
-                      <TableHead className="whitespace-nowrap">DB Sourced Year</TableHead>
-                      <TableHead className="whitespace-nowrap">UCDB Status</TableHead>
-                      <TableHead className="whitespace-nowrap">Company Name</TableHead>
-                      <TableHead className="whitespace-nowrap">Full Name</TableHead>
-                      <TableHead className="whitespace-nowrap">Designation</TableHead>
-                      <TableHead className="whitespace-nowrap">Department</TableHead>
-                      <TableHead className="whitespace-nowrap">Designation Level</TableHead>
-                      <TableHead className="whitespace-nowrap">City</TableHead>
-                      <TableHead className="whitespace-nowrap">State</TableHead>
-                      <TableHead className="whitespace-nowrap">Country</TableHead>
-                      <TableHead className="whitespace-nowrap">ISD Code</TableHead>
-                      <TableHead className="whitespace-nowrap">STD Code</TableHead>
-                      <TableHead className="whitespace-nowrap">Mobile Number 1</TableHead>
-                      <TableHead className="whitespace-nowrap">Mobile Number 2</TableHead>
-                      <TableHead className="whitespace-nowrap">Direct Number</TableHead>
-                      <TableHead className="whitespace-nowrap">Phone Number</TableHead>
-                      <TableHead className="whitespace-nowrap">Official Email</TableHead>
-                      <TableHead className="whitespace-nowrap">Personal Email 1</TableHead>
-                      <TableHead className="whitespace-nowrap">Personal Email 2</TableHead>
-                      <TableHead className="whitespace-nowrap">Contact LinkedIn</TableHead>
-                      <TableHead className="whitespace-nowrap">Domain Name</TableHead>
-                      <TableHead className="whitespace-nowrap">Website</TableHead>
-                      <TableHead className="whitespace-nowrap">Industry</TableHead>
-                      <TableHead className="whitespace-nowrap">Sub Industry</TableHead>
-                      <TableHead className="whitespace-nowrap">Employee Size</TableHead>
-                      <TableHead className="whitespace-nowrap">Turnover</TableHead>
-                      <TableHead className="whitespace-nowrap">Company LinkedIn</TableHead>
+                      {[
+                        ["unique_id", "Unique ID"],
+                        ["db_sourced_year", "DB Sourced Year"],
+                        ["ucdb_status", "UCDB Status"],
+                        ["company_name", "Company Name"],
+                        ["full_name", "Full Name"],
+                        ["designation", "Designation"],
+                        ["department", "Department"],
+                        ["designation_level", "Designation Level"],
+                        ["city", "City"],
+                        ["state", "State"],
+                        ["country", "Country"],
+                        ["isd_code", "ISD Code"],
+                        ["std_code", "STD Code"],
+                        ["mobile_number_1", "Mobile Number 1"],
+                        ["mobile_number_2", "Mobile Number 2"],
+                        ["direct_number", "Direct Number"],
+                        ["phone_number", "Phone Number"],
+                        ["official_email", "Official Email"],
+                        ["personal_email_1", "Personal Email 1"],
+                        ["personal_email_2", "Personal Email 2"],
+                        ["linkedin_url", "Contact LinkedIn"],
+                        ["domain_name", "Domain Name"],
+                        ["website", "Website"],
+                        ["industry", "Industry"],
+                        ["sub_industry", "Sub Industry"],
+                        ["employee_size", "Employee Size"],
+                        ["turnover", "Turnover"],
+                        ["company_linkedin_url", "Company LinkedIn"],
+                      ].map(([field, label]) => (
+                        <SortableHead
+                          key={field}
+                          field={field}
+                          label={label}
+                          sortField={sortField}
+                          sortAscending={sortAscending}
+                          onSort={handleSort}
+                        />
+                      ))}
                     </TableRow>
                   </TableHeader>
                   <TableBody>

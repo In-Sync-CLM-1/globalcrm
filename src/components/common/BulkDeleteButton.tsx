@@ -14,6 +14,7 @@ import { Trash2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useNotification } from "@/hooks/useNotification";
 import { useUserRole } from "@/hooks/useUserRole";
+import { useOrgContext } from "@/hooks/useOrgContext";
 
 interface BulkDeleteButtonProps {
   selectedIds: string[];
@@ -32,9 +33,11 @@ export function BulkDeleteButton({
   const [isDeleting, setIsDeleting] = useState(false);
   const notify = useNotification();
   const { isAdmin, isSuperAdmin, loading: roleLoading } = useUserRole();
+  const { isPlatformAdmin } = useOrgContext();
 
-  // Only show button to admins
-  if (!isAdmin && !isSuperAdmin) {
+  // Only show button to admins. Platform admins have no user_roles row, so
+  // they must be checked separately via org context.
+  if (!isAdmin && !isSuperAdmin && !isPlatformAdmin) {
     return null;
   }
 
