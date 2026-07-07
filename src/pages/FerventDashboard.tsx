@@ -1,35 +1,106 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import DashboardLayout from "@/components/Layout/DashboardLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import {
-  ResponsiveContainer, AreaChart, Area, BarChart, Bar,
-  PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip,
-} from "recharts";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { format, startOfMonth, subMonths } from "date-fns";
-import { Database, Building2, Mail, Phone, TrendingUp, ArrowRight } from "lucide-react";
+import { Database, Building2, Mail, Phone, TrendingUp, ArrowRight, SlidersHorizontal, Download, X, UserX, Users } from "lucide-react";
 import { useIsFervent, FERVENT_ORG_ID } from "@/hooks/useIsFervent";
-
-const COLORS = ["#01B8AA", "#3b82f6", "#f59e0b", "#8b5cf6", "#ef4444", "#10b981", "#6366f1", "#ec4899"];
+import { EChart } from "@/components/charts/EChart";
+import { getFerventChartTheme } from "@/components/FerventDashboard/ferventChartTheme";
+import { exportToCSV } from "@/utils/exportUtils";
+import {
+  buildTrendOption,
+  buildIndustryTreemapOption,
+  buildDesignationDonutOption,
+  buildRankedBarOption,
+  buildStatusSegmentOption,
+} from "@/components/FerventDashboard/ferventChartOptions";
 
 interface RepoRow {
   id: string;
   company_name: string | null;
-  industry: string | null;
+  full_name: string | null;
+  designation: string | null;
   designation_level: string | null;
+  department: string | null;
+  industry: string | null;
+  employee_size: string | null;
   ucdb_status: string | null;
   city: string | null;
   state: string | null;
   official_email: string | null;
+  personal_email_1: string | null;
+  personal_email_2: string | null;
   mobile_number_1: string | null;
   created_at: string;
 }
 
+interface FilterState {
+  dateFrom: string;
+  dateTo: string;
+  industry: string;
+  designationLevel: string;
+  designation: string;
+  city: string;
+  state: string;
+  source: string;
+}
+
+const emptyFilters: FilterState = {
+  dateFrom: "", dateTo: "", industry: "all", designationLevel: "all",
+  designation: "all", city: "all", state: "all", source: "all",
+};
+
+const UNSPECIFIED = "Unspecified";
+
+function normalizeKey(raw: string | null): string {
+  return (typeof raw === "string" ? raw.trim() : "") || UNSPECIFIED;
+}
+
+function hasEmail(r: RepoRow): boolean {
+  return !!(r.official_email?.trim() || r.personal_email_1?.trim() || r.personal_email_2?.trim());
+}
+function hasMobile(r: RepoRow): boolean {
+  return !!r.mobile_number_1?.trim();
+}
+
+function groupBy(rows: RepoRow[], field: keyof RepoRow): { name: string; value: number }[] {
+  const m = new Map<string, number>();
+  rows.forEach((r) => {
+    const key = normalizeKey(r[field] as string | null);
+    m.set(key, (m.get(key) || 0) + 1);
+  });
+  return Array.from(m.entries())
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value);
+}
+
+function distinctOptions(rows: RepoRow[], field: keyof RepoRow): string[] {
+  const set = new Set<string>();
+  rows.forEach((r) => set.add(normalizeKey(r[field] as string | null)));
+  return Array.from(set).sort((a, b) => (a === UNSPECIFIED ? 1 : b === UNSPECIFIED ? -1 : a.localeCompare(b)));
+}
+
+function csvEscape(v: string): string {
+  return `"${(v || "").replace(/"/g, '""')}"`;
+}
+
 export default function FerventDashboard() {
   const { isLoading: orgLoading } = useIsFervent();
+  const theme = useMemo(() => getFerventChartTheme(), []);
+  const [filters, setFilters] = useState<FilterState>(emptyFilters);
+  const [drilldown, setDrilldown] = useState<{ label: string; rows: RepoRow[] } | null>(null);
 
   const { data: rows = [], isLoading } = useQuery({
     queryKey: ["fervent-dashboard-data"],
@@ -40,7 +111,9 @@ export default function FerventDashboard() {
       while (true) {
         const { data, error } = await supabase
           .from("fervent_data_repository")
-          .select("id, company_name, industry, designation_level, ucdb_status, city, state, official_email, mobile_number_1, created_at")
+          .select(
+            "id, company_name, full_name, designation, designation_level, department, industry, employee_size, ucdb_status, city, state, official_email, personal_email_1, personal_email_2, mobile_number_1, created_at"
+          )
           .eq("org_id", FERVENT_ORG_ID)
           .range(from, from + pageSize - 1);
         if (error) throw error;
@@ -52,67 +125,71 @@ export default function FerventDashboard() {
     },
   });
 
+  const filterOptions = useMemo(
+    () => ({
+      industry: distinctOptions(rows, "industry"),
+      designationLevel: distinctOptions(rows, "designation_level"),
+      designation: distinctOptions(rows, "designation"),
+      city: distinctOptions(rows, "city"),
+      state: distinctOptions(rows, "state"),
+      source: distinctOptions(rows, "ucdb_status"),
+    }),
+    [rows]
+  );
+
+  const activeFilters =
+    (filters.dateFrom ? 1 : 0) + (filters.dateTo ? 1 : 0) +
+    (filters.industry !== "all" ? 1 : 0) + (filters.designationLevel !== "all" ? 1 : 0) +
+    (filters.designation !== "all" ? 1 : 0) + (filters.city !== "all" ? 1 : 0) +
+    (filters.state !== "all" ? 1 : 0) + (filters.source !== "all" ? 1 : 0);
+
+  const filteredRows = useMemo(() => {
+    return rows.filter((r) => {
+      if (filters.dateFrom && new Date(r.created_at) < new Date(filters.dateFrom)) return false;
+      if (filters.dateTo && new Date(r.created_at) > new Date(`${filters.dateTo}T23:59:59`)) return false;
+      if (filters.industry !== "all" && normalizeKey(r.industry) !== filters.industry) return false;
+      if (filters.designationLevel !== "all" && normalizeKey(r.designation_level) !== filters.designationLevel) return false;
+      if (filters.designation !== "all" && normalizeKey(r.designation) !== filters.designation) return false;
+      if (filters.city !== "all" && normalizeKey(r.city) !== filters.city) return false;
+      if (filters.state !== "all" && normalizeKey(r.state) !== filters.state) return false;
+      if (filters.source !== "all" && normalizeKey(r.ucdb_status) !== filters.source) return false;
+      return true;
+    });
+  }, [rows, filters]);
+
   const stats = useMemo(() => {
-    const total = rows.length;
-    const companies = new Set(rows.map((r) => r.company_name).filter(Boolean)).size;
-    const withEmail = rows.filter((r) => r.official_email && r.official_email.trim() !== "").length;
-    const withMobile = rows.filter((r) => r.mobile_number_1 && r.mobile_number_1.trim() !== "").length;
-    const industries = new Set(rows.map((r) => r.industry).filter(Boolean)).size;
-
+    const total = filteredRows.length;
+    const companies = new Set(filteredRows.map((r) => r.company_name).filter(Boolean)).size;
+    const withEmail = filteredRows.filter(hasEmail).length;
+    const withMobile = filteredRows.filter(hasMobile).length;
+    const industries = new Set(filteredRows.map((r) => r.industry).filter(Boolean)).size;
     const monthStart = startOfMonth(new Date());
-    const addedThisMonth = rows.filter((r) => new Date(r.created_at) >= monthStart).length;
-
+    const addedThisMonth = filteredRows.filter((r) => new Date(r.created_at) >= monthStart).length;
+    const missingBoth = filteredRows.filter((r) => !hasEmail(r) && !hasMobile(r)).length;
     const emailCoverage = total ? Math.round((withEmail / total) * 100) : 0;
     const mobileCoverage = total ? Math.round((withMobile / total) * 100) : 0;
+    return { total, companies, withEmail, withMobile, industries, addedThisMonth, emailCoverage, mobileCoverage, missingBoth };
+  }, [filteredRows]);
 
-    return { total, companies, withEmail, withMobile, industries, addedThisMonth, emailCoverage, mobileCoverage };
-  }, [rows]);
+  const byIndustry = useMemo(() => groupBy(filteredRows, "industry"), [filteredRows]);
+  const byDesignationLevel = useMemo(() => groupBy(filteredRows, "designation_level"), [filteredRows]);
+  const byStatus = useMemo(() => groupBy(filteredRows, "ucdb_status"), [filteredRows]);
+  const byState = useMemo(() => groupBy(filteredRows, "state"), [filteredRows]);
+  const byCity = useMemo(() => groupBy(filteredRows, "city"), [filteredRows]);
+  const byDesignation = useMemo(() => groupBy(filteredRows, "designation"), [filteredRows]);
+  const byEmployeeSize = useMemo(() => groupBy(filteredRows, "employee_size"), [filteredRows]);
+  const byCompany = useMemo(() => groupBy(filteredRows, "company_name"), [filteredRows]);
 
-  const byIndustry = useMemo(() => {
-    const m = new Map<string, number>();
-    rows.forEach((r) => {
-      const key = r.industry?.trim() || "Unspecified";
-      m.set(key, (m.get(key) || 0) + 1);
-    });
-    return Array.from(m.entries())
-      .map(([name, count]) => ({ name, count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 8);
-  }, [rows]);
-
-  const byDesignationLevel = useMemo(() => {
-    const m = new Map<string, number>();
-    rows.forEach((r) => {
-      const key = r.designation_level?.trim() || "Unspecified";
-      m.set(key, (m.get(key) || 0) + 1);
-    });
-    return Array.from(m.entries())
-      .map(([name, value]) => ({ name, value }))
-      .sort((a, b) => b.value - a.value);
-  }, [rows]);
-
-  const byStatus = useMemo(() => {
-    const m = new Map<string, number>();
-    rows.forEach((r) => {
-      const key = r.ucdb_status?.trim() || "Unspecified";
-      m.set(key, (m.get(key) || 0) + 1);
-    });
-    return Array.from(m.entries())
-      .map(([name, value]) => ({ name, value }))
-      .sort((a, b) => b.value - a.value);
-  }, [rows]);
-
-  const byState = useMemo(() => {
-    const m = new Map<string, number>();
-    rows.forEach((r) => {
-      const key = r.state?.trim() || "Unspecified";
-      m.set(key, (m.get(key) || 0) + 1);
-    });
-    return Array.from(m.entries())
-      .map(([name, count]) => ({ name, count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 8);
-  }, [rows]);
+  const missingBuckets = useMemo(() => {
+    const both = filteredRows.filter((r) => !hasEmail(r) && !hasMobile(r));
+    const emailOnly = filteredRows.filter((r) => !hasEmail(r) && hasMobile(r));
+    const mobileOnly = filteredRows.filter((r) => hasEmail(r) && !hasMobile(r));
+    return [
+      { label: "Missing mobile & email", rows: both, dot: "bg-red-600", border: "border-red-200", bg: "bg-red-50", text: "text-red-700", pill: "border-red-200 text-red-800 hover:bg-red-100" },
+      { label: "Missing email only", rows: emailOnly, dot: "bg-amber-400", border: "border-amber-200", bg: "bg-amber-50", text: "text-amber-700", pill: "border-amber-200 text-amber-800 hover:bg-amber-100" },
+      { label: "Missing mobile only", rows: mobileOnly, dot: "bg-blue-400", border: "border-blue-200", bg: "bg-blue-50", text: "text-blue-700", pill: "border-blue-200 text-blue-800 hover:bg-blue-100" },
+    ].filter((b) => b.rows.length > 0);
+  }, [filteredRows]);
 
   const monthlyTrend = useMemo(() => {
     const months: { key: string; label: string; count: number }[] = [];
@@ -121,13 +198,116 @@ export default function FerventDashboard() {
       months.push({ key: format(d, "yyyy-MM"), label: format(d, "MMM"), count: 0 });
     }
     const map = new Map(months.map((m) => [m.key, m]));
-    rows.forEach((r) => {
+    filteredRows.forEach((r) => {
       const key = format(new Date(r.created_at), "yyyy-MM");
       const bucket = map.get(key);
       if (bucket) bucket.count++;
     });
     return months;
-  }, [rows]);
+  }, [filteredRows]);
+
+  const monthKeyMap = useMemo(() => {
+    const m: Record<string, string> = {};
+    monthlyTrend.forEach((b) => (m[b.label] = b.key));
+    return m;
+  }, [monthlyTrend]);
+
+  const trendOption = useMemo(() => buildTrendOption(monthlyTrend, theme), [monthlyTrend, theme]);
+  const industryOption = useMemo(() => buildIndustryTreemapOption(byIndustry, theme), [byIndustry, theme]);
+  const designationLevelOption = useMemo(() => buildDesignationDonutOption(byDesignationLevel, theme), [byDesignationLevel, theme]);
+  const statesOption = useMemo(() => buildRankedBarOption(byState, theme, { topN: 8 }), [byState, theme]);
+  const cityOption = useMemo(() => buildRankedBarOption(byCity, theme, { topN: 8, color: theme.sequential[2] }), [byCity, theme]);
+  const designationOption = useMemo(
+    () => buildRankedBarOption(byDesignation, theme, { topN: 10, color: theme.categorical[0], labelWidth: 120 }),
+    [byDesignation, theme]
+  );
+  const employeeSizeOption = useMemo(() => buildRankedBarOption(byEmployeeSize, theme, { topN: 8, color: theme.categorical[3] }), [byEmployeeSize, theme]);
+  const companyOption = useMemo(
+    () => buildRankedBarOption(byCompany, theme, { topN: 12, color: theme.categorical[5], labelWidth: 130 }),
+    [byCompany, theme]
+  );
+  const statusOption = useMemo(() => buildStatusSegmentOption(byStatus, theme), [byStatus, theme]);
+
+  const drill = (label: string, matcher: (r: RepoRow) => boolean) => {
+    setDrilldown({ label, rows: filteredRows.filter(matcher) });
+  };
+
+  function fieldClickEvents(field: keyof RepoRow, grouped: { name: string; value: number }[], labelPrefix: string) {
+    const top = grouped.slice(0, 7).map((d) => d.name);
+    return {
+      click: (p: any) => {
+        const name = p.name ?? p.seriesName;
+        if (!name) return;
+        if (name === "Other") drill(`${labelPrefix}: Other`, (r) => !top.includes(normalizeKey(r[field] as string | null)));
+        else drill(`${labelPrefix}: ${name}`, (r) => normalizeKey(r[field] as string | null) === name);
+      },
+    };
+  }
+
+  const trendClickEvents = {
+    click: (p: any) => {
+      const key = monthKeyMap[p.name];
+      if (!key) return;
+      drill(`Added in ${p.name}`, (r) => format(new Date(r.created_at), "yyyy-MM") === key);
+    },
+  };
+
+  const resetFilters = () => setFilters(emptyFilters);
+
+  const exportSummaryCsv = () => {
+    const total = filteredRows.length;
+    const lines = ["Dimension,Value,Count,Share %"];
+    const push = (dim: string, arr: { name: string; value: number }[]) => {
+      arr.forEach((d) => lines.push(`${dim},${csvEscape(d.name)},${d.value},${total ? ((d.value / total) * 100).toFixed(1) : 0}`));
+    };
+    push("Industry", byIndustry);
+    push("Designation Level", byDesignationLevel);
+    push("Designation", byDesignation);
+    push("Data Source", byStatus);
+    push("State", byState);
+    push("City", byCity);
+    push("Employee Size", byEmployeeSize);
+    lines.push("");
+    lines.push("Top Companies,Company,Contacts");
+    byCompany.slice(0, 50).forEach((c) => lines.push(`Company,${csvEscape(c.name)},${c.value}`));
+    lines.push("");
+    lines.push("Missing Contact Info,Company,Full Name,Reason,Mobile,Email,Added On");
+    missingBuckets.forEach((b) =>
+      b.rows.forEach((r) => {
+        lines.push(
+          `Missing,${csvEscape(r.company_name || "")},${csvEscape(r.full_name || "")},${csvEscape(b.label)},${csvEscape(r.mobile_number_1 || "")},${csvEscape(
+            r.official_email || r.personal_email_1 || r.personal_email_2 || ""
+          )},${format(new Date(r.created_at), "yyyy-MM-dd")}`
+        );
+      })
+    );
+    const blob = new Blob([lines.join("\n")], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `fervent-dashboard-summary-${format(new Date(), "yyyyMMdd-HHmm")}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportDrilldownCsv = () => {
+    if (!drilldown || drilldown.rows.length === 0) return;
+    exportToCSV(
+      drilldown.rows,
+      [
+        { key: "company_name", label: "Company" },
+        { key: "full_name", label: "Full Name" },
+        { key: "designation", label: "Designation" },
+        { key: "department", label: "Department" },
+        { key: "city", label: "City" },
+        { key: "state", label: "State" },
+        { key: "mobile_number_1", label: "Mobile Number" },
+        { key: "official_email", label: "Official Email" },
+        { key: "created_at", label: "Added On", format: (v: string) => format(new Date(v), "yyyy-MM-dd") },
+      ],
+      `fervent-drilldown-${format(new Date(), "yyyyMMdd-HHmm")}`
+    );
+  };
 
   if (orgLoading || isLoading) {
     return (
@@ -145,18 +325,75 @@ export default function FerventDashboard() {
             <h1 className="text-2xl font-semibold tracking-tight">Fervent Dashboard</h1>
             <p className="text-sm text-muted-foreground">An overview of your vendor/lead database.</p>
           </div>
-          <Button variant="outline" size="sm" asChild>
-            <Link to="/data-repository" className="gap-1.5">
-              Open Fervent Database <ArrowRight className="h-4 w-4" />
-            </Link>
-          </Button>
+          <div className="flex items-center gap-2">
+            {stats.total > 0 && (
+              <>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" size="sm">
+                      <SlidersHorizontal className="mr-2 h-4 w-4" /> Filters
+                      {activeFilters > 0 && <Badge className="ml-2" variant="secondary">{activeFilters}</Badge>}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent align="end" className="w-80 space-y-3">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <Label className="text-xs">Added from</Label>
+                        <Input type="date" value={filters.dateFrom} onChange={(e) => setFilters((f) => ({ ...f, dateFrom: e.target.value }))} />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Added to</Label>
+                        <Input type="date" value={filters.dateTo} onChange={(e) => setFilters((f) => ({ ...f, dateTo: e.target.value }))} />
+                      </div>
+                    </div>
+                    {([
+                      ["industry", "Industry"],
+                      ["designationLevel", "Designation Level"],
+                      ["designation", "Designation"],
+                      ["state", "State"],
+                      ["city", "City"],
+                      ["source", "Data Source"],
+                    ] as const).map(([key, label]) => (
+                      <div key={key} className="space-y-1">
+                        <Label className="text-xs">{label}</Label>
+                        <Select value={filters[key]} onValueChange={(v) => setFilters((f) => ({ ...f, [key]: v }))}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All</SelectItem>
+                            {filterOptions[key].map((opt) => (
+                              <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    ))}
+                    {activeFilters > 0 && (
+                      <Button variant="ghost" size="sm" className="w-full" onClick={resetFilters}>
+                        <X className="mr-1.5 h-3.5 w-3.5" /> Reset filters
+                      </Button>
+                    )}
+                  </PopoverContent>
+                </Popover>
+                <Button variant="outline" size="sm" onClick={exportSummaryCsv}>
+                  <Download className="mr-2 h-4 w-4" /> Export
+                </Button>
+              </>
+            )}
+            <Button variant="outline" size="sm" asChild>
+              <Link to="/data-repository" className="gap-1.5">
+                Open Fervent Database <ArrowRight className="h-4 w-4" />
+              </Link>
+            </Button>
+          </div>
         </div>
 
         {stats.total === 0 ? (
           <Card>
             <CardContent className="py-16 text-center space-y-3">
               <Database className="h-10 w-10 mx-auto text-muted-foreground" />
-              <p className="text-muted-foreground">No records yet. Import your database to see insights here.</p>
+              <p className="text-muted-foreground">
+                {activeFilters > 0 ? "No records match the current filters." : "No records yet. Import your database to see insights here."}
+              </p>
               <Button asChild>
                 <Link to="/data-repository">Go to Fervent Database</Link>
               </Button>
@@ -164,167 +401,229 @@ export default function FerventDashboard() {
           </Card>
         ) : (
           <>
-            {/* KPIs */}
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-              <KpiCard icon={<Database size={16} />} label="Total Records" value={stats.total} tone="slate" />
-              <KpiCard icon={<Building2 size={16} />} label="Companies" value={stats.companies} tone="blue" />
-              <KpiCard icon={<TrendingUp size={16} />} label="Industries" value={stats.industries} tone="violet" />
-              <KpiCard icon={<Database size={16} />} label="Added This Month" value={stats.addedThisMonth} tone="emerald" />
-              <KpiCard icon={<Mail size={16} />} label="Email Coverage" value={`${stats.emailCoverage}%`} tone="amber" />
-              <KpiCard icon={<Phone size={16} />} label="Mobile Coverage" value={`${stats.mobileCoverage}%`} tone="indigo" />
+            {/* KPI strip */}
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
+              <KpiCard icon={<Database size={16} />} label="Total Records" value={stats.total} accent={theme.categorical[0]} />
+              <KpiCard icon={<Building2 size={16} />} label="Companies" value={stats.companies} accent={theme.categorical[2]} />
+              <KpiCard icon={<TrendingUp size={16} />} label="Industries Tagged" value={stats.industries} accent={theme.categorical[3]} />
+              <KpiCard icon={<Database size={16} />} label="Added This Month" value={stats.addedThisMonth} accent={theme.categorical[5]} />
+              <KpiCard icon={<Mail size={16} />} label="Email Coverage" value={`${stats.emailCoverage}%`} accent={theme.categorical[4]} />
+              <KpiCard icon={<Phone size={16} />} label="Mobile Coverage" value={`${stats.mobileCoverage}%`} accent={theme.categorical[6]} />
+              <KpiCard
+                icon={<UserX size={16} />}
+                label="Missing Both"
+                value={stats.missingBoth}
+                accent="#ef4444"
+                onClick={stats.missingBoth > 0 ? () => drill("Missing mobile & email", (r) => !hasEmail(r) && !hasMobile(r)) : undefined}
+              />
             </div>
 
-            {/* Trend + Designation Level */}
-            <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
-              <ChartCard className="lg:col-span-2" title="Records added" subtitle="Last 6 months">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={monthlyTrend} margin={{ top: 6, right: 8, left: -18, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id="g-added" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#01B8AA" stopOpacity={0.35} />
-                        <stop offset="95%" stopColor="#01B8AA" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.5} />
-                    <XAxis dataKey="label" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
-                    <YAxis tick={{ fontSize: 10 }} tickLine={false} axisLine={false} allowDecimals={false} />
-                    <Tooltip content={<ChartTooltip />} />
-                    <Area type="monotone" dataKey="count" name="Records" stroke="#01B8AA" strokeWidth={2} fill="url(#g-added)" />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </ChartCard>
-
-              <ChartCard title="By designation level" subtitle="Seniority mix">
-                {byDesignationLevel.length > 0 ? (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie data={byDesignationLevel} dataKey="value" nameKey="name" innerRadius={40} outerRadius={70} paddingAngle={2}>
-                        {byDesignationLevel.map((_, i) => (
-                          <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                        ))}
-                      </Pie>
-                      <Tooltip content={<ChartTooltip />} />
-                    </PieChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <Empty>No data</Empty>
-                )}
-              </ChartCard>
+            {/* Bento grid — hero designation ranking, trend, and data source mix */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+              <Card className="lg:col-span-2 lg:row-span-2">
+                <ChartHeader title="By Designation" subtitle="Top job titles — click to drill down" />
+                <CardContent className="p-1 h-[350px]">
+                  <EChart option={designationOption} eventHandlers={fieldClickEvents("designation", byDesignation, "Designation")} />
+                </CardContent>
+              </Card>
+              <Card>
+                <ChartHeader title="Records Added" subtitle="Last 6 months — click a bar to drill down" />
+                <CardContent className="p-1 h-[160px]">
+                  <EChart option={trendOption} eventHandlers={trendClickEvents} />
+                </CardContent>
+              </Card>
+              <Card>
+                <ChartHeader title="By Data Source" subtitle="Click a segment to drill down" />
+                <CardContent className="p-1 h-[160px]">
+                  <EChart option={statusOption} eventHandlers={fieldClickEvents("ucdb_status", byStatus, "Source")} />
+                </CardContent>
+              </Card>
             </div>
 
-            {/* Industry + State */}
-            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-              <ChartCard title="Top industries" subtitle="By record count">
-                {byIndustry.length > 0 ? (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={byIndustry} layout="vertical" margin={{ top: 4, right: 12, left: 8, bottom: 0 }}>
-                      <CartesianGrid horizontal={false} strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.5} />
-                      <XAxis type="number" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} allowDecimals={false} />
-                      <YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
-                      <Tooltip content={<ChartTooltip />} />
-                      <Bar dataKey="count" fill="#01B8AA" radius={[0, 4, 4, 0]} barSize={12} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <Empty>No data</Empty>
-                )}
-              </ChartCard>
-
-              <ChartCard title="Top states" subtitle="Geographic spread">
-                {byState.length > 0 ? (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={byState} layout="vertical" margin={{ top: 4, right: 12, left: 8, bottom: 0 }}>
-                      <CartesianGrid horizontal={false} strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.5} />
-                      <XAxis type="number" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} allowDecimals={false} />
-                      <YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
-                      <Tooltip content={<ChartTooltip />} />
-                      <Bar dataKey="count" fill="#3b82f6" radius={[0, 4, 4, 0]} barSize={12} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <Empty>No data</Empty>
-                )}
-              </ChartCard>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+              <Card className="lg:col-span-2">
+                <ChartHeader title="By Industry" subtitle="Click a tile to drill down" />
+                <CardContent className="p-1 h-[230px]">
+                  <EChart option={industryOption} eventHandlers={fieldClickEvents("industry", byIndustry, "Industry")} />
+                </CardContent>
+              </Card>
+              <Card>
+                <ChartHeader title="By Designation Level" subtitle="Seniority mix — click to drill down" />
+                <CardContent className="p-1 h-[230px]">
+                  <EChart option={designationLevelOption} eventHandlers={fieldClickEvents("designation_level", byDesignationLevel, "Designation level")} />
+                </CardContent>
+              </Card>
             </div>
 
-            {/* Source status */}
-            <ChartCard title="By source" subtitle="UCDB Status breakdown">
-              {byStatus.length > 0 ? (
-                <ResponsiveContainer width="100%" height={160}>
-                  <BarChart data={byStatus} margin={{ top: 4, right: 12, left: -18, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.5} />
-                    <XAxis dataKey="name" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
-                    <YAxis tick={{ fontSize: 10 }} tickLine={false} axisLine={false} allowDecimals={false} />
-                    <Tooltip content={<ChartTooltip />} />
-                    <Bar dataKey="value" name="Records" radius={[4, 4, 0, 0]} barSize={40}>
-                      {byStatus.map((_, i) => (
-                        <Cell key={i} fill={COLORS[i % COLORS.length]} />
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+              <Card>
+                <ChartHeader title="Top States" subtitle="Click a bar to drill down" />
+                <CardContent className="p-1 h-[230px]">
+                  <EChart option={statesOption} eventHandlers={fieldClickEvents("state", byState, "State")} />
+                </CardContent>
+              </Card>
+              <Card>
+                <ChartHeader title="Top Cities" subtitle="Click a bar to drill down" />
+                <CardContent className="p-1 h-[230px]">
+                  <EChart option={cityOption} eventHandlers={fieldClickEvents("city", byCity, "City")} />
+                </CardContent>
+              </Card>
+              <Card>
+                <ChartHeader title="By Company Size" subtitle="Employees — click to drill down" />
+                <CardContent className="p-1 h-[230px]">
+                  <EChart option={employeeSizeOption} eventHandlers={fieldClickEvents("employee_size", byEmployeeSize, "Company size")} />
+                </CardContent>
+              </Card>
+            </div>
+
+            <Card>
+              <ChartHeader
+                title="Top Companies"
+                subtitle="By number of contacts — click a bar to drill down"
+                extra={<Badge variant="secondary">{byCompany.length}</Badge>}
+              />
+              <CardContent className="p-1 h-[280px]">
+                <EChart option={companyOption} eventHandlers={fieldClickEvents("company_name", byCompany, "Company")} />
+              </CardContent>
+            </Card>
+
+            {/* Missing contact info */}
+            {missingBuckets.length > 0 && (
+              <Card>
+                <ChartHeader
+                  title="Missing Contact Info"
+                  subtitle="Records that can't currently be called or emailed"
+                  extra={<Badge variant="secondary">{missingBuckets.reduce((s, b) => s + b.rows.length, 0)}</Badge>}
+                />
+                <CardContent className="p-3">
+                  <TooltipProvider delayDuration={200}>
+                    <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${Math.min(missingBuckets.length, 3)}, minmax(0, 1fr))` }}>
+                      {missingBuckets.map((b) => (
+                        <div key={b.label} className={`rounded-lg border ${b.border} ${b.bg} p-2.5`}>
+                          <div className={`text-[11px] font-semibold ${b.text} mb-2 flex items-center gap-1.5`}>
+                            <span className={`inline-block w-2 h-2 rounded-full ${b.dot}`} />
+                            {b.label}
+                            <span className="ml-auto font-normal opacity-60">{b.rows.length}</span>
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {b.rows.slice(0, 24).map((r) => (
+                              <Tooltip key={r.id}>
+                                <TooltipTrigger asChild>
+                                  <button className={`text-[11px] px-2 py-0.5 rounded border bg-white ${b.pill} font-medium transition-colors cursor-default`}>
+                                    {r.full_name || r.company_name || "—"}
+                                  </button>
+                                </TooltipTrigger>
+                                <TooltipContent side="top" className="text-xs">
+                                  <p className="font-semibold mb-0.5">{r.full_name || "—"}</p>
+                                  <p>{r.company_name || "—"}</p>
+                                  <p>{r.designation || "—"}</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            ))}
+                          </div>
+                          {b.rows.length > 24 && (
+                            <button
+                              className="mt-2 text-[11px] text-muted-foreground underline underline-offset-2"
+                              onClick={() => setDrilldown({ label: b.label, rows: b.rows })}
+                            >
+                              +{b.rows.length - 24} more — view all
+                            </button>
+                          )}
+                        </div>
                       ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              ) : (
-                <Empty>No data</Empty>
-              )}
-            </ChartCard>
+                    </div>
+                  </TooltipProvider>
+                </CardContent>
+              </Card>
+            )}
           </>
         )}
       </div>
+
+      {/* Drill-down dialog */}
+      <Dialog open={!!drilldown} onOpenChange={(open) => { if (!open) setDrilldown(null); }}>
+        <DialogContent className="max-w-5xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <div className="flex items-center justify-between gap-2 pr-6">
+              <DialogTitle className="flex items-center gap-2">
+                <Users className="h-4 w-4" />
+                Records — {drilldown?.label}
+                <Badge variant="secondary">{drilldown?.rows.length ?? 0}</Badge>
+              </DialogTitle>
+              {drilldown && drilldown.rows.length > 0 && (
+                <Button variant="outline" size="sm" onClick={exportDrilldownCsv}>
+                  <Download className="mr-2 h-3.5 w-3.5" /> Export
+                </Button>
+              )}
+            </div>
+          </DialogHeader>
+          {drilldown && drilldown.rows.length > 0 ? (
+            <div className="border rounded-lg overflow-hidden">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-muted/50">
+                    <TableHead className="text-xs">Company</TableHead>
+                    <TableHead className="text-xs">Full Name</TableHead>
+                    <TableHead className="text-xs">Designation</TableHead>
+                    <TableHead className="text-xs">City / State</TableHead>
+                    <TableHead className="text-xs">Mobile</TableHead>
+                    <TableHead className="text-xs">Email</TableHead>
+                    <TableHead className="text-xs whitespace-nowrap">Added On</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {drilldown.rows.slice(0, 500).map((r) => (
+                    <TableRow key={r.id} className="hover:bg-muted/30">
+                      <TableCell className="text-xs max-w-[160px] truncate" title={r.company_name || ""}>{r.company_name || "—"}</TableCell>
+                      <TableCell className="text-xs max-w-[150px] truncate" title={r.full_name || ""}>{r.full_name || "—"}</TableCell>
+                      <TableCell className="text-xs max-w-[140px] truncate" title={r.designation || ""}>{r.designation || "—"}</TableCell>
+                      <TableCell className="text-xs whitespace-nowrap">{[r.city, r.state].filter(Boolean).join(", ") || "—"}</TableCell>
+                      <TableCell className="text-xs whitespace-nowrap">{r.mobile_number_1 || "—"}</TableCell>
+                      <TableCell className="text-xs max-w-[170px] truncate" title={r.official_email || ""}>{r.official_email || r.personal_email_1 || r.personal_email_2 || "—"}</TableCell>
+                      <TableCell className="text-xs whitespace-nowrap">{format(new Date(r.created_at), "dd MMM ''yy")}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              {drilldown.rows.length > 500 && (
+                <p className="text-center text-[11px] text-muted-foreground py-2 border-t bg-muted/30">
+                  Showing first 500 of {drilldown.rows.length} — export CSV for the full list.
+                </p>
+              )}
+            </div>
+          ) : (
+            <p className="text-center text-muted-foreground text-sm py-10">No records found for this slice.</p>
+          )}
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 }
 
-const TONES: Record<string, string> = {
-  slate: "text-slate-600 bg-slate-100 dark:bg-slate-800/50",
-  amber: "text-amber-600 bg-amber-100 dark:bg-amber-900/30",
-  blue: "text-blue-600 bg-blue-100 dark:bg-blue-900/30",
-  emerald: "text-emerald-600 bg-emerald-100 dark:bg-emerald-900/30",
-  violet: "text-violet-600 bg-violet-100 dark:bg-violet-900/30",
-  indigo: "text-indigo-600 bg-indigo-100 dark:bg-indigo-900/30",
-};
-
-function KpiCard({ icon, label, value, tone }: { icon: React.ReactNode; label: string; value: React.ReactNode; tone: string }) {
+function KpiCard({ icon, label, value, accent, onClick }: { icon: React.ReactNode; label: string; value: React.ReactNode; accent: string; onClick?: () => void }) {
   return (
-    <Card className="overflow-hidden transition-shadow hover:shadow-md">
-      <CardContent className="flex items-center gap-3 p-3">
-        <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${TONES[tone] || TONES.slate}`}>{icon}</div>
+    <Card className={`overflow-hidden transition-shadow hover:shadow-md ${onClick ? "cursor-pointer" : ""}`} onClick={onClick}>
+      <CardContent className="flex items-center gap-2.5 p-2.5" style={{ borderLeft: `3px solid ${accent}` }}>
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg" style={{ backgroundColor: `${accent}1A`, color: accent }}>
+          {icon}
+        </div>
         <div className="min-w-0">
-          <p className="truncate text-xs text-muted-foreground">{label}</p>
-          <p className="text-xl font-semibold leading-tight">{value}</p>
+          <p className="truncate text-[11px] text-muted-foreground leading-tight">{label}</p>
+          <p className="text-lg font-semibold leading-tight">{value}</p>
         </div>
       </CardContent>
     </Card>
   );
 }
 
-function ChartCard({ title, subtitle, children, className = "" }: { title: string; subtitle?: string; children: React.ReactNode; className?: string }) {
+function ChartHeader({ title, subtitle, extra }: { title: string; subtitle?: string; extra?: React.ReactNode }) {
   return (
-    <Card className={`flex flex-col p-4 ${className}`}>
-      <div className="mb-2 shrink-0">
-        <h3 className="text-sm font-semibold">{title}</h3>
-        {subtitle && <p className="text-[11px] text-muted-foreground">{subtitle}</p>}
+    <div className="flex items-start justify-between gap-2 p-3 pb-1">
+      <div>
+        <h3 className="text-sm font-semibold leading-tight">{title}</h3>
+        {subtitle && <p className="text-[11px] text-muted-foreground leading-tight">{subtitle}</p>}
       </div>
-      <div className="h-[220px]">{children}</div>
-    </Card>
-  );
-}
-
-function Empty({ children }: { children: React.ReactNode }) {
-  return <div className="flex h-full items-center justify-center text-xs text-muted-foreground">{children}</div>;
-}
-
-const ChartTooltip = ({ active, payload, label }: any) => {
-  if (!active || !payload?.length) return null;
-  return (
-    <div className="space-y-1 rounded-lg border bg-card px-3 py-2 text-xs shadow-md">
-      {label && <p className="mb-1 font-medium text-foreground">{label}</p>}
-      {payload.map((p: any) => (
-        <div key={p.dataKey} className="flex items-center gap-2">
-          <span className="h-2 w-2 rounded-full" style={{ backgroundColor: p.color || p.fill }} />
-          <span className="capitalize text-muted-foreground">{p.name || p.dataKey}:</span>
-          <span className="font-medium">{p.value}</span>
-        </div>
-      ))}
+      {extra}
     </div>
   );
-};
+}
