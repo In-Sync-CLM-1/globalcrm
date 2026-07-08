@@ -15,14 +15,11 @@ setupErrorLogging();
 // stuck failing forever.
 sessionStorage.removeItem("chunk_reload");
 
-// When a fresh service worker takes control after a deploy, force a one-time reload
-// so the open tab/PWA picks up the new JS bundle instead of serving the cached one.
-if ("serviceWorker" in navigator && navigator.serviceWorker.controller) {
-  let reloading = false;
-  navigator.serviceWorker.addEventListener("controllerchange", () => {
-    if (reloading) return;
-    reloading = true;
-    window.location.reload();
+// Unregister any service worker left behind by the app's former PWA setup so
+// previously-installed users stop getting served a stale cached build.
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.getRegistrations().then((regs) => {
+    regs.forEach((reg) => reg.unregister());
   });
 }
 
