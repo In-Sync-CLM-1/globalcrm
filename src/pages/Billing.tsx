@@ -176,7 +176,12 @@ export default function Billing() {
 
   const status = String(sub?.subscription_status || "—");
   const balance = Number(sub?.wallet_balance ?? 0);
-  const nextBilling = sub?.next_billing_date ? format(new Date(sub.next_billing_date), "d MMM yyyy") : "—";
+  // next_billing_date is seeded at org creation (created_at + 1 month) purely as an
+  // internal trial-tracking baseline (see Users.tsx's inTrial check) — nothing is
+  // actually scheduled to charge on it. It only becomes a real commitment once the
+  // org has paid at least once (record-offline-payment / verify-razorpay-payment
+  // both advance it from the payment date by the plan's cadence at that point).
+  const nextBilling = hasEverPaid && sub?.next_billing_date ? format(new Date(sub.next_billing_date), "d MMM yyyy") : "—";
 
   return (
     <DashboardLayout>
@@ -197,7 +202,8 @@ export default function Billing() {
               : trialEnded ? `Trial ended ${format(trialEndsAt!, "d MMM yyyy")} · subscribe below`
               : `${seats} user${seats > 1 ? "s" : ""} × ${inr(perUser)}/mo`
             } />
-          <SnapCard icon={<CalendarClock size={16} />} tone="violet" label="Next billing" value={nextBilling} />
+          <SnapCard icon={<CalendarClock size={16} />} tone="violet" label="Next billing" value={nextBilling}
+            hint={!hasEverPaid ? "Not subscribed yet — nothing is scheduled to charge" : undefined} />
         </div>
 
         {/* Subscription */}
