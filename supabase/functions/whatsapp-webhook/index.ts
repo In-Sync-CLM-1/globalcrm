@@ -92,6 +92,55 @@ function mapExotelStatus(exoStatusCode: number): string {
   }
 }
 
+// Credit back a wallet charge for a WhatsApp send that was accepted at submission
+// time but failed at delivery (DLR). Idempotent on the service_usage_logs row for
+// (whatsapp, waLogId): once refunded/deleted, a duplicate DLR callback for the
+// same sid is a no-op. Mirrors pipeline-action-dispatcher's own refundFunds, but
+// this is the only refund path for failures that surface after submission.
+async function refundWalletForFailedMessage(
+  supabaseClient: any,
+  args: { orgId: string; waLogId: string; cost: number | null; reason: string },
+): Promise<void> {
+  try {
+    const { data: usage } = await supabaseClient
+      .from('service_usage_logs')
+      .select('id, cost')
+      .eq('org_id', args.orgId)
+      .eq('service_type', 'whatsapp')
+      .eq('reference_id', args.waLogId)
+      .maybeSingle();
+    if (!usage) return; // never charged, or already refunded
+
+    const cost = Number(usage.cost ?? args.cost ?? 0);
+    if (!(cost > 0)) return;
+
+    const { data: newBal, error } = await supabaseClient.rpc('credit_wallet_funds', {
+      p_org: args.orgId,
+      p_amount: cost,
+    });
+    if (error) {
+      console.error('credit_wallet_funds error:', error.message);
+      return;
+    }
+    const balanceAfter = Number(newBal ?? 0);
+    await supabaseClient.from('wallet_transactions').insert({
+      org_id: args.orgId,
+      transaction_type: 'refund',
+      amount: cost,
+      balance_before: balanceAfter - cost,
+      balance_after: balanceAfter,
+      reference_id: args.waLogId,
+      reference_type: 'whatsapp',
+      quantity: 1,
+      unit_cost: cost,
+      description: `Refund — WhatsApp delivery failed (${args.reason})`,
+    });
+    await supabaseClient.from('service_usage_logs').delete().eq('id', usage.id);
+  } catch (e) {
+    console.error('refundWalletForFailedMessage exception:', String(e));
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -283,7 +332,7 @@ Deno.serve(async (req) => {
         // dashboard funnel and the disposition column reflect real status.
         const { data: waLog } = await supabaseClient
           .from('whatsapp_logs')
-          .select('id, delivered_at')
+          .select('id, org_id, delivered_at, cost_charged')
           .eq('exotel_msg_sid', sid)
           .maybeSingle();
 
@@ -299,6 +348,19 @@ Deno.serve(async (req) => {
             logUpd.error_text = `${exo_detailed_status}: ${description}`;
           }
           await supabaseClient.from('whatsapp_logs').update(logUpd).eq('id', waLog.id);
+
+          // A message can be charged at send time (reserve_wallet_funds) then still
+          // bounce later at the DLR stage (invalid recipient, template rejected, etc).
+          // The sender's own failure path already refunds; this is the ONLY refund
+          // for failures that surface asynchronously via this webhook.
+          if (messageStatus === 'failed') {
+            await refundWalletForFailedMessage(supabaseClient, {
+              orgId: waLog.org_id,
+              waLogId: waLog.id,
+              cost: waLog.cost_charged,
+              reason: `${exo_detailed_status}: ${description}`,
+            });
+          }
         }
 
         if (!message && !waLog) {
