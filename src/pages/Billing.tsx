@@ -12,10 +12,12 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { format } from "date-fns";
+import { format, addDays, differenceInCalendarDays } from "date-fns";
 import { Wallet, Users, CalendarClock, Loader2, CheckCircle2, IndianRupee, Receipt, TrendingUp, FileText } from "lucide-react";
 
 declare global { interface Window { Razorpay?: any } }
+
+const TRIAL_DAYS = 14;
 
 const PLANS = [
   { id: "quarterly" as const, label: "Quarterly", months: 3, note: "Billed every 3 months" },
@@ -78,6 +80,12 @@ export default function Billing() {
     enabled: !!effectiveOrgId,
   });
 
+  const { data: org } = useQuery({
+    queryKey: ["billing-org", effectiveOrgId],
+    queryFn: async () => (await supabase.from("organizations").select("created_at").eq("id", effectiveOrgId).maybeSingle()).data,
+    enabled: !!effectiveOrgId,
+  });
+
   const perUser = Number(pricing?.per_user_monthly_cost ?? 799);
   const gstPct = Number(pricing?.gst_percentage ?? 18);
   const seats = Math.max(1, Number(sub?.user_count ?? 1));
@@ -85,6 +93,17 @@ export default function Billing() {
   const base = seats * perUser * months;
   const gst = +(base * gstPct / 100).toFixed(2);
   const total = +(base + gst).toFixed(2);
+
+  // Trial is informational only, same as every other org (Fervent included):
+  // no separate lockout state. A trial "ends" the moment the org has a paid
+  // invoice, or 14 days after signup, whichever comes first — after that the
+  // existing overdue-invoice ladder (grace -> read-only -> locked) is the
+  // only enforcement that ever applies.
+  const hasEverPaid = (invoices || []).some((inv: any) => (inv.payment_status ?? inv.status) === "paid");
+  const trialEndsAt = org?.created_at ? addDays(new Date(org.created_at), TRIAL_DAYS) : null;
+  const daysLeftInTrial = trialEndsAt ? differenceInCalendarDays(trialEndsAt, new Date()) : null;
+  const inTrial = !hasEverPaid && daysLeftInTrial !== null && daysLeftInTrial >= 0;
+  const trialEnded = !hasEverPaid && daysLeftInTrial !== null && daysLeftInTrial < 0;
 
   const usageSummary = useMemo(() => {
     const rows = usage || [];
@@ -169,8 +188,12 @@ export default function Billing() {
           <SnapCard icon={<Wallet size={16} />} tone="blue" label="Wallet balance" value={inr(balance)}
             hint={balance <= 500 ? "At the ₹500 reserve — calls & messages are paused until you top up" : balance <= 1000 ? "Low balance" : undefined} />
           <SnapCard icon={<CheckCircle2 size={16} />} tone="emerald" label="Subscription"
-            value={<span className="capitalize">{status === "trialing" ? "Trial" : status}</span>}
-            hint={`${seats} user${seats > 1 ? "s" : ""} × ${inr(perUser)}/mo`} />
+            value={<span className="capitalize">{inTrial ? "Trial" : trialEnded ? "Trial ended" : status}</span>}
+            hint={
+              inTrial ? `${daysLeftInTrial} day${daysLeftInTrial === 1 ? "" : "s"} left · ends ${format(trialEndsAt!, "d MMM yyyy")}`
+              : trialEnded ? `Trial ended ${format(trialEndsAt!, "d MMM yyyy")} · subscribe below`
+              : `${seats} user${seats > 1 ? "s" : ""} × ${inr(perUser)}/mo`
+            } />
           <SnapCard icon={<CalendarClock size={16} />} tone="violet" label="Next billing" value={nextBilling} />
         </div>
 
@@ -179,7 +202,9 @@ export default function Billing() {
           <CardHeader className="pb-3"><CardTitle className="text-base">Subscription plan</CardTitle></CardHeader>
           <CardContent className="space-y-4">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Users size={15} /> Charged on <span className="font-medium text-foreground">{seats}</span> user{seats > 1 ? "s" : ""} created · <span className="font-medium text-foreground">{inr(perUser)}</span> per user / month · 14-day free trial
+              <Users size={15} /> Charged on <span className="font-medium text-foreground">{seats}</span> user{seats > 1 ? "s" : ""} created · <span className="font-medium text-foreground">{inr(perUser)}</span> per user / month
+              {inTrial && <> · <span className="font-medium text-foreground">{daysLeftInTrial} day{daysLeftInTrial === 1 ? "" : "s"}</span> left in your 14-day free trial</>}
+              {trialEnded && <> · your 14-day free trial ended <span className="font-medium text-foreground">{format(trialEndsAt!, "d MMM yyyy")}</span></>}
             </div>
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
