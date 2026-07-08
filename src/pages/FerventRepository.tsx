@@ -97,8 +97,12 @@ const emptyFilters: RepositoryFilters = {
 
 // PostgREST's .or() splits on unescaped commas/parens, so a raw search value
 // like "Smith, Jones & Co" would otherwise be parsed as extra filter clauses.
+// The quotes must wrap the full ilike pattern (including any % wildcards) —
+// PostgREST only treats a value as quoted when the quote is the first
+// character, so wrapping the raw term and adding % outside the quotes (as
+// before) sent literal `"` and `%` chars to Postgres and matched nothing.
 function escapeOrValue(value: string): string {
-  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
 function applyBasicFilters(query: any, f: RepositoryFilters) {
@@ -107,9 +111,8 @@ function applyBasicFilters(query: any, f: RepositoryFilters) {
 
   if (f.search) {
     const s = escapeOrValue(f.search);
-    query = exact
-      ? query.or(`full_name.ilike.${s},company_name.ilike.${s}`)
-      : query.or(`full_name.ilike.%${s}%,company_name.ilike.%${s}%`);
+    const pattern = exact ? s : `%${s}%`;
+    query = query.or(`full_name.ilike."${pattern}",company_name.ilike."${pattern}"`);
   }
   if (f.city) query = query.ilike("city", like(f.city));
   if (f.state) query = query.ilike("state", like(f.state));
