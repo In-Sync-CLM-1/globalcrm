@@ -95,11 +95,14 @@ export default function Billing() {
   const total = +(base + gst).toFixed(2);
 
   // Trial is informational only, same as every other org (Fervent included):
-  // no separate lockout state. A trial "ends" the moment the org has a paid
-  // invoice, or 14 days after signup, whichever comes first — after that the
+  // no separate lockout state. A trial "ends" the moment the org has ever
+  // paid, or 14 days after signup, whichever comes first — after that the
   // existing overdue-invoice ladder (grace -> read-only -> locked) is the
-  // only enforcement that ever applies.
-  const hasEverPaid = (invoices || []).some((inv: any) => (inv.payment_status ?? inv.status) === "paid");
+  // only enforcement that ever applies. Read off organization_subscriptions.
+  // last_payment_date, not the invoices table — an invoice-ledger insert can
+  // fail independently of the payment itself succeeding (see
+  // SubscriptionStatusBanner for the incident that surfaced this).
+  const hasEverPaid = !!sub?.last_payment_date;
   const trialEndsAt = org?.created_at ? addDays(new Date(org.created_at), TRIAL_DAYS) : null;
   const daysLeftInTrial = trialEndsAt ? differenceInCalendarDays(trialEndsAt, new Date()) : null;
   const inTrial = !hasEverPaid && daysLeftInTrial !== null && daysLeftInTrial >= 0;

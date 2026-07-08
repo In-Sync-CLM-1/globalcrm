@@ -29,13 +29,14 @@ export default function SubscriptionStatusBanner() {
 
   // Trial reminder — informational only, same rule as every org (no lockout
   // when the 14 days run out; the overdue-invoice ladder below is the only
-  // thing that ever actually restricts access). Only shown once the trial
-  // has actually ended, so it reads as a nudge rather than a daily nag.
-  // "Has this org ever paid" is read straight off organization_subscriptions.
-  // last_payment_date — both payment paths (Razorpay + offline) stamp it in
-  // the same write that flips subscription_status to active, so it can't
-  // drift out of sync the way a side-table (subscription_invoices) can if an
-  // invoice-ledger insert fails independently of the payment succeeding.
+  // thing that ever actually restricts access). Shown throughout the trial
+  // (as a countdown) and after it ends (as a nudge), for any org that has
+  // never paid. "Has this org ever paid" is read straight off
+  // organization_subscriptions.last_payment_date — both payment paths
+  // (Razorpay + offline) stamp it in the same write that flips
+  // subscription_status to active, so it can't drift out of sync the way a
+  // side-table (subscription_invoices) can if an invoice-ledger insert fails
+  // independently of the payment succeeding.
   const { data: trialInfo } = useQuery({
     queryKey: ["subscription-trial-check", effectiveOrgId],
     queryFn: async () => {
@@ -43,7 +44,7 @@ export default function SubscriptionStatusBanner() {
       if (!org?.created_at) return null;
       const trialEndsAt = addDays(new Date(org.created_at), TRIAL_DAYS);
       const daysLeft = differenceInCalendarDays(trialEndsAt, new Date());
-      return daysLeft < 0 ? { trialEndsAt } : null;
+      return { trialEndsAt, daysLeft, ended: daysLeft < 0 };
     },
     enabled: !!effectiveOrgId && subscription?.subscription_status === "active" && !subscription?.last_payment_date,
   });
@@ -52,13 +53,30 @@ export default function SubscriptionStatusBanner() {
 
   if (subscription.subscription_status === "active") {
     if (!trialInfo) return null;
+    if (trialInfo.ended) {
+      return (
+        <div className="mx-6 mt-4">
+          <Alert>
+            <Gift className="h-4 w-4" />
+            <AlertTitle>Your free trial ended {format(trialInfo.trialEndsAt, "d MMM yyyy")}</AlertTitle>
+            <AlertDescription>
+              Everything still works — <Link to="/billing" className="underline underline-offset-2">subscribe on the Billing page</Link> whenever you're ready.
+            </AlertDescription>
+          </Alert>
+        </div>
+      );
+    }
     return (
       <div className="mx-6 mt-4">
         <Alert>
           <Gift className="h-4 w-4" />
-          <AlertTitle>Your free trial ended {format(trialInfo.trialEndsAt, "d MMM yyyy")}</AlertTitle>
+          <AlertTitle>
+            {trialInfo.daysLeft === 0
+              ? "Your free trial ends today"
+              : `${trialInfo.daysLeft} day${trialInfo.daysLeft === 1 ? "" : "s"} left in your free trial`}
+          </AlertTitle>
           <AlertDescription>
-            Everything still works — <Link to="/billing" className="underline underline-offset-2">subscribe on the Billing page</Link> whenever you're ready.
+            Trial ends {format(trialInfo.trialEndsAt, "d MMM yyyy")} — <Link to="/billing" className="underline underline-offset-2">subscribe on the Billing page</Link> anytime, everything keeps working either way.
           </AlertDescription>
         </Alert>
       </div>
