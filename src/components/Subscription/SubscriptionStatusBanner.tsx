@@ -16,7 +16,7 @@ export default function SubscriptionStatusBanner() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("organization_subscriptions")
-        .select("subscription_status, grace_period_end, readonly_period_end, lockout_date, wallet_balance, wallet_minimum_balance")
+        .select("subscription_status, grace_period_end, readonly_period_end, lockout_date, wallet_balance, wallet_minimum_balance, last_payment_date")
         .eq("org_id", effectiveOrgId)
         .maybeSingle();
 
@@ -31,19 +31,21 @@ export default function SubscriptionStatusBanner() {
   // when the 14 days run out; the overdue-invoice ladder below is the only
   // thing that ever actually restricts access). Only shown once the trial
   // has actually ended, so it reads as a nudge rather than a daily nag.
+  // "Has this org ever paid" is read straight off organization_subscriptions.
+  // last_payment_date — both payment paths (Razorpay + offline) stamp it in
+  // the same write that flips subscription_status to active, so it can't
+  // drift out of sync the way a side-table (subscription_invoices) can if an
+  // invoice-ledger insert fails independently of the payment succeeding.
   const { data: trialInfo } = useQuery({
     queryKey: ["subscription-trial-check", effectiveOrgId],
     queryFn: async () => {
-      const [{ data: org }, { data: paidInvoice }] = await Promise.all([
-        supabase.from("organizations").select("created_at").eq("id", effectiveOrgId).maybeSingle(),
-        supabase.from("subscription_invoices").select("id").eq("org_id", effectiveOrgId).eq("payment_status", "paid").limit(1).maybeSingle(),
-      ]);
-      if (!org?.created_at || paidInvoice) return null;
+      const { data: org } = await supabase.from("organizations").select("created_at").eq("id", effectiveOrgId).maybeSingle();
+      if (!org?.created_at) return null;
       const trialEndsAt = addDays(new Date(org.created_at), TRIAL_DAYS);
       const daysLeft = differenceInCalendarDays(trialEndsAt, new Date());
       return daysLeft < 0 ? { trialEndsAt } : null;
     },
-    enabled: !!effectiveOrgId && subscription?.subscription_status === "active",
+    enabled: !!effectiveOrgId && subscription?.subscription_status === "active" && !subscription?.last_payment_date,
   });
 
   if (!subscription) return null;
