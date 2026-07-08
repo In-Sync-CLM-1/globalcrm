@@ -461,16 +461,3 @@
   }
 }
 
-/* PWA specific styles */
-@media (display-mode: standalone) {
-  body {
-    /* Adjust for standalone PWA mode */
-    padding-top: env(safe-area-inset-top);
-  }
-  
-  /* Hide browser-specific UI elements in standalone mode */
-  .browser-only {
-    display: none !important;
-  }
-}
-
