@@ -91,6 +91,11 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
         setIsUploading(false);
         return;
       }
+      if (!headerLine.includes("unique id") && !headerLine.includes("unique_id")) {
+        setValidationError("CSV must contain a 'Unique ID' column");
+        setIsUploading(false);
+        return;
+      }
 
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("User not authenticated");
@@ -208,9 +213,9 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
             <p className="font-medium">Requirements:</p>
             <ul className="list-disc list-inside space-y-1 text-muted-foreground">
               <li>UTF-8 encoded CSV file</li>
-              <li>Required column: <code className="bg-background px-1 rounded">Full Name</code></li>
+              <li>Required columns: <code className="bg-background px-1 rounded">Full Name</code> and <code className="bg-background px-1 rounded">Unique ID</code></li>
               <li>Rows are matched on <code className="bg-background px-1 rounded">Unique ID</code> — a matching ID updates that existing record with this upload's data; a new ID adds a new record</li>
-              <li>Rows with no Unique ID are skipped if their Mobile Number or Email already exists</li>
+              <li>Rows missing a Unique ID are rejected — every row needs one</li>
               <li>Maximum 5,000 records per upload</li>
               <li>Maximum file size: 10MB</li>
             </ul>

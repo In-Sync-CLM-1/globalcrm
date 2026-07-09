@@ -183,7 +183,7 @@ serve(async (req) => {
         requiredColumns = ['first_name', 'email'];
         break;
       case 'fervent_repository':
-        requiredColumns = ['full_name'];
+        requiredColumns = ['full_name', 'unique_id'];
         break;
       case 'email_recipients':
       case 'whatsapp_recipients':
@@ -355,6 +355,22 @@ serve(async (req) => {
             created_by: importJob.user_id,
             import_job_id: importJob.id
           };
+        }
+
+        // Unique ID is mandatory for the Fervent repository — it's the only
+        // reliable key the insert-or-update upsert can match on. A row
+        // without one is rejected rather than silently going through the
+        // weaker Mobile/Email fallback.
+        if (importJob.import_type === 'fervent_repository' && !record.unique_id) {
+          errorCount++;
+          errors.push({
+            row: currentRowNumber,
+            field: 'unique_id',
+            message: 'Unique ID is required',
+            sample: line.substring(0, 100)
+          });
+          processedRows++;
+          continue;
         }
 
         batch.push(record);
