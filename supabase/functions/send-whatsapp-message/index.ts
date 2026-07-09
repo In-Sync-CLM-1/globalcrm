@@ -405,7 +405,7 @@ function buildTemplateComponents(template: any, variables?: Record<string, strin
         components.push({
           type: 'button',
           sub_type: 'url',
-          index: index,
+          index: String(index),
           parameters: [{
             type: 'text',
             text: variables?.[`button_${index}`] || '',
