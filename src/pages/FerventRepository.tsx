@@ -39,6 +39,7 @@ import { Upload, Download, Search, X, Phone, MessageSquare, GitBranch, Lock, His
 export interface RepositoryRecord {
   id: string;
   unique_id: string | null;
+  upload_status: string | null;
   db_sourced_year: number | null;
   ucdb_status: string | null;
   company_name: string | null;
@@ -528,6 +529,7 @@ export default function FerventRepository() {
                       </TableHead>
                       {[
                         ["unique_id", "Unique ID"],
+                        ["upload_status", "Status"],
                         ["db_sourced_year", "DB Sourced Year"],
                         ["ucdb_status", "UCDB Status"],
                         ["company_name", "Company Name"],
@@ -574,6 +576,11 @@ export default function FerventRepository() {
                           <Checkbox checked={selectedIds.includes(r.id)} onCheckedChange={() => toggleSelect(r.id)} />
                         </TableCell>
                         <TableCell className="whitespace-nowrap">{r.unique_id || "—"}</TableCell>
+                        <TableCell className="whitespace-nowrap">
+                          <Badge variant={r.upload_status === "existing" ? "secondary" : "outline"}>
+                            {r.upload_status === "existing" ? "Updated" : "Fresh"}
+                          </Badge>
+                        </TableCell>
                         <TableCell className="whitespace-nowrap">{r.db_sourced_year || "—"}</TableCell>
                         <TableCell className="whitespace-nowrap">{r.ucdb_status ? <Badge variant="outline">{r.ucdb_status}</Badge> : "—"}</TableCell>
                         <TableCell className="whitespace-nowrap">{r.company_name || "—"}</TableCell>

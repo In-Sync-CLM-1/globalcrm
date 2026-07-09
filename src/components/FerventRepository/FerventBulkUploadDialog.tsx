@@ -209,7 +209,8 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
             <ul className="list-disc list-inside space-y-1 text-muted-foreground">
               <li>UTF-8 encoded CSV file</li>
               <li>Required column: <code className="bg-background px-1 rounded">Full Name</code></li>
-              <li>Duplicate records are matched on <code className="bg-background px-1 rounded">Unique ID</code></li>
+              <li>Rows are matched on <code className="bg-background px-1 rounded">Unique ID</code> — a matching ID updates that existing record with this upload's data; a new ID adds a new record</li>
+              <li>Rows with no Unique ID are skipped if their Mobile Number or Email already exists</li>
               <li>Maximum 5,000 records per upload</li>
               <li>Maximum file size: 10MB</li>
             </ul>

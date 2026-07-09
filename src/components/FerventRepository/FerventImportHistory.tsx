@@ -12,6 +12,7 @@ interface ImportJobRow {
   success_count: number | null;
   error_count: number | null;
   duplicate_count: number | null;
+  updated_count: number | null;
   stage_details: { duplicate_samples?: Array<{ matched_on: string; value: string }> } | null;
 }
 
@@ -34,7 +35,7 @@ export function FerventImportHistory({ open, onOpenChange, orgId }: FerventImpor
     queryFn: async () => {
       const { data, error } = await supabase
         .from("import_jobs")
-        .select("id, file_name, status, created_at, success_count, error_count, duplicate_count, stage_details")
+        .select("id, file_name, status, created_at, success_count, error_count, duplicate_count, updated_count, stage_details")
         .eq("org_id", orgId)
         .eq("import_type", "fervent_repository")
         .order("created_at", { ascending: false })
@@ -62,6 +63,7 @@ export function FerventImportHistory({ open, onOpenChange, orgId }: FerventImpor
                 <TableHead>File</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Inserted</TableHead>
+                <TableHead>Updated</TableHead>
                 <TableHead>Duplicates Skipped</TableHead>
                 <TableHead>Errors</TableHead>
                 <TableHead>Date</TableHead>
@@ -77,6 +79,7 @@ export function FerventImportHistory({ open, onOpenChange, orgId }: FerventImpor
                       <Badge variant={STATUS_VARIANT[job.status] || "secondary"}>{job.status}</Badge>
                     </TableCell>
                     <TableCell>{job.success_count ?? 0}</TableCell>
+                    <TableCell>{job.updated_count ?? 0}</TableCell>
                     <TableCell>
                       {job.duplicate_count ? (
                         <span title={samples.map((s) => `${s.matched_on}: ${s.value}`).join("\n")}>
