@@ -416,6 +416,10 @@ serve(async (req) => {
               duplicateSamples.push(...result.duplicateSamples.slice(0, Math.max(0, 200 - duplicateSamples.length)));
             }
           }
+          if (result.dbErrors) {
+            errorCount += result.dbErrors;
+            if (result.dbErrorSamples) errors.push(...result.dbErrorSamples);
+          }
 
           batch = [];
 
@@ -462,6 +466,10 @@ serve(async (req) => {
         if (result.duplicateSamples) {
           duplicateSamples.push(...result.duplicateSamples.slice(0, Math.max(0, 200 - duplicateSamples.length)));
         }
+      }
+      if (result.dbErrors) {
+        errorCount += result.dbErrors;
+        if (result.dbErrorSamples) errors.push(...result.dbErrorSamples);
       }
     }
 
@@ -575,7 +583,7 @@ async function processBatch(
   importJob: ImportJob,
   batch: any[],
   batchNumber: number
-): Promise<{ inserted: number; updated: number; skipped: number; duplicateSamples?: Array<{ matched_on: string; value: string }> }> {
+): Promise<{ inserted: number; updated: number; skipped: number; dbErrors?: number; duplicateSamples?: Array<{ matched_on: string; value: string }>; dbErrorSamples?: Array<{ row?: number; field?: string; message: string; sample?: string }> }> {
   console.log('[DB] Inserting batch', batchNumber, 'with', batch.length, 'records');
 
   try {
@@ -737,6 +745,11 @@ async function processBatch(
         return { inserted: 0, updated: 0, skipped: originalLength, duplicateSamples };
       }
 
+      let insertedCount = 0;
+      let updatedCount = 0;
+      let dbErrorCount = 0;
+      const dbErrorSamples: Array<{ row?: number; field?: string; message: string; sample?: string }> = [];
+
       const { data: upsertResult, error: upsertError } = await supabase.rpc('upsert_fervent_repository_batch', {
         p_org_id: importJob.org_id,
         p_created_by: importJob.user_id,
@@ -744,16 +757,38 @@ async function processBatch(
         p_records: batch,
       });
 
-      if (upsertError) {
-        console.error('[DB] Batch upsert failed:', upsertError);
-        throw upsertError;
+      if (!upsertError) {
+        const row = Array.isArray(upsertResult) ? upsertResult[0] : upsertResult;
+        insertedCount = row?.inserted_count ?? 0;
+        updatedCount = row?.updated_count ?? 0;
+      } else {
+        // The whole-batch upsert failed — most likely one bad row in this
+        // batch of up to 500 (e.g. a value Postgres can't cast). Don't let
+        // that take the other ~499 good rows down with it: retry one row at
+        // a time and only exclude the row(s) that actually fail.
+        console.error(`[DB] Batch ${batchNumber} upsert failed as a whole, retrying row-by-row:`, upsertError);
+        for (const rec of batch) {
+          const { data: rowResult, error: rowError } = await supabase.rpc('upsert_fervent_repository_batch', {
+            p_org_id: importJob.org_id,
+            p_created_by: importJob.user_id,
+            p_import_job_id: importJob.id,
+            p_records: [rec],
+          });
+          if (rowError) {
+            dbErrorCount++;
+            if (dbErrorSamples.length < 20) {
+              dbErrorSamples.push({ field: 'unique_id', message: rowError.message, sample: String(rec.unique_id ?? '') });
+            }
+            continue;
+          }
+          const rowRow = Array.isArray(rowResult) ? rowResult[0] : rowResult;
+          insertedCount += rowRow?.inserted_count ?? 0;
+          updatedCount += rowRow?.updated_count ?? 0;
+        }
       }
 
-      const row = Array.isArray(upsertResult) ? upsertResult[0] : upsertResult;
-      const insertedCount = row?.inserted_count ?? 0;
-      const updatedCount = row?.updated_count ?? 0;
-      console.log(`[DB] Batch ${batchNumber}: ${insertedCount} inserted, ${updatedCount} updated, ${skippedCount} duplicates skipped`);
-      return { inserted: insertedCount, updated: updatedCount, skipped: skippedCount, duplicateSamples };
+      console.log(`[DB] Batch ${batchNumber}: ${insertedCount} inserted, ${updatedCount} updated, ${skippedCount} duplicates skipped, ${dbErrorCount} row errors`);
+      return { inserted: insertedCount, updated: updatedCount, skipped: skippedCount, dbErrors: dbErrorCount, duplicateSamples, dbErrorSamples };
     } else {
       throw new Error(`Unknown import type: ${importJob.import_type}`);
     }

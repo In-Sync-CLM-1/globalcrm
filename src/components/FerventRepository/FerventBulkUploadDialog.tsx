@@ -26,17 +26,79 @@ interface FerventBulkUploadDialogProps {
   onUploadStarted: () => void;
 }
 
+interface UploadPreview {
+  total: number;
+  willProcess: number;
+  missingUniqueId: number;
+}
+
+// Mirrors the backend's CSV parsing (process-bulk-import/index.ts) closely
+// enough to give an accurate pre-upload count — same quoted-comma handling
+// and header normalization, so "will be processed" matches what actually
+// happens once the file is uploaded.
+function parseCSVLine(line: string): string[] {
+  const values: string[] = [];
+  let current = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    const nextChar = line[i + 1];
+    if (char === '"') {
+      if (inQuotes && nextChar === '"') { current += '"'; i++; } else { inQuotes = !inQuotes; }
+    } else if (char === "," && !inQuotes) {
+      values.push(current.trim());
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+  values.push(current.trim());
+  return values.map((v) => v.replace(/^"|"$/g, ""));
+}
+
+function normalizeHeader(header: string): string {
+  return header.toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "");
+}
+
+function computePreview(text: string): UploadPreview {
+  const lines = text.trim().split("\n").filter((l) => l.trim());
+  const headers = lines.length > 0 ? parseCSVLine(lines[0]).map(normalizeHeader) : [];
+  const uniqueIdIdx = headers.indexOf("unique_id");
+
+  const total = Math.max(0, lines.length - 1);
+  let missingUniqueId = 0;
+  for (let i = 1; i < lines.length; i++) {
+    const values = parseCSVLine(lines[i]);
+    const uid = uniqueIdIdx >= 0 ? (values[uniqueIdIdx] || "").trim() : "";
+    if (!uid) missingUniqueId++;
+  }
+
+  return { total, willProcess: total - missingUniqueId, missingUniqueId };
+}
+
 export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadStarted }: FerventBulkUploadDialogProps) {
   const [file, setFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [validationError, setValidationError] = useState<string>("");
+  const [preview, setPreview] = useState<UploadPreview | null>(null);
   const notification = useNotification();
 
   const validateFile = (f: File): string | null => {
     if (!f.type.includes("csv") && !f.name.endsWith(".csv")) return "Please select a CSV file";
     if (f.size > MAX_FILE_SIZE) return "File size must be less than 10MB";
     return null;
+  };
+
+  const acceptFile = async (f: File) => {
+    setFile(f);
+    setPreview(null);
+    try {
+      const text = await f.text();
+      setPreview(computePreview(text));
+    } catch {
+      // Preview is best-effort; the real validation happens on Upload.
+    }
   };
 
   const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); setIsDragging(true); };
@@ -48,14 +110,14 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
     const dropped = e.dataTransfer.files[0];
     if (!dropped) return;
     const error = validateFile(dropped);
-    if (error) { setValidationError(error); setFile(null); } else { setValidationError(""); setFile(dropped); }
+    if (error) { setValidationError(error); setFile(null); setPreview(null); } else { setValidationError(""); acceptFile(dropped); }
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = e.target.files?.[0];
     if (!selected) return;
     const error = validateFile(selected);
-    if (error) { setValidationError(error); setFile(null); } else { setValidationError(""); setFile(selected); }
+    if (error) { setValidationError(error); setFile(null); setPreview(null); } else { setValidationError(""); acceptFile(selected); }
   };
 
   const downloadTemplate = () => {
@@ -134,10 +196,14 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
       });
       if (triggerError) throw triggerError;
 
-      notification.success("Upload started", "Your file is being processed in the background");
+      const countMessage = preview
+        ? `${preview.willProcess} of ${preview.total} records will be processed${preview.missingUniqueId > 0 ? ` (${preview.missingUniqueId} skipped — missing Unique ID)` : ""}.`
+        : "Your file is being processed in the background.";
+      notification.success("Upload started", countMessage);
       onUploadStarted();
       onOpenChange(false);
       setFile(null);
+      setPreview(null);
     } catch (error: any) {
       notification.error("Upload failed", error.message);
     } finally {
@@ -148,6 +214,7 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
   const handleClose = () => {
     if (!isUploading) {
       setFile(null);
+      setPreview(null);
       setValidationError("");
       onOpenChange(false);
     }
@@ -191,7 +258,18 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
                 <FileText className="h-12 w-12 mx-auto text-primary" />
                 <p className="text-sm font-medium">{file.name}</p>
                 <p className="text-xs text-muted-foreground">{(file.size / 1024).toFixed(2)} KB</p>
-                <Button type="button" variant="ghost" size="sm" onClick={() => { setFile(null); setValidationError(""); }}>
+                {preview && (
+                  <p className="text-xs">
+                    {preview.missingUniqueId > 0 ? (
+                      <span className="text-amber-600">
+                        {preview.willProcess} of {preview.total} records will be processed — {preview.missingUniqueId} will be skipped (missing Unique ID)
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">All {preview.total} records will be processed</span>
+                    )}
+                  </p>
+                )}
+                <Button type="button" variant="ghost" size="sm" onClick={() => { setFile(null); setPreview(null); setValidationError(""); }}>
                   Remove
                 </Button>
               </div>

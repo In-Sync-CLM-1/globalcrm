@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import DashboardLayout from "@/components/Layout/DashboardLayout";
@@ -20,6 +20,8 @@ import PaginationControls from "@/components/common/PaginationControls";
 import { BulkDeleteButton } from "@/components/common/BulkDeleteButton";
 import { exportToCSV } from "@/utils/exportUtils";
 import { FerventBulkUploadDialog } from "@/components/FerventRepository/FerventBulkUploadDialog";
+import { FerventActiveUploadProgress } from "@/components/FerventRepository/FerventActiveUploadProgress";
+import { useFerventActiveImportJob } from "@/hooks/useFerventActiveImportJob";
 import { FerventRecordActivity } from "@/components/FerventRepository/FerventRecordActivity";
 import { FerventExportHistory } from "@/components/FerventRepository/FerventExportHistory";
 import { FerventImportHistory } from "@/components/FerventRepository/FerventImportHistory";
@@ -183,6 +185,19 @@ function DisabledAction({ icon: Icon, label }: { icon: any; label: string }) {
 
 export default function FerventRepository() {
   const { effectiveOrgId } = useOrgContext();
+  const { data: activeImportJob } = useFerventActiveImportJob(effectiveOrgId || null);
+  const hadActiveImportJob = useRef(false);
+  useEffect(() => {
+    if (activeImportJob) {
+      hadActiveImportJob.current = true;
+    } else if (hadActiveImportJob.current) {
+      // The active job just finished (polling no longer finds a pending/
+      // processing row) — refresh the table and import history to show it.
+      hadActiveImportJob.current = false;
+      queryClient.invalidateQueries({ queryKey: ["fervent-repository"] });
+      queryClient.invalidateQueries({ queryKey: ["fervent-import-history"] });
+    }
+  }, [activeImportJob, queryClient]);
   const { canAccessFeature, loading: featureLoading } = useFeatureAccess();
   const notify = useNotification();
   const queryClient = useQueryClient();
@@ -414,12 +429,14 @@ export default function FerventRepository() {
               <Download className="h-4 w-4 mr-2" />
               {exporting ? "Exporting..." : selectedIds.length > 0 ? `Export Selected (${selectedIds.length})` : "Export"}
             </Button>
-            <Button size="sm" onClick={() => setShowUpload(true)}>
+            <Button size="sm" onClick={() => setShowUpload(true)} disabled={!!activeImportJob}>
               <Upload className="h-4 w-4 mr-2" />
-              Import CSV
+              {activeImportJob ? "Import in progress…" : "Import CSV"}
             </Button>
           </div>
         </div>
+
+        <FerventActiveUploadProgress orgId={effectiveOrgId || null} />
 
         <Card>
           <Collapsible open={filtersOpen} onOpenChange={setFiltersOpen}>
