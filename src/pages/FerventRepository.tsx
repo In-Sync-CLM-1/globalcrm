@@ -34,7 +34,8 @@ import {
   type BooleanQuery,
   type SavedSearchDefinition,
 } from "@/components/FerventRepository/ferventBooleanSearch";
-import { Upload, Download, Search, X, Phone, MessageSquare, GitBranch, Lock, History, Pencil, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
+import { Upload, Download, Search, X, Phone, MessageSquare, GitBranch, Lock, History, Pencil, ArrowUp, ArrowDown, ArrowUpDown, ChevronDown, ChevronUp } from "lucide-react";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 export interface RepositoryRecord {
   id: string;
@@ -197,6 +198,7 @@ export default function FerventRepository() {
   const [showBulkEdit, setShowBulkEdit] = useState(false);
   const [editingRecord, setEditingRecord] = useState<RepositoryRecord | null>(null);
   const [searchMode, setSearchMode] = useState<"basic" | "advanced">("basic");
+  const [filtersOpen, setFiltersOpen] = useState(true);
   const [advancedQuery, setAdvancedQuery] = useState<BooleanQuery>(emptyBooleanQuery);
   const [appliedAdvancedQuery, setAppliedAdvancedQuery] = useState<BooleanQuery | null>(null);
   const [sortField, setSortField] = useState<string>("created_at");
@@ -420,29 +422,38 @@ export default function FerventRepository() {
         </div>
 
         <Card>
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between flex-wrap gap-2">
-              <CardTitle className="text-sm font-medium flex items-center gap-2">
-                <Search className="h-4 w-4" /> {searchMode === "advanced" ? "Advanced Search" : "Filters"}
-              </CardTitle>
-              <div className="flex gap-1">
-                <Button
-                  size="sm"
-                  variant={searchMode === "basic" ? "secondary" : "ghost"}
-                  onClick={() => setSearchMode("basic")}
-                >
-                  Filters
-                </Button>
-                <Button
-                  size="sm"
-                  variant={searchMode === "advanced" ? "secondary" : "ghost"}
-                  onClick={() => setSearchMode("advanced")}
-                >
-                  Advanced Search
-                </Button>
+          <Collapsible open={filtersOpen} onOpenChange={setFiltersOpen}>
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <CollapsibleTrigger asChild>
+                  <button
+                    type="button"
+                    className="flex items-center gap-2 text-sm font-medium hover:text-foreground/80"
+                  >
+                    <Search className="h-4 w-4" />
+                    {searchMode === "advanced" ? "Advanced Search" : "Filters"}
+                    {filtersOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                  </button>
+                </CollapsibleTrigger>
+                <div className="flex gap-1">
+                  <Button
+                    size="sm"
+                    variant={searchMode === "basic" ? "secondary" : "ghost"}
+                    onClick={() => { setSearchMode("basic"); setFiltersOpen(true); }}
+                  >
+                    Filters
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={searchMode === "advanced" ? "secondary" : "ghost"}
+                    onClick={() => { setSearchMode("advanced"); setFiltersOpen(true); }}
+                  >
+                    Advanced Search
+                  </Button>
+                </div>
               </div>
-            </div>
-          </CardHeader>
+            </CardHeader>
+            <CollapsibleContent>
           <CardContent>
             {searchMode === "advanced" ? (
               <FerventAdvancedSearch
@@ -491,6 +502,8 @@ export default function FerventRepository() {
               </>
             )}
           </CardContent>
+            </CollapsibleContent>
+          </Collapsible>
         </Card>
 
         {selectedIds.length > 0 && (
