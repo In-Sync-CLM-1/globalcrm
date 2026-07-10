@@ -187,6 +187,9 @@ export default function FerventRepository() {
   const { effectiveOrgId } = useOrgContext();
   const { data: activeImportJob } = useFerventActiveImportJob(effectiveOrgId || null);
   const hadActiveImportJob = useRef(false);
+  const { canAccessFeature, loading: featureLoading } = useFeatureAccess();
+  const notify = useNotification();
+  const queryClient = useQueryClient();
   useEffect(() => {
     if (activeImportJob) {
       hadActiveImportJob.current = true;
@@ -198,9 +201,6 @@ export default function FerventRepository() {
       queryClient.invalidateQueries({ queryKey: ["fervent-import-history"] });
     }
   }, [activeImportJob, queryClient]);
-  const { canAccessFeature, loading: featureLoading } = useFeatureAccess();
-  const notify = useNotification();
-  const queryClient = useQueryClient();
 
   const [filters, setFilters] = useState<RepositoryFilters>(emptyFilters);
   const [appliedFilters, setAppliedFilters] = useState<RepositoryFilters>(emptyFilters);
