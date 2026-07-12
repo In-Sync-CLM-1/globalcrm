@@ -176,6 +176,9 @@ async function processOrg(supabase: any, orgId: string): Promise<unknown> {
   // Calling window: outside the window, only stages flagged ignore_window (the
   // inbound demo-request qualify call) run now; everything else stays pending
   // for the next in-window tick. Inside the window, all rows run.
+  // WhatsApp is never gated by this — the window (incl. the Sunday no-call rule)
+  // exists to avoid ringing someone's phone off-hours; it doesn't apply to a
+  // WhatsApp message, so those rows always pass through untouched.
   if (!win.inside) {
     const { data: exempt } = await supabase
       .from("pipeline_stage_actions")
@@ -184,7 +187,7 @@ async function processOrg(supabase: any, orgId: string): Promise<unknown> {
       .eq("is_active", true)
       .eq("ignore_window", true);
     const exemptStages = new Set<string>((exempt || []).map((e: any) => e.stage_id));
-    activeQueue = activeQueue.filter((r) => exemptStages.has(r.stage_id));
+    activeQueue = activeQueue.filter((r) => r.action_type === "whatsapp" || exemptStages.has(r.stage_id));
     if (activeQueue.length === 0) {
       return { org_id: orgId, acted: false, reason: win.reason };
     }
