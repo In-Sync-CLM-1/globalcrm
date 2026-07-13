@@ -329,6 +329,7 @@ export default function FerventRepository() {
 
       exportToCSV(rows, [
         { key: "unique_id", label: "Unique ID" },
+        { key: "upload_status", label: "Status", format: (v: string | null) => (v === "existing" ? "Updated" : "Fresh") },
         { key: "db_sourced_year", label: "DB Sourced Year" },
         { key: "ucdb_status", label: "UCDB Status" },
         { key: "company_name", label: "Company Name" },
