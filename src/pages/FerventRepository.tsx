@@ -9,6 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
+import { MultiSelectFilter } from "@/components/ui/multi-select-filter";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { LoadingState } from "@/components/common/LoadingState";
@@ -76,28 +77,35 @@ export interface RepositoryRecord {
 
 interface RepositoryFilters {
   search: string;
-  city: string;
-  state: string;
-  country: string;
-  industry: string;
-  subIndustry: string;
-  designation: string;
-  designationLevel: string;
-  department: string;
+  city: string[];
+  state: string[];
+  country: string[];
+  industry: string[];
+  subIndustry: string[];
+  designation: string[];
+  designationLevel: string[];
+  department: string[];
   dbSourcedYear: string;
-  ucdbStatus: string;
+  ucdbStatus: string[];
   website: string;
   domainName: string;
-  employeeSize: string;
-  turnover: string;
+  employeeSize: string[];
+  turnover: string[];
   matchMode: "exact" | "contains";
 }
 
 const emptyFilters: RepositoryFilters = {
-  search: "", city: "", state: "", country: "", industry: "",
-  subIndustry: "", designation: "", designationLevel: "", department: "", dbSourcedYear: "", ucdbStatus: "",
-  website: "", domainName: "", employeeSize: "", turnover: "", matchMode: "contains",
+  search: "", city: [], state: [], country: [], industry: [],
+  subIndustry: [], designation: [], designationLevel: [], department: [], dbSourcedYear: "", ucdbStatus: [],
+  website: "", domainName: "", employeeSize: [], turnover: [], matchMode: "contains",
 };
+
+// Distinct-value columns backing the searchable multi-select filters below.
+const FILTER_OPTION_FIELDS = [
+  "city", "state", "country", "industry", "sub_industry", "designation",
+  "designation_level", "department", "ucdb_status", "employee_size", "turnover",
+] as const;
+type FilterOptionField = (typeof FILTER_OPTION_FIELDS)[number];
 
 // PostgREST's .or() splits on unescaped commas/parens, so a raw search value
 // like "Smith, Jones & Co" would otherwise be parsed as extra filter clauses.
@@ -118,20 +126,20 @@ function applyBasicFilters(query: any, f: RepositoryFilters) {
     const pattern = exact ? s : `%${s}%`;
     query = query.or(`full_name.ilike."${pattern}",company_name.ilike."${pattern}"`);
   }
-  if (f.city) query = query.ilike("city", like(f.city));
-  if (f.state) query = query.ilike("state", like(f.state));
-  if (f.country) query = query.ilike("country", like(f.country));
-  if (f.industry) query = query.ilike("industry", like(f.industry));
-  if (f.subIndustry) query = query.ilike("sub_industry", like(f.subIndustry));
-  if (f.designation) query = query.ilike("designation", like(f.designation));
-  if (f.designationLevel) query = query.ilike("designation_level", like(f.designationLevel));
-  if (f.department) query = query.ilike("department", like(f.department));
+  if (f.city.length) query = query.in("city", f.city);
+  if (f.state.length) query = query.in("state", f.state);
+  if (f.country.length) query = query.in("country", f.country);
+  if (f.industry.length) query = query.in("industry", f.industry);
+  if (f.subIndustry.length) query = query.in("sub_industry", f.subIndustry);
+  if (f.designation.length) query = query.in("designation", f.designation);
+  if (f.designationLevel.length) query = query.in("designation_level", f.designationLevel);
+  if (f.department.length) query = query.in("department", f.department);
   if (f.dbSourcedYear) query = query.eq("db_sourced_year", parseInt(f.dbSourcedYear));
-  if (f.ucdbStatus) query = query.ilike("ucdb_status", like(f.ucdbStatus));
+  if (f.ucdbStatus.length) query = query.in("ucdb_status", f.ucdbStatus);
   if (f.website) query = query.ilike("website", like(f.website));
   if (f.domainName) query = query.ilike("domain_name", like(f.domainName));
-  if (f.employeeSize) query = query.ilike("employee_size", like(f.employeeSize));
-  if (f.turnover) query = query.ilike("turnover", like(f.turnover));
+  if (f.employeeSize.length) query = query.in("employee_size", f.employeeSize);
+  if (f.turnover.length) query = query.in("turnover", f.turnover);
   return query;
 }
 
@@ -254,6 +262,40 @@ export default function FerventRepository() {
   });
 
   const records = data || [];
+
+  // Distinct values for the searchable multi-select filters — fetched once
+  // (paginated past Supabase's 1000-row cap) and reused across renders.
+  const { data: filterOptions } = useQuery({
+    queryKey: ["fervent-filter-options", effectiveOrgId],
+    queryFn: async () => {
+      const sets = Object.fromEntries(FILTER_OPTION_FIELDS.map((f) => [f, new Set<string>()])) as Record<FilterOptionField, Set<string>>;
+      const pageSize = 1000;
+      let from = 0;
+      while (true) {
+        const { data, error } = await supabase
+          .from("fervent_data_repository")
+          .select(FILTER_OPTION_FIELDS.join(","))
+          .eq("org_id", effectiveOrgId)
+          .range(from, from + pageSize - 1);
+        if (error) throw error;
+        (data || []).forEach((row: any) => {
+          FILTER_OPTION_FIELDS.forEach((f) => {
+            const v = row[f];
+            if (typeof v === "string" && v.trim()) sets[f].add(v.trim());
+          });
+        });
+        if (!data || data.length < pageSize) break;
+        from += pageSize;
+      }
+      return Object.fromEntries(
+        FILTER_OPTION_FIELDS.map((f) => [f, Array.from(sets[f]).sort((a, b) => a.localeCompare(b))])
+      ) as Record<FilterOptionField, string[]>;
+    },
+    enabled: !!effectiveOrgId && canAccessFeature("fervent_data_repository"),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const opts = (field: FilterOptionField) => filterOptions?.[field] || [];
 
   const applyFilters = () => {
     setAppliedFilters(filters);
@@ -513,20 +555,20 @@ export default function FerventRepository() {
                 </div>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   <Input placeholder="Name or company" value={filters.search} onChange={(e) => setFilters({ ...filters, search: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
-                  <Input placeholder="City" value={filters.city} onChange={(e) => setFilters({ ...filters, city: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
-                  <Input placeholder="State" value={filters.state} onChange={(e) => setFilters({ ...filters, state: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
-                  <Input placeholder="Country" value={filters.country} onChange={(e) => setFilters({ ...filters, country: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
-                  <Input placeholder="Industry" value={filters.industry} onChange={(e) => setFilters({ ...filters, industry: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
-                  <Input placeholder="Sub Industry" value={filters.subIndustry} onChange={(e) => setFilters({ ...filters, subIndustry: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
-                  <Input placeholder="Designation" value={filters.designation} onChange={(e) => setFilters({ ...filters, designation: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
-                  <Input placeholder="Designation Level" value={filters.designationLevel} onChange={(e) => setFilters({ ...filters, designationLevel: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
-                  <Input placeholder="Department" value={filters.department} onChange={(e) => setFilters({ ...filters, department: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
+                  <MultiSelectFilter triggerLabel="City" placeholder="Search city..." options={opts("city")} selected={filters.city} onChange={(v) => setFilters({ ...filters, city: v })} />
+                  <MultiSelectFilter triggerLabel="State" placeholder="Search state..." options={opts("state")} selected={filters.state} onChange={(v) => setFilters({ ...filters, state: v })} />
+                  <MultiSelectFilter triggerLabel="Country" placeholder="Search country..." options={opts("country")} selected={filters.country} onChange={(v) => setFilters({ ...filters, country: v })} />
+                  <MultiSelectFilter triggerLabel="Industry" placeholder="Search industry..." options={opts("industry")} selected={filters.industry} onChange={(v) => setFilters({ ...filters, industry: v })} />
+                  <MultiSelectFilter triggerLabel="Sub Industry" placeholder="Search sub industry..." options={opts("sub_industry")} selected={filters.subIndustry} onChange={(v) => setFilters({ ...filters, subIndustry: v })} />
+                  <MultiSelectFilter triggerLabel="Designation" placeholder="Search designation..." options={opts("designation")} selected={filters.designation} onChange={(v) => setFilters({ ...filters, designation: v })} />
+                  <MultiSelectFilter triggerLabel="Designation Level" placeholder="Search level..." options={opts("designation_level")} selected={filters.designationLevel} onChange={(v) => setFilters({ ...filters, designationLevel: v })} />
+                  <MultiSelectFilter triggerLabel="Department" placeholder="Search department..." options={opts("department")} selected={filters.department} onChange={(v) => setFilters({ ...filters, department: v })} />
                   <Input placeholder="DB Sourced Year" type="number" value={filters.dbSourcedYear} onChange={(e) => setFilters({ ...filters, dbSourcedYear: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
-                  <Input placeholder="UCDB Status" value={filters.ucdbStatus} onChange={(e) => setFilters({ ...filters, ucdbStatus: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
+                  <MultiSelectFilter triggerLabel="UCDB Status" placeholder="Search status..." options={opts("ucdb_status")} selected={filters.ucdbStatus} onChange={(v) => setFilters({ ...filters, ucdbStatus: v })} />
                   <Input placeholder="Website" value={filters.website} onChange={(e) => setFilters({ ...filters, website: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
                   <Input placeholder="Domain Name" value={filters.domainName} onChange={(e) => setFilters({ ...filters, domainName: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
-                  <Input placeholder="Employee Size" value={filters.employeeSize} onChange={(e) => setFilters({ ...filters, employeeSize: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
-                  <Input placeholder="Turnover" value={filters.turnover} onChange={(e) => setFilters({ ...filters, turnover: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
+                  <MultiSelectFilter triggerLabel="Employee Size" placeholder="Search employee size..." options={opts("employee_size")} selected={filters.employeeSize} onChange={(v) => setFilters({ ...filters, employeeSize: v })} />
+                  <MultiSelectFilter triggerLabel="Turnover" placeholder="Search turnover..." options={opts("turnover")} selected={filters.turnover} onChange={(v) => setFilters({ ...filters, turnover: v })} />
                 </div>
                 <div className="flex gap-2 mt-3">
                   <Button size="sm" onClick={applyFilters}>Apply Filters</Button>

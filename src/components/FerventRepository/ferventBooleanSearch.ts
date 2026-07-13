@@ -56,7 +56,7 @@ export const emptyBooleanQuery: BooleanQuery = { mode: "all", conditions: [] };
 // instead of importing RepositoryFilters to avoid a circular import with
 // FerventRepository.tsx (which imports BOOLEAN_SEARCH_FIELDS from here).
 export type SavedSearchDefinition =
-  | { mode: "basic"; filters: Record<string, string> }
+  | { mode: "basic"; filters: Record<string, string | string[]> }
   | { mode: "advanced"; query: BooleanQuery };
 
 export function isBooleanQueryEmpty(q: BooleanQuery): boolean {
