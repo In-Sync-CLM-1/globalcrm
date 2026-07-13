@@ -28,7 +28,6 @@ interface FerventBulkUploadDialogProps {
 
 interface UploadPreview {
   total: number;
-  willProcess: number;
   missingUniqueId: number;
 }
 
@@ -73,7 +72,7 @@ function computePreview(text: string): UploadPreview {
     if (!uid) missingUniqueId++;
   }
 
-  return { total, willProcess: total - missingUniqueId, missingUniqueId };
+  return { total, missingUniqueId };
 }
 
 export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadStarted }: FerventBulkUploadDialogProps) {
@@ -153,11 +152,6 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
         setIsUploading(false);
         return;
       }
-      if (!headerLine.includes("unique id") && !headerLine.includes("unique_id")) {
-        setValidationError("CSV must contain a 'Unique ID' column");
-        setIsUploading(false);
-        return;
-      }
 
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("User not authenticated");
@@ -197,7 +191,7 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
       if (triggerError) throw triggerError;
 
       const countMessage = preview
-        ? `${preview.willProcess} of ${preview.total} records will be processed${preview.missingUniqueId > 0 ? ` (${preview.missingUniqueId} skipped — missing Unique ID)` : ""}.`
+        ? `${preview.total} records will be processed${preview.missingUniqueId > 0 ? ` (${preview.missingUniqueId} without a Unique ID will be matched automatically)` : ""}.`
         : "Your file is being processed in the background.";
       notification.success("Upload started", countMessage);
       onUploadStarted();
@@ -262,7 +256,7 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
                   <p className="text-xs">
                     {preview.missingUniqueId > 0 ? (
                       <span className="text-amber-600">
-                        {preview.willProcess} of {preview.total} records will be processed — {preview.missingUniqueId} will be skipped (missing Unique ID)
+                        All {preview.total} records will be processed — {preview.missingUniqueId} have no Unique ID and will be matched automatically against existing records
                       </span>
                     ) : (
                       <span className="text-muted-foreground">All {preview.total} records will be processed</span>
@@ -291,9 +285,9 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
             <p className="font-medium">Requirements:</p>
             <ul className="list-disc list-inside space-y-1 text-muted-foreground">
               <li>UTF-8 encoded CSV file</li>
-              <li>Required columns: <code className="bg-background px-1 rounded">Full Name</code> and <code className="bg-background px-1 rounded">Unique ID</code></li>
-              <li>Rows are matched on <code className="bg-background px-1 rounded">Unique ID</code> — a matching ID updates that existing record with this upload's data; a new ID adds a new record</li>
-              <li>Rows missing a Unique ID are rejected — every row needs one</li>
+              <li>Required column: <code className="bg-background px-1 rounded">Full Name</code></li>
+              <li>Rows are matched on <code className="bg-background px-1 rounded">Unique ID</code> when given — a matching ID updates that existing record with this upload's data; a new ID adds a new record</li>
+              <li>Rows with no Unique ID are matched automatically against existing records (by phone, email, or AI name verification) and merged in, or added as new with a system-assigned ID if no match is found</li>
               <li>Maximum 5,000 records per upload</li>
               <li>Maximum file size: 10MB</li>
             </ul>

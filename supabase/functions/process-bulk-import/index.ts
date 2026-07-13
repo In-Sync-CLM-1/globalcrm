@@ -183,7 +183,7 @@ serve(async (req) => {
         requiredColumns = ['first_name', 'email'];
         break;
       case 'fervent_repository':
-        requiredColumns = ['full_name', 'unique_id'];
+        requiredColumns = ['full_name'];
         break;
       case 'email_recipients':
       case 'whatsapp_recipients':
@@ -355,22 +355,6 @@ serve(async (req) => {
             created_by: importJob.user_id,
             import_job_id: importJob.id
           };
-        }
-
-        // Unique ID is mandatory for the Fervent repository — it's the only
-        // reliable key the insert-or-update upsert can match on. A row
-        // without one is rejected rather than silently going through the
-        // weaker Mobile/Email fallback.
-        if (importJob.import_type === 'fervent_repository' && !record.unique_id) {
-          errorCount++;
-          errors.push({
-            row: currentRowNumber,
-            field: 'unique_id',
-            message: 'Unique ID is required',
-            sample: line.substring(0, 100)
-          });
-          processedRows++;
-          continue;
         }
 
         batch.push(record);
@@ -660,135 +644,7 @@ async function processBatch(
         ignoreDuplicates: false
       };
     } else if (importJob.import_type === 'fervent_repository') {
-      tableName = 'fervent_data_repository';
-
-      // Match rule: Unique ID is the reliable per-contact key — a row whose
-      // Unique ID already exists for this org gets UPDATED (every field
-      // replaced with the new upload's values), not skipped. A new Unique ID
-      // gets inserted fresh. The DB upsert below handles both in one call.
-      //
-      // Rows with NO Unique ID have no safe key to update against, so they
-      // keep the old behaviour: dedupe against Mobile Number 1 / Official
-      // Email (existing records and the rest of this batch) and skip on match.
-      const mobilesToCheck = batch
-        .map(r => r.mobile_number_1)
-        .filter((v: string | null) => v && String(v).trim() !== '');
-      const emailsToCheck = batch
-        .map(r => (r.official_email ? String(r.official_email).trim().toLowerCase() : null))
-        .filter((v: string | null): v is string => !!v);
-
-      let existingMobiles = new Set<string>();
-      let existingEmails = new Set<string>();
-
-      if (mobilesToCheck.length > 0) {
-        const { data: existingByMobile } = await supabase
-          .from('fervent_data_repository')
-          .select('mobile_number_1')
-          .eq('org_id', importJob.org_id)
-          .in('mobile_number_1', mobilesToCheck);
-        existingMobiles = new Set((existingByMobile || []).map((r: any) => r.mobile_number_1));
-      }
-      if (emailsToCheck.length > 0) {
-        const { data: existingByEmail } = await supabase
-          .from('fervent_data_repository')
-          .select('official_email')
-          .eq('org_id', importJob.org_id)
-          .in('official_email', emailsToCheck);
-        existingEmails = new Set((existingByEmail || []).map((r: any) => String(r.official_email).trim().toLowerCase()));
-      }
-
-      const seenMobiles = new Set<string>();
-      const seenEmails = new Set<string>();
-      const originalLength = batch.length;
-
-      batch = batch.filter((record: any) => {
-        const uniqueId = record.unique_id && String(record.unique_id).trim() !== '' ? String(record.unique_id) : null;
-        const mobile = record.mobile_number_1 && String(record.mobile_number_1).trim() !== '' ? String(record.mobile_number_1) : null;
-        const email = record.official_email && String(record.official_email).trim() !== '' ? String(record.official_email).trim().toLowerCase() : null;
-
-        if (!uniqueId) {
-          // No Unique ID on this row: fall back to Mobile OR Email — either
-          // one matching an existing record (or another row in this batch)
-          // counts as a duplicate and is skipped.
-          if (mobile && (existingMobiles.has(mobile) || seenMobiles.has(mobile))) {
-            if (duplicateSamples.length < 20) duplicateSamples.push({ matched_on: 'mobile_number_1', value: mobile });
-            return false;
-          }
-          if (email && (existingEmails.has(email) || seenEmails.has(email))) {
-            if (duplicateSamples.length < 20) duplicateSamples.push({ matched_on: 'official_email', value: email });
-            return false;
-          }
-        }
-
-        if (mobile) seenMobiles.add(mobile);
-        if (email) seenEmails.add(email);
-        return true;
-      });
-
-      // A single upsert statement can't touch the same conflict key twice —
-      // if the same Unique ID appears more than once in this batch, keep only
-      // the last occurrence (latest upload wins, same as the row-level rule).
-      const lastIndexForId = new Map<string, number>();
-      batch.forEach((record: any, idx: number) => {
-        const uniqueId = record.unique_id && String(record.unique_id).trim() !== '' ? String(record.unique_id) : null;
-        if (uniqueId) lastIndexForId.set(uniqueId, idx);
-      });
-      batch = batch.filter((record: any, idx: number) => {
-        const uniqueId = record.unique_id && String(record.unique_id).trim() !== '' ? String(record.unique_id) : null;
-        if (!uniqueId) return true;
-        return lastIndexForId.get(uniqueId) === idx;
-      });
-
-      skippedCount = originalLength - batch.length;
-      if (batch.length === 0) {
-        console.log(`[DB] Batch ${batchNumber}: All ${originalLength} records are duplicates, skipping`);
-        return { inserted: 0, updated: 0, skipped: originalLength, duplicateSamples };
-      }
-
-      let insertedCount = 0;
-      let updatedCount = 0;
-      let dbErrorCount = 0;
-      const dbErrorSamples: Array<{ row?: number; field?: string; message: string; sample?: string }> = [];
-
-      const { data: upsertResult, error: upsertError } = await supabase.rpc('upsert_fervent_repository_batch', {
-        p_org_id: importJob.org_id,
-        p_created_by: importJob.user_id,
-        p_import_job_id: importJob.id,
-        p_records: batch,
-      });
-
-      if (!upsertError) {
-        const row = Array.isArray(upsertResult) ? upsertResult[0] : upsertResult;
-        insertedCount = row?.inserted_count ?? 0;
-        updatedCount = row?.updated_count ?? 0;
-      } else {
-        // The whole-batch upsert failed — most likely one bad row in this
-        // batch of up to 500 (e.g. a value Postgres can't cast). Don't let
-        // that take the other ~499 good rows down with it: retry one row at
-        // a time and only exclude the row(s) that actually fail.
-        console.error(`[DB] Batch ${batchNumber} upsert failed as a whole, retrying row-by-row:`, upsertError);
-        for (const rec of batch) {
-          const { data: rowResult, error: rowError } = await supabase.rpc('upsert_fervent_repository_batch', {
-            p_org_id: importJob.org_id,
-            p_created_by: importJob.user_id,
-            p_import_job_id: importJob.id,
-            p_records: [rec],
-          });
-          if (rowError) {
-            dbErrorCount++;
-            if (dbErrorSamples.length < 20) {
-              dbErrorSamples.push({ field: 'unique_id', message: rowError.message, sample: String(rec.unique_id ?? '') });
-            }
-            continue;
-          }
-          const rowRow = Array.isArray(rowResult) ? rowResult[0] : rowResult;
-          insertedCount += rowRow?.inserted_count ?? 0;
-          updatedCount += rowRow?.updated_count ?? 0;
-        }
-      }
-
-      console.log(`[DB] Batch ${batchNumber}: ${insertedCount} inserted, ${updatedCount} updated, ${skippedCount} duplicates skipped, ${dbErrorCount} row errors`);
-      return { inserted: insertedCount, updated: updatedCount, skipped: skippedCount, dbErrors: dbErrorCount, duplicateSamples, dbErrorSamples };
+      return await processFerventBatch(supabase, importJob, batch, batchNumber);
     } else {
       throw new Error(`Unknown import type: ${importJob.import_type}`);
     }
@@ -809,4 +665,316 @@ async function processBatch(
     console.error('[DB] Batch processing error:', error);
     throw error;
   }
+}
+
+// =============================================================================
+// FERVENT REPOSITORY: Unique ID match/update, plus AI-assisted duplicate
+// containment for rows that arrive with no Unique ID (uploads are distributed
+// across sources, so the same person routinely re-appears with a different or
+// missing Unique ID). See supabase/migrations/20260710120000_fervent_ai_dedupe.sql.
+//
+//   1. Unique ID matches an existing record for this org -> UPDATE it.
+//   2. No Unique ID -> containment before insert:
+//      a. exact phone/email overlap with an existing record -> merge into it.
+//      b. same normalised full name, no contact overlap -> Groq verifies
+//         "same person?" from company/designation/location context.
+//      c. no match at all, or AI says different person -> stays new.
+//   3. Rows still new after containment, plus duplicates of each other within
+//      the same file, get a system-assigned FERVENT-nnnnnn Unique ID.
+//
+// Merge semantics: incoming non-empty values overwrite the existing ones;
+// empty cells never blank out data already on the record.
+// =============================================================================
+
+const GROQ_MODEL = 'llama-3.3-70b-versatile';
+
+function normPhone(v: any): string | null {
+  if (!v) return null;
+  const digits = String(v).replace(/\D/g, '');
+  if (digits.length < 8) return null;
+  return digits.slice(-10);
+}
+
+function normEmail(v: any): string | null {
+  if (!v) return null;
+  const s = String(v).trim().toLowerCase();
+  return s === '' ? null : s;
+}
+
+function phonesOf(r: any): string[] {
+  return [normPhone(r.mobile_number_1), normPhone(r.mobile_number_2)].filter((v): v is string => !!v);
+}
+
+function emailsOf(r: any): string[] {
+  return [normEmail(r.official_email), normEmail(r.personal_email_1), normEmail(r.personal_email_2)].filter((v): v is string => !!v);
+}
+
+// True if two incoming rows (neither yet in the DB) share a phone or email —
+// used only for same-file containment, so it stays deterministic (no AI).
+function sameContact(a: any, b: any): boolean {
+  if (phonesOf(a).some(p => phonesOf(b).includes(p))) return true;
+  if (emailsOf(a).some(e => emailsOf(b).includes(e))) return true;
+  return false;
+}
+
+// Incoming non-empty values overwrite base; empty/missing values keep base's.
+function mergeNonEmpty(base: any, incoming: any): any {
+  const out = { ...base };
+  for (const [k, v] of Object.entries(incoming)) {
+    if (k === 'unique_id' || k === 'org_id' || k === 'created_by') continue;
+    if (v !== null && v !== undefined && String(v).trim() !== '') out[k] = v;
+  }
+  return out;
+}
+
+// One Groq call verifies every name-only candidate pair in the batch at once.
+// Fails closed: on any error/timeout, nothing is confirmed and those rows
+// fall through to "new" rather than risk merging two different people.
+async function verifySamePersonBatch(
+  pairs: Array<{ idx: number; incoming: any; candidate: any }>
+): Promise<Set<number>> {
+  const confirmed = new Set<number>();
+  const groqKey = Deno.env.get('GROQ_API_KEY');
+  if (!groqKey || pairs.length === 0) return confirmed;
+
+  const items = pairs.map(p => ({
+    idx: p.idx,
+    person_a: {
+      name: p.incoming.full_name || '',
+      company: p.incoming.company_name || '',
+      designation: p.incoming.designation || '',
+      department: p.incoming.department || '',
+      city: p.incoming.city || '',
+    },
+    person_b: {
+      name: p.candidate.full_name || '',
+      company: p.candidate.company_name || '',
+      designation: p.candidate.designation || '',
+      department: p.candidate.department || '',
+      city: p.candidate.city || '',
+    },
+  }));
+
+  try {
+    const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${groqKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: GROQ_MODEL,
+        temperature: 0,
+        response_format: { type: 'json_object' },
+        messages: [
+          {
+            role: 'system',
+            content: 'You verify whether two contact records in a B2B data repository refer to the same real person. Both records already share the same normalised full name. Two records sharing a name may be the same person re-entered under a different Unique ID, or two different people who happen to share a common name. Use company, designation, department and city as supporting evidence: the same person usually keeps a consistent employer/role/location across uploads; two different people with the same name usually differ on at least one. Treat blank fields on either side as unknown, not as a mismatch. Respond ONLY with JSON of the exact shape {"results": [{"idx": <int>, "same_person": <true|false>}, ...]}, one entry per idx given, no prose.',
+          },
+          { role: 'user', content: JSON.stringify(items) },
+        ],
+      }),
+    });
+    if (!resp.ok) {
+      console.error('[AI-DEDUPE] Groq verification failed:', resp.status, await resp.text());
+      return confirmed;
+    }
+    const data = await resp.json();
+    const parsed = JSON.parse(data.choices[0].message.content);
+    for (const r of parsed.results || []) {
+      if (r.same_person === true) confirmed.add(Number(r.idx));
+    }
+  } catch (e) {
+    console.error('[AI-DEDUPE] Groq verification error:', e);
+  }
+  return confirmed;
+}
+
+async function processFerventBatch(
+  supabase: any,
+  importJob: ImportJob,
+  rawBatch: any[],
+  batchNumber: number
+): Promise<{ inserted: number; updated: number; skipped: number; dbErrors?: number; duplicateSamples?: Array<{ matched_on: string; value: string }>; dbErrorSamples?: Array<{ row?: number; field?: string; message: string; sample?: string }> }> {
+  const duplicateSamples: Array<{ matched_on: string; value: string }> = [];
+  const dbErrorSamples: Array<{ row?: number; field?: string; message: string; sample?: string }> = [];
+
+  // Rows carrying a Unique ID go through the existing ON CONFLICT upsert. A
+  // single upsert can't touch the same conflict key twice, so if the same
+  // Unique ID appears more than once in this batch, keep only the last
+  // occurrence (latest upload wins).
+  const withUid: any[] = [];
+  const withoutUid: any[] = [];
+  for (const record of rawBatch) {
+    const uid = record.unique_id && String(record.unique_id).trim() !== '' ? String(record.unique_id) : null;
+    if (uid) { record.unique_id = uid; withUid.push(record); } else withoutUid.push(record);
+  }
+  const lastIndexForId = new Map<string, number>();
+  withUid.forEach((r, idx) => lastIndexForId.set(r.unique_id, idx));
+  const dedupedWithUid = withUid.filter((r, idx) => lastIndexForId.get(r.unique_id) === idx);
+  let inBatchCollisions = withUid.length - dedupedWithUid.length;
+
+  // --- Duplicate containment for rows with no Unique ID ---
+  const mergesByTarget = new Map<string, { target_id: string; record: any }>();
+  const newRows: any[] = [];
+
+  if (withoutUid.length > 0) {
+    const candidateInput = withoutUid.map((r, idx) => ({
+      idx,
+      full_name: r.full_name,
+      mobile_number_1: r.mobile_number_1,
+      mobile_number_2: r.mobile_number_2,
+      official_email: r.official_email,
+      personal_email_1: r.personal_email_1,
+      personal_email_2: r.personal_email_2,
+    }));
+
+    const { data: candidates, error: candErr } = await supabase.rpc('find_fervent_duplicate_candidates', {
+      p_org_id: importJob.org_id,
+      p_records: candidateInput,
+    });
+    if (candErr) console.error('[AI-DEDUPE] find_fervent_duplicate_candidates failed:', candErr);
+
+    const byIdx = new Map<number, any[]>();
+    for (const c of candidates || []) {
+      if (!byIdx.has(c.incoming_idx)) byIdx.set(c.incoming_idx, []);
+      byIdx.get(c.incoming_idx)!.push(c);
+    }
+
+    const claimedTargets = new Set<string>();
+    const nameOnlyChecks: Array<{ idx: number; incoming: any; candidate: any }> = [];
+
+    withoutUid.forEach((record, idx) => {
+      const cands = byIdx.get(idx) || [];
+      const strong = cands.find((c: any) => (c.match_type === 'phone' || c.match_type === 'email') && !claimedTargets.has(c.existing_record.id));
+      if (strong) {
+        claimedTargets.add(strong.existing_record.id);
+        const existingEntry = mergesByTarget.get(strong.existing_record.id);
+        mergesByTarget.set(strong.existing_record.id, {
+          target_id: strong.existing_record.id,
+          record: mergeNonEmpty(existingEntry?.record || {}, record),
+        });
+        return;
+      }
+      const nameMatch = cands.find((c: any) => c.match_type === 'name' && !claimedTargets.has(c.existing_record.id));
+      if (nameMatch) {
+        nameOnlyChecks.push({ idx, incoming: record, candidate: nameMatch.existing_record });
+        return;
+      }
+      newRows.push(record);
+    });
+
+    if (nameOnlyChecks.length > 0) {
+      const confirmed = await verifySamePersonBatch(nameOnlyChecks);
+      for (const check of nameOnlyChecks) {
+        const targetId = check.candidate.id;
+        if (confirmed.has(check.idx) && !claimedTargets.has(targetId)) {
+          claimedTargets.add(targetId);
+          const existingEntry = mergesByTarget.get(targetId);
+          mergesByTarget.set(targetId, {
+            target_id: targetId,
+            record: mergeNonEmpty(existingEntry?.record || {}, check.incoming),
+          });
+        } else {
+          newRows.push(check.incoming);
+        }
+      }
+    }
+  }
+
+  // Same person appearing twice in one file, neither instance already in the
+  // DB: fold the later row into the earliest one (phone/email exact only —
+  // no AI call for this tier, it's just intra-file hygiene).
+  const foldedNew: any[] = [];
+  let foldedCount = 0;
+  for (const record of newRows) {
+    const matchIdx = foldedNew.findIndex(existing => sameContact(existing, record));
+    if (matchIdx >= 0) {
+      foldedNew[matchIdx] = mergeNonEmpty(foldedNew[matchIdx], record);
+      foldedCount++;
+      if (duplicateSamples.length < 20) duplicateSamples.push({ matched_on: 'same file', value: record.full_name || '' });
+    } else {
+      foldedNew.push(record);
+    }
+  }
+
+  let mergedCount = 0;
+  if (mergesByTarget.size > 0) {
+    const merges = Array.from(mergesByTarget.values());
+    const { data: mergeResult, error: mergeErr } = await supabase.rpc('merge_fervent_repository_batch', {
+      p_org_id: importJob.org_id,
+      p_import_job_id: importJob.id,
+      p_merges: merges,
+    });
+    if (mergeErr) {
+      console.error('[AI-DEDUPE] merge_fervent_repository_batch failed:', mergeErr);
+      dbErrorSamples.push({ field: 'merge', message: mergeErr.message, sample: '' });
+    } else {
+      mergedCount = mergeResult ?? 0;
+    }
+  }
+
+  // Genuinely new rows get a system-assigned Unique ID, then flow through the
+  // same ON CONFLICT upsert as rows that arrived with one.
+  if (foldedNew.length > 0) {
+    const { data: newIds, error: idErr } = await supabase.rpc('generate_fervent_unique_ids', {
+      p_org_id: importJob.org_id,
+      p_count: foldedNew.length,
+    });
+    if (idErr || !newIds || newIds.length !== foldedNew.length) {
+      console.error('[AI-DEDUPE] generate_fervent_unique_ids failed:', idErr);
+      foldedNew.forEach((rec: any) => {
+        dbErrorSamples.push({ field: 'unique_id', message: idErr?.message || 'id generation failed', sample: rec.full_name || '' });
+      });
+    } else {
+      foldedNew.forEach((record, i) => { record.unique_id = newIds[i]; });
+      dedupedWithUid.push(...foldedNew);
+    }
+  }
+
+  let insertedCount = 0;
+  let updatedCount = 0;
+  let dbErrorCount = 0;
+
+  if (dedupedWithUid.length > 0) {
+    const { data: upsertResult, error: upsertError } = await supabase.rpc('upsert_fervent_repository_batch', {
+      p_org_id: importJob.org_id,
+      p_created_by: importJob.user_id,
+      p_import_job_id: importJob.id,
+      p_records: dedupedWithUid,
+    });
+
+    if (!upsertError) {
+      const row = Array.isArray(upsertResult) ? upsertResult[0] : upsertResult;
+      insertedCount = row?.inserted_count ?? 0;
+      updatedCount = row?.updated_count ?? 0;
+    } else {
+      // The whole-batch upsert failed — most likely one bad row in this
+      // batch (e.g. a value Postgres can't cast). Don't let that take the
+      // rest of the batch down with it: retry one row at a time and only
+      // exclude the row(s) that actually fail.
+      console.error(`[DB] Batch ${batchNumber} upsert failed as a whole, retrying row-by-row:`, upsertError);
+      for (const rec of dedupedWithUid) {
+        const { data: rowResult, error: rowError } = await supabase.rpc('upsert_fervent_repository_batch', {
+          p_org_id: importJob.org_id,
+          p_created_by: importJob.user_id,
+          p_import_job_id: importJob.id,
+          p_records: [rec],
+        });
+        if (rowError) {
+          dbErrorCount++;
+          if (dbErrorSamples.length < 20) {
+            dbErrorSamples.push({ field: 'unique_id', message: rowError.message, sample: String(rec.unique_id ?? '') });
+          }
+          continue;
+        }
+        const rowRow = Array.isArray(rowResult) ? rowResult[0] : rowResult;
+        insertedCount += rowRow?.inserted_count ?? 0;
+        updatedCount += rowRow?.updated_count ?? 0;
+      }
+    }
+  }
+
+  updatedCount += mergedCount;
+  const skippedCount = inBatchCollisions + foldedCount;
+
+  console.log(`[DB] Fervent batch ${batchNumber}: ${insertedCount} inserted, ${updatedCount} updated (${mergedCount} via AI containment merge), ${skippedCount} folded/collided in-file, ${dbErrorCount} row errors`);
+  return { inserted: insertedCount, updated: updatedCount, skipped: skippedCount, dbErrors: dbErrorCount, duplicateSamples, dbErrorSamples };
 }
