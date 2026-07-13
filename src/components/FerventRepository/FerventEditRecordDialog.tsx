@@ -15,14 +15,14 @@ const EDITABLE_FIELDS: { key: keyof RepositoryRecord; label: string; type?: "num
   { key: "db_sourced_year", label: "DB Sourced Year", type: "number" },
   { key: "ucdb_status", label: "UCDB Status" },
   { key: "company_name", label: "Company Name" },
-  { key: "full_name", label: "Full Name" },
+  { key: "first_name", label: "First Name" },
+  { key: "last_name", label: "Last Name" },
   { key: "designation", label: "Designation" },
   { key: "department", label: "Department" },
   { key: "designation_level", label: "Designation Level" },
   { key: "city", label: "City" },
   { key: "state", label: "State" },
   { key: "country", label: "Country" },
-  { key: "isd_code", label: "ISD Code" },
   { key: "std_code", label: "STD Code" },
   { key: "mobile_number_1", label: "Mobile Number 1" },
   { key: "mobile_number_2", label: "Mobile Number 2" },
@@ -118,7 +118,7 @@ export function FerventEditRecordDialog({ open, onOpenChange, record, orgId, onS
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[700px] max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Edit {record.full_name || "Record"}</DialogTitle>
+          <DialogTitle>Edit {[record.first_name, record.last_name].filter(Boolean).join(" ") || "Record"}</DialogTitle>
         </DialogHeader>
         <div className="grid grid-cols-2 gap-x-4 gap-y-3">
           {EDITABLE_FIELDS.map(({ key, label, type }) => (

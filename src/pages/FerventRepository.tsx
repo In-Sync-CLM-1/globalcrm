@@ -47,14 +47,14 @@ export interface RepositoryRecord {
   db_sourced_year: number | null;
   ucdb_status: string | null;
   company_name: string | null;
-  full_name: string | null;
+  first_name: string | null;
+  last_name: string | null;
   designation: string | null;
   department: string | null;
   designation_level: string | null;
   city: string | null;
   state: string | null;
   country: string | null;
-  isd_code: string | null;
   std_code: string | null;
   mobile_number_1: string | null;
   mobile_number_2: string | null;
@@ -124,7 +124,7 @@ function applyBasicFilters(query: any, f: RepositoryFilters) {
   if (f.search) {
     const s = escapeOrValue(f.search);
     const pattern = exact ? s : `%${s}%`;
-    query = query.or(`full_name.ilike."${pattern}",company_name.ilike."${pattern}"`);
+    query = query.or(`first_name.ilike."${pattern}",last_name.ilike."${pattern}",company_name.ilike."${pattern}"`);
   }
   if (f.city.length) query = query.in("city", f.city);
   if (f.state.length) query = query.in("state", f.state);
@@ -398,14 +398,14 @@ export default function FerventRepository() {
         { key: "db_sourced_year", label: "DB Sourced Year" },
         { key: "ucdb_status", label: "UCDB Status" },
         { key: "company_name", label: "Company Name" },
-        { key: "full_name", label: "Full Name" },
+        { key: "first_name", label: "First Name" },
+        { key: "last_name", label: "Last Name" },
         { key: "designation", label: "Designation" },
         { key: "department", label: "Department" },
         { key: "designation_level", label: "Designation Level" },
         { key: "city", label: "City" },
         { key: "state", label: "State" },
         { key: "country", label: "Country" },
-        { key: "isd_code", label: "ISD Code" },
         { key: "std_code", label: "STD Code" },
         { key: "mobile_number_1", label: "Mobile Number 1" },
         { key: "mobile_number_2", label: "Mobile Number 2" },
@@ -629,14 +629,14 @@ export default function FerventRepository() {
                         ["db_sourced_year", "DB Sourced Year"],
                         ["ucdb_status", "UCDB Status"],
                         ["company_name", "Company Name"],
-                        ["full_name", "Full Name"],
+                        ["first_name", "First Name"],
+                        ["last_name", "Last Name"],
                         ["designation", "Designation"],
                         ["department", "Department"],
                         ["designation_level", "Designation Level"],
                         ["city", "City"],
                         ["state", "State"],
                         ["country", "Country"],
-                        ["isd_code", "ISD Code"],
                         ["std_code", "STD Code"],
                         ["mobile_number_1", "Mobile Number 1"],
                         ["mobile_number_2", "Mobile Number 2"],
@@ -680,14 +680,14 @@ export default function FerventRepository() {
                         <TableCell className="whitespace-nowrap">{r.db_sourced_year || "—"}</TableCell>
                         <TableCell className="whitespace-nowrap">{r.ucdb_status ? <Badge variant="outline">{r.ucdb_status}</Badge> : "—"}</TableCell>
                         <TableCell className="whitespace-nowrap">{r.company_name || "—"}</TableCell>
-                        <TableCell className="whitespace-nowrap font-medium">{r.full_name || "—"}</TableCell>
+                        <TableCell className="whitespace-nowrap font-medium">{r.first_name || "—"}</TableCell>
+                        <TableCell className="whitespace-nowrap font-medium">{r.last_name || "—"}</TableCell>
                         <TableCell className="whitespace-nowrap">{r.designation || "—"}</TableCell>
                         <TableCell className="whitespace-nowrap">{r.department || "—"}</TableCell>
                         <TableCell className="whitespace-nowrap">{r.designation_level || "—"}</TableCell>
                         <TableCell className="whitespace-nowrap">{r.city || "—"}</TableCell>
                         <TableCell className="whitespace-nowrap">{r.state || "—"}</TableCell>
                         <TableCell className="whitespace-nowrap">{r.country || "—"}</TableCell>
-                        <TableCell className="whitespace-nowrap">{r.isd_code || "—"}</TableCell>
                         <TableCell className="whitespace-nowrap">{r.std_code || "—"}</TableCell>
                         <TableCell className="whitespace-nowrap">{r.mobile_number_1 || "—"}</TableCell>
                         <TableCell className="whitespace-nowrap">{r.mobile_number_2 || "—"}</TableCell>
@@ -737,7 +737,7 @@ export default function FerventRepository() {
       <Dialog open={!!selectedRecord} onOpenChange={(open) => !open && setSelectedRecord(null)}>
         <DialogContent className="sm:max-w-[700px] max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{selectedRecord?.full_name || "Record Details"}</DialogTitle>
+            <DialogTitle>{[selectedRecord?.first_name, selectedRecord?.last_name].filter(Boolean).join(" ") || "Record Details"}</DialogTitle>
           </DialogHeader>
           {selectedRecord && (
             <div className="space-y-4">
@@ -757,13 +757,14 @@ export default function FerventRepository() {
                   ["DB Sourced Year", selectedRecord.db_sourced_year],
                   ["UCDB Status", selectedRecord.ucdb_status],
                   ["Company Name", selectedRecord.company_name],
+                  ["First Name", selectedRecord.first_name],
+                  ["Last Name", selectedRecord.last_name],
                   ["Designation", selectedRecord.designation],
                   ["Department", selectedRecord.department],
                   ["Designation Level", selectedRecord.designation_level],
                   ["City", selectedRecord.city],
                   ["State", selectedRecord.state],
                   ["Country", selectedRecord.country],
-                  ["ISD Code", selectedRecord.isd_code],
                   ["STD Code", selectedRecord.std_code],
                   ["Mobile Number 1", selectedRecord.mobile_number_1],
                   ["Mobile Number 2", selectedRecord.mobile_number_2],

@@ -6,14 +6,14 @@
 // by the basic Filters panel's "DB Sourced Year" input.
 export const BOOLEAN_SEARCH_FIELDS: { key: string; label: string }[] = [
   { key: "company_name", label: "Company Name" },
-  { key: "full_name", label: "Full Name" },
+  { key: "first_name", label: "First Name" },
+  { key: "last_name", label: "Last Name" },
   { key: "designation", label: "Designation" },
   { key: "department", label: "Department" },
   { key: "designation_level", label: "Designation Level" },
   { key: "city", label: "City" },
   { key: "state", label: "State" },
   { key: "country", label: "Country" },
-  { key: "isd_code", label: "ISD Code" },
   { key: "std_code", label: "STD Code" },
   { key: "mobile_number_1", label: "Mobile Number 1" },
   { key: "mobile_number_2", label: "Mobile Number 2" },

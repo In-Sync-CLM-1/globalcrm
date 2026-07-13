@@ -5402,11 +5402,9 @@ export type Database = {
           domain_name: string | null
           employee_size: string | null
           first_name: string | null
-          full_name: string | null
           id: string
           import_job_id: string | null
           industry: string | null
-          isd_code: string | null
           last_name: string | null
           linkedin_url: string | null
           mobile_number_1: string | null
@@ -5441,11 +5439,9 @@ export type Database = {
           domain_name?: string | null
           employee_size?: string | null
           first_name?: string | null
-          full_name?: string | null
           id?: string
           import_job_id?: string | null
           industry?: string | null
-          isd_code?: string | null
           last_name?: string | null
           linkedin_url?: string | null
           mobile_number_1?: string | null
@@ -5480,11 +5476,9 @@ export type Database = {
           domain_name?: string | null
           employee_size?: string | null
           first_name?: string | null
-          full_name?: string | null
           id?: string
           import_job_id?: string | null
           industry?: string | null
-          isd_code?: string | null
           last_name?: string | null
           linkedin_url?: string | null
           mobile_number_1?: string | null

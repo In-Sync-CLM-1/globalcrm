@@ -39,7 +39,8 @@ echarts.registerMap("India", indiaGeo as any);
 interface RepoRow {
   id: string;
   company_name: string | null;
-  full_name: string | null;
+  first_name: string | null;
+  last_name: string | null;
   designation: string | null;
   designation_level: string | null;
   department: string | null;
@@ -79,6 +80,10 @@ function fieldMatches(value: string | null, filterValue: string, mode: "exact" |
   const key = normalizeKey(value);
   if (mode === "contains") return key.toLowerCase().includes(filterValue.toLowerCase());
   return key === filterValue;
+}
+
+function displayName(r: Pick<RepoRow, "first_name" | "last_name">): string {
+  return [r.first_name, r.last_name].filter((v) => v && v.trim()).join(" ").trim();
 }
 
 function hasEmail(r: RepoRow): boolean {
@@ -126,7 +131,7 @@ export default function FerventDashboard() {
         const { data, error } = await supabase
           .from("fervent_data_repository")
           .select(
-            "id, company_name, full_name, designation, designation_level, department, industry, employee_size, ucdb_status, city, state, official_email, personal_email_1, personal_email_2, mobile_number_1, created_at"
+            "id, company_name, first_name, last_name, designation, designation_level, department, industry, employee_size, ucdb_status, city, state, official_email, personal_email_1, personal_email_2, mobile_number_1, created_at"
           )
           .eq("org_id", FERVENT_ORG_ID)
           .range(from, from + pageSize - 1);
@@ -339,11 +344,11 @@ export default function FerventDashboard() {
     lines.push("Top Companies,Company,Contacts");
     byCompany.slice(0, 50).forEach((c) => lines.push(`Company,${csvEscape(c.name)},${c.value}`));
     lines.push("");
-    lines.push("Missing Contact Info,Company,Full Name,Reason,Mobile,Email,Added On");
+    lines.push("Missing Contact Info,Company,Name,Reason,Mobile,Email,Added On");
     missingBuckets.forEach((b) =>
       b.rows.forEach((r) => {
         lines.push(
-          `Missing,${csvEscape(r.company_name || "")},${csvEscape(r.full_name || "")},${csvEscape(b.label)},${csvEscape(r.mobile_number_1 || "")},${csvEscape(
+          `Missing,${csvEscape(r.company_name || "")},${csvEscape(displayName(r))},${csvEscape(b.label)},${csvEscape(r.mobile_number_1 || "")},${csvEscape(
             r.official_email || r.personal_email_1 || r.personal_email_2 || ""
           )},${format(new Date(r.created_at), "yyyy-MM-dd")}`
         );
@@ -364,7 +369,8 @@ export default function FerventDashboard() {
       drilldown.rows,
       [
         { key: "company_name", label: "Company" },
-        { key: "full_name", label: "Full Name" },
+        { key: "first_name", label: "First Name" },
+        { key: "last_name", label: "Last Name" },
         { key: "designation", label: "Designation" },
         { key: "department", label: "Department" },
         { key: "city", label: "City" },
@@ -604,11 +610,11 @@ export default function FerventDashboard() {
                               <Tooltip key={r.id}>
                                 <TooltipTrigger asChild>
                                   <button className={`text-[11px] px-2 py-0.5 rounded border bg-white ${b.pill} font-medium transition-colors cursor-default`}>
-                                    {r.full_name || r.company_name || "—"}
+                                    {displayName(r) || r.company_name || "—"}
                                   </button>
                                 </TooltipTrigger>
                                 <TooltipContent side="top" className="text-xs">
-                                  <p className="font-semibold mb-0.5">{r.full_name || "—"}</p>
+                                  <p className="font-semibold mb-0.5">{displayName(r) || "—"}</p>
                                   <p>{r.company_name || "—"}</p>
                                   <p>{r.designation || "—"}</p>
                                 </TooltipContent>
@@ -657,7 +663,7 @@ export default function FerventDashboard() {
                 <TableHeader>
                   <TableRow className="bg-muted/50">
                     <TableHead className="text-xs">Company</TableHead>
-                    <TableHead className="text-xs">Full Name</TableHead>
+                    <TableHead className="text-xs">Name</TableHead>
                     <TableHead className="text-xs">Designation</TableHead>
                     <TableHead className="text-xs">City / State</TableHead>
                     <TableHead className="text-xs">Mobile</TableHead>
@@ -669,7 +675,7 @@ export default function FerventDashboard() {
                   {drilldown.rows.slice(0, 500).map((r) => (
                     <TableRow key={r.id} className="hover:bg-muted/30">
                       <TableCell className="text-xs max-w-[160px] truncate" title={r.company_name || ""}>{r.company_name || "—"}</TableCell>
-                      <TableCell className="text-xs max-w-[150px] truncate" title={r.full_name || ""}>{r.full_name || "—"}</TableCell>
+                      <TableCell className="text-xs max-w-[150px] truncate" title={displayName(r)}>{displayName(r) || "—"}</TableCell>
                       <TableCell className="text-xs max-w-[140px] truncate" title={r.designation || ""}>{r.designation || "—"}</TableCell>
                       <TableCell className="text-xs whitespace-nowrap">{[r.city, r.state].filter(Boolean).join(", ") || "—"}</TableCell>
                       <TableCell className="text-xs whitespace-nowrap">{r.mobile_number_1 || "—"}</TableCell>

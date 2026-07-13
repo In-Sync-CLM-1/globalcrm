@@ -11,8 +11,8 @@ const MAX_RECORDS = 5000;
 
 const TEMPLATE_HEADERS = [
   "Sr. No.", "Unique ID", "DB Sourced Year", "UCDB Status", "Company Name",
-  "First Name", "Last Name", "Full Name", "Designation", "Department",
-  "Designation Level", "City", "State", "Country", "ISD Code", "STD Code",
+  "First Name", "Last Name", "Designation", "Department",
+  "Designation Level", "City", "State", "Country", "STD Code",
   "Mobile Number 1", "Mobile Number 2", "Direct Number", "Phone Number",
   "Official Email ID", "Personal Email ID 1", "Personal Email ID 2",
   "Contact LinkedIn ID", "Domain Name", "Website", "Industry", "SubIndustry",
@@ -147,8 +147,8 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
       }
 
       const headerLine = lines[0].toLowerCase();
-      if (!headerLine.includes("full name") && !headerLine.includes("full_name")) {
-        setValidationError("CSV must contain a 'Full Name' column");
+      if (!headerLine.includes("first name") && !headerLine.includes("first_name")) {
+        setValidationError("CSV must contain a 'First Name' column");
         setIsUploading(false);
         return;
       }
@@ -285,7 +285,8 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
             <p className="font-medium">Requirements:</p>
             <ul className="list-disc list-inside space-y-1 text-muted-foreground">
               <li>UTF-8 encoded CSV file</li>
-              <li>Required column: <code className="bg-background px-1 rounded">Full Name</code></li>
+              <li>Required column: <code className="bg-background px-1 rounded">First Name</code></li>
+              <li><code className="bg-background px-1 rounded">Mobile Number 1</code> should include the country code, e.g. <code className="bg-background px-1 rounded">+919876543210</code></li>
               <li>Rows are matched on <code className="bg-background px-1 rounded">Unique ID</code> when given — a matching ID updates that existing record with this upload's data; a new ID adds a new record</li>
               <li>Rows with no Unique ID are matched automatically against existing records (by phone, email, or AI name verification) and merged in, or added as new with a system-assigned ID if no match is found</li>
               <li>Maximum 5,000 records per upload</li>

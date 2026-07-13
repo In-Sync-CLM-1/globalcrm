@@ -183,7 +183,7 @@ serve(async (req) => {
         requiredColumns = ['first_name', 'email'];
         break;
       case 'fervent_repository':
-        requiredColumns = ['full_name'];
+        requiredColumns = ['first_name'];
         break;
       case 'email_recipients':
       case 'whatsapp_recipients':
@@ -328,14 +328,12 @@ serve(async (req) => {
             company_name: row.company_name || null,
             first_name: row.first_name || null,
             last_name: row.last_name || null,
-            full_name: row.full_name,
             designation: row.designation || null,
             department: row.department || null,
             designation_level: row.designation_level || null,
             city: row.city || null,
             state: row.state || null,
             country: row.country || null,
-            isd_code: row.isd_code || null,
             std_code: row.std_code || null,
             mobile_number_1: row.mobile_number_1 || null,
             mobile_number_2: row.mobile_number_2 || null,
@@ -718,6 +716,11 @@ function sameContact(a: any, b: any): boolean {
   return false;
 }
 
+// Human-readable label for logging/AI-prompt purposes only — never stored.
+function displayName(r: any): string {
+  return [r.first_name, r.last_name].filter((v) => v && String(v).trim()).join(' ').trim() || r.company_name || '';
+}
+
 // Incoming non-empty values overwrite base; empty/missing values keep base's.
 function mergeNonEmpty(base: any, incoming: any): any {
   const out = { ...base };
@@ -814,14 +817,14 @@ async function verifySamePersonBatch(
   const items = pairs.map(p => ({
     idx: p.idx,
     person_a: {
-      name: p.incoming.full_name || '',
+      name: displayName(p.incoming),
       company: p.incoming.company_name || '',
       designation: p.incoming.designation || '',
       department: p.incoming.department || '',
       city: p.incoming.city || '',
     },
     person_b: {
-      name: p.candidate.full_name || '',
+      name: displayName(p.candidate),
       company: p.candidate.company_name || '',
       designation: p.candidate.designation || '',
       department: p.candidate.department || '',
@@ -871,7 +874,8 @@ async function processFerventBatch(
   if (withoutUid.length > 0) {
     const candidateInput = withoutUid.map((r, idx) => ({
       idx,
-      full_name: r.full_name,
+      first_name: r.first_name,
+      last_name: r.last_name,
       mobile_number_1: r.mobile_number_1,
       mobile_number_2: r.mobile_number_2,
       official_email: r.official_email,
@@ -942,7 +946,7 @@ async function processFerventBatch(
     if (matchIdx >= 0) {
       foldedNew[matchIdx] = mergeNonEmpty(foldedNew[matchIdx], record);
       foldedCount++;
-      if (duplicateSamples.length < 20) duplicateSamples.push({ matched_on: 'same file', value: record.full_name || '' });
+      if (duplicateSamples.length < 20) duplicateSamples.push({ matched_on: 'same file', value: displayName(record) });
     } else {
       foldedNew.push(record);
     }
@@ -974,7 +978,7 @@ async function processFerventBatch(
     if (idErr || !newIds || newIds.length !== foldedNew.length) {
       console.error('[AI-DEDUPE] generate_fervent_unique_ids failed:', idErr);
       foldedNew.forEach((rec: any) => {
-        dbErrorSamples.push({ field: 'unique_id', message: idErr?.message || 'id generation failed', sample: rec.full_name || '' });
+        dbErrorSamples.push({ field: 'unique_id', message: idErr?.message || 'id generation failed', sample: displayName(rec) });
       });
     } else {
       foldedNew.forEach((record, i) => { record.unique_id = newIds[i]; });
