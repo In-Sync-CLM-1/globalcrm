@@ -310,19 +310,36 @@ export default function FerventRepository() {
     setExporting(true);
     try {
       const exportingSelection = selectedIds.length > 0;
-      let query = supabase.from("fervent_data_repository").select("*").eq("org_id", effectiveOrgId);
+      const buildQuery = () => {
+        let query = supabase.from("fervent_data_repository").select("*").eq("org_id", effectiveOrgId);
+        if (exportingSelection) {
+          query = query.in("id", selectedIds);
+        } else if (appliedAdvancedQuery) {
+          query = applyBooleanQuery(query, appliedAdvancedQuery);
+        } else {
+          query = applyBasicFilters(query, appliedFilters);
+        }
+        query = query.order(sortField, { ascending: sortAscending, nullsFirst: false });
+        // Tiebreaker on the primary key so paginated .range() batches never
+        // reshuffle/skip rows when sortField has duplicate values across pages.
+        if (sortField !== "id") query = query.order("id", { ascending: true });
+        return query;
+      };
 
-      if (exportingSelection) {
-        query = query.in("id", selectedIds);
-      } else if (appliedAdvancedQuery) {
-        query = applyBooleanQuery(query, appliedAdvancedQuery);
-      } else {
-        query = applyBasicFilters(query, appliedFilters);
+      // Supabase caps a single request at 1000 rows — page through with
+      // .range() to pull the full result set, same pattern as RMPL's export.
+      const PAGE_SIZE = 1000;
+      const rows: RepositoryRecord[] = [];
+      let from = 0;
+      while (true) {
+        const { data, error } = await buildQuery().range(from, from + PAGE_SIZE - 1);
+        if (error) throw error;
+        rows.push(...((data || []) as RepositoryRecord[]));
+        if (!data || data.length < PAGE_SIZE) break;
+        from += PAGE_SIZE;
       }
 
-      const { data: rows, error } = await query.order(sortField, { ascending: sortAscending, nullsFirst: false });
-      if (error) throw error;
-      if (!rows || rows.length === 0) {
+      if (rows.length === 0) {
         notify.error("Nothing to export", exportingSelection ? "No selected records found." : "No records match the current filters.");
         return;
       }
