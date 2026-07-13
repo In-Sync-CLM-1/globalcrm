@@ -687,6 +687,7 @@ async function processBatch(
 // =============================================================================
 
 const GROQ_MODEL = 'llama-3.3-70b-versatile';
+const HAIKU_MODEL = 'claude-haiku-4-5';
 
 function normPhone(v: any): string | null {
   if (!v) return null;
@@ -727,15 +728,88 @@ function mergeNonEmpty(base: any, incoming: any): any {
   return out;
 }
 
-// One Groq call verifies every name-only candidate pair in the batch at once.
-// Fails closed: on any error/timeout, nothing is confirmed and those rows
-// fall through to "new" rather than risk merging two different people.
+const NAME_VERIFY_SYSTEM_PROMPT = 'You verify whether two contact records in a B2B data repository refer to the same real person. Both records already share the same normalised full name. Two records sharing a name may be the same person re-entered under a different Unique ID, or two different people who happen to share a common name. Use company, designation, department and city as supporting evidence: the same person usually keeps a consistent employer/role/location across uploads; two different people with the same name usually differ on at least one. Treat blank fields on either side as unknown, not as a mismatch. Respond ONLY with JSON of the exact shape {"results": [{"idx": <int>, "same_person": <true|false>}, ...]}, one entry per idx given, no prose.';
+
+function parseVerifyResults(text: string): Set<number> {
+  const confirmed = new Set<number>();
+  const clean = text.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
+  const parsed = JSON.parse(clean);
+  for (const r of parsed.results || []) {
+    if (r.same_person === true) confirmed.add(Number(r.idx));
+  }
+  return confirmed;
+}
+
+// Returns null (not an empty Set) on failure, so the caller can tell
+// "verified, nobody matched" apart from "couldn't verify, try the backup".
+async function callGroqVerify(items: any[]): Promise<Set<number> | null> {
+  const groqKey = Deno.env.get('GROQ_API_KEY');
+  if (!groqKey) return null;
+  try {
+    const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${groqKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: GROQ_MODEL,
+        temperature: 0,
+        response_format: { type: 'json_object' },
+        messages: [
+          { role: 'system', content: NAME_VERIFY_SYSTEM_PROMPT },
+          { role: 'user', content: JSON.stringify(items) },
+        ],
+      }),
+    });
+    if (!resp.ok) {
+      console.error('[AI-DEDUPE] Groq verification failed:', resp.status, await resp.text());
+      return null;
+    }
+    const data = await resp.json();
+    return parseVerifyResults(data.choices[0].message.content);
+  } catch (e) {
+    console.error('[AI-DEDUPE] Groq verification error:', e);
+    return null;
+  }
+}
+
+// Backup for when Groq is down/unconfigured/rate-limited.
+async function callHaikuVerify(items: any[]): Promise<Set<number> | null> {
+  const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
+  if (!anthropicKey) return null;
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': anthropicKey,
+        'anthropic-version': '2023-06-01',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: HAIKU_MODEL,
+        max_tokens: 1024,
+        system: NAME_VERIFY_SYSTEM_PROMPT,
+        messages: [{ role: 'user', content: JSON.stringify(items) }],
+      }),
+    });
+    if (!resp.ok) {
+      console.error('[AI-DEDUPE] Haiku verification failed:', resp.status, await resp.text());
+      return null;
+    }
+    const data = await resp.json();
+    return parseVerifyResults(data.content[0].text);
+  } catch (e) {
+    console.error('[AI-DEDUPE] Haiku verification error:', e);
+    return null;
+  }
+}
+
+// One call verifies every name-only candidate pair in the batch at once.
+// Groq first, Claude Haiku as backup if Groq is unavailable or errors.
+// Fails closed: if both are unavailable, nothing is confirmed and those
+// rows fall through to "new" rather than risk merging two different people.
 async function verifySamePersonBatch(
   pairs: Array<{ idx: number; incoming: any; candidate: any }>
 ): Promise<Set<number>> {
-  const confirmed = new Set<number>();
-  const groqKey = Deno.env.get('GROQ_API_KEY');
-  if (!groqKey || pairs.length === 0) return confirmed;
+  if (pairs.length === 0) return new Set();
 
   const items = pairs.map(p => ({
     idx: p.idx,
@@ -755,36 +829,15 @@ async function verifySamePersonBatch(
     },
   }));
 
-  try {
-    const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${groqKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: GROQ_MODEL,
-        temperature: 0,
-        response_format: { type: 'json_object' },
-        messages: [
-          {
-            role: 'system',
-            content: 'You verify whether two contact records in a B2B data repository refer to the same real person. Both records already share the same normalised full name. Two records sharing a name may be the same person re-entered under a different Unique ID, or two different people who happen to share a common name. Use company, designation, department and city as supporting evidence: the same person usually keeps a consistent employer/role/location across uploads; two different people with the same name usually differ on at least one. Treat blank fields on either side as unknown, not as a mismatch. Respond ONLY with JSON of the exact shape {"results": [{"idx": <int>, "same_person": <true|false>}, ...]}, one entry per idx given, no prose.',
-          },
-          { role: 'user', content: JSON.stringify(items) },
-        ],
-      }),
-    });
-    if (!resp.ok) {
-      console.error('[AI-DEDUPE] Groq verification failed:', resp.status, await resp.text());
-      return confirmed;
-    }
-    const data = await resp.json();
-    const parsed = JSON.parse(data.choices[0].message.content);
-    for (const r of parsed.results || []) {
-      if (r.same_person === true) confirmed.add(Number(r.idx));
-    }
-  } catch (e) {
-    console.error('[AI-DEDUPE] Groq verification error:', e);
-  }
-  return confirmed;
+  const groqResult = await callGroqVerify(items);
+  if (groqResult) return groqResult;
+
+  console.warn('[AI-DEDUPE] Groq unavailable, falling back to Haiku');
+  const haikuResult = await callHaikuVerify(items);
+  if (haikuResult) return haikuResult;
+
+  console.error('[AI-DEDUPE] Both Groq and Haiku verification failed; treating all as not-same-person');
+  return new Set();
 }
 
 async function processFerventBatch(
