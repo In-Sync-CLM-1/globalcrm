@@ -107,6 +107,18 @@ const FILTER_OPTION_FIELDS = [
 ] as const;
 type FilterOptionField = (typeof FILTER_OPTION_FIELDS)[number];
 
+// Bulk-exporting the whole database in one click isn't allowed — this table
+// carries personal contact data (mobile numbers, personal emails), so export
+// is gated on at least one applied filter narrowing the result set.
+function hasActiveBasicFilters(f: RepositoryFilters): boolean {
+  return !!(
+    f.search || f.website || f.domainName || f.dbSourcedYear ||
+    f.city.length || f.state.length || f.country.length || f.industry.length ||
+    f.subIndustry.length || f.designation.length || f.designationLevel.length ||
+    f.department.length || f.ucdbStatus.length || f.employeeSize.length || f.turnover.length
+  );
+}
+
 // PostgREST's .or() splits on unescaped commas/parens, so a raw search value
 // like "Smith, Jones & Co" would otherwise be parsed as extra filter clauses.
 // The quotes must wrap the full ilike pattern (including any % wildcards) —
@@ -349,9 +361,14 @@ export default function FerventRepository() {
   };
 
   const handleExport = async () => {
+    const exportingSelection = selectedIds.length > 0;
+    const exportingAdvanced = !!appliedAdvancedQuery;
+    if (!exportingSelection && !exportingAdvanced && !hasActiveBasicFilters(appliedFilters)) {
+      notify.error("Apply a filter first", "Exporting the full database isn't allowed. Apply at least one filter, run an advanced search, or select specific records before exporting.");
+      return;
+    }
     setExporting(true);
     try {
-      const exportingSelection = selectedIds.length > 0;
       const buildQuery = () => {
         let query = supabase.from("fervent_data_repository").select("*").eq("org_id", effectiveOrgId);
         if (exportingSelection) {
@@ -441,6 +458,8 @@ export default function FerventRepository() {
     }
   };
 
+  const canExport = selectedIds.length > 0 || !!appliedAdvancedQuery || hasActiveBasicFilters(appliedFilters);
+
   if (featureLoading) {
     return (
       <DashboardLayout>
@@ -485,10 +504,21 @@ export default function FerventRepository() {
               <History className="h-4 w-4 mr-2" />
               Export History
             </Button>
-            <Button variant="outline" size="sm" onClick={handleExport} disabled={exporting}>
-              <Download className="h-4 w-4 mr-2" />
-              {exporting ? "Exporting..." : selectedIds.length > 0 ? `Export Selected (${selectedIds.length})` : "Export"}
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex">
+                  <Button variant="outline" size="sm" onClick={handleExport} disabled={exporting || !canExport}>
+                    <Download className="h-4 w-4 mr-2" />
+                    {exporting ? "Exporting..." : selectedIds.length > 0 ? `Export Selected (${selectedIds.length})` : "Export"}
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              {!canExport && (
+                <TooltipContent>
+                  <p>Apply a filter, run an advanced search, or select records first — exporting the full database isn't allowed.</p>
+                </TooltipContent>
+              )}
+            </Tooltip>
             <Button size="sm" onClick={() => setShowUpload(true)} disabled={!!activeImportJob}>
               <Upload className="h-4 w-4 mr-2" />
               {activeImportJob ? "Import in progress…" : "Import CSV"}
