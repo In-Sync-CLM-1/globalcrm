@@ -31,7 +31,7 @@ import { FerventBulkEditDialog } from "@/components/FerventRepository/FerventBul
 import { FerventAdvancedSearch } from "@/components/FerventRepository/FerventAdvancedSearch";
 import { FerventSavedSearches } from "@/components/FerventRepository/FerventSavedSearches";
 import { TurnoverRangeFilter } from "@/components/FerventRepository/TurnoverRangeFilter";
-import { EMPLOYEE_SIZE_BUCKETS, formatTurnoverInrMillion } from "@/components/FerventRepository/ferventFieldNormalization";
+import { EMPLOYEE_SIZE_BUCKETS, formatTurnoverUsdMillion } from "@/components/FerventRepository/ferventFieldNormalization";
 import {
   applyBooleanQuery,
   emptyBooleanQuery,
@@ -72,7 +72,7 @@ export interface RepositoryRecord {
   sub_industry: string | null;
   employee_size: string | null;
   turnover: string | null;
-  turnover_inr_million: number | null;
+  turnover_usd_million: number | null;
   company_linkedin_url: string | null;
   import_job_id: string | null;
   created_at: string;
@@ -93,15 +93,15 @@ interface RepositoryFilters {
   website: string;
   domainName: string;
   employeeSize: string[];
-  turnoverMinM: string;
-  turnoverMaxM: string;
+  turnoverMinUsdM: string;
+  turnoverMaxUsdM: string;
   matchMode: "exact" | "contains";
 }
 
 const emptyFilters: RepositoryFilters = {
   search: "", city: [], state: [], country: [], industry: [],
   subIndustry: [], designation: [], designationLevel: [], department: [], dbSourcedYear: "", ucdbStatus: [],
-  website: "", domainName: "", employeeSize: [], turnoverMinM: "", turnoverMaxM: "", matchMode: "contains",
+  website: "", domainName: "", employeeSize: [], turnoverMinUsdM: "", turnoverMaxUsdM: "", matchMode: "contains",
 };
 
 // Distinct-value columns backing the searchable multi-select filters below.
@@ -143,8 +143,8 @@ function applyBasicFilters(query: any, f: RepositoryFilters) {
   if (f.website) query = query.ilike("website", like(f.website));
   if (f.domainName) query = query.ilike("domain_name", like(f.domainName));
   if (f.employeeSize.length) query = query.in("employee_size", f.employeeSize);
-  if (f.turnoverMinM) query = query.gte("turnover_inr_million", parseFloat(f.turnoverMinM));
-  if (f.turnoverMaxM) query = query.lte("turnover_inr_million", parseFloat(f.turnoverMaxM));
+  if (f.turnoverMinUsdM) query = query.gte("turnover_usd_million", parseFloat(f.turnoverMinUsdM));
+  if (f.turnoverMaxUsdM) query = query.lte("turnover_usd_million", parseFloat(f.turnoverMaxUsdM));
   return query;
 }
 
@@ -425,7 +425,7 @@ export default function FerventRepository() {
         { key: "industry", label: "Industry" },
         { key: "sub_industry", label: "SubIndustry" },
         { key: "employee_size", label: "Employee Size" },
-        { key: "turnover", label: "Turnover", format: (v: string | null, row: RepositoryRecord) => row.turnover_inr_million != null ? formatTurnoverInrMillion(row.turnover_inr_million) : (v || "") },
+        { key: "turnover", label: "Turnover", format: (v: string | null, row: RepositoryRecord) => row.turnover_usd_million != null ? formatTurnoverUsdMillion(row.turnover_usd_million) : (v || "") },
         { key: "company_linkedin_url", label: "Company LinkedIn ID" },
       ], `fervent-database-${exportingSelection ? "selected" : "filtered"}-${new Date().toISOString().slice(0, 10)}.csv`);
 
@@ -579,7 +579,7 @@ export default function FerventRepository() {
                   <Input placeholder="Website" value={filters.website} onChange={(e) => setFilters({ ...filters, website: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
                   <Input placeholder="Domain Name" value={filters.domainName} onChange={(e) => setFilters({ ...filters, domainName: e.target.value })} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
                   <MultiSelectFilter triggerLabel="Employee Size" placeholder="Search range..." options={EMPLOYEE_SIZE_BUCKETS} selected={filters.employeeSize} onChange={(v) => setFilters({ ...filters, employeeSize: v })} />
-                  <TurnoverRangeFilter minM={filters.turnoverMinM} maxM={filters.turnoverMaxM} onChange={(min, max) => setFilters({ ...filters, turnoverMinM: min, turnoverMaxM: max })} />
+                  <TurnoverRangeFilter minM={filters.turnoverMinUsdM} maxM={filters.turnoverMaxUsdM} onChange={(min, max) => setFilters({ ...filters, turnoverMinUsdM: min, turnoverMaxUsdM: max })} />
                 </div>
                 <div className="flex gap-2 mt-3">
                   <Button size="sm" onClick={applyFilters}>Apply Filters</Button>
@@ -707,7 +707,7 @@ export default function FerventRepository() {
                         <TableCell className="whitespace-nowrap">{r.industry || "—"}</TableCell>
                         <TableCell className="whitespace-nowrap">{r.sub_industry || "—"}</TableCell>
                         <TableCell className="whitespace-nowrap">{r.employee_size || "—"}</TableCell>
-                        <TableCell className="whitespace-nowrap">{r.turnover_inr_million != null ? formatTurnoverInrMillion(r.turnover_inr_million) : (r.turnover || "—")}</TableCell>
+                        <TableCell className="whitespace-nowrap">{r.turnover_usd_million != null ? formatTurnoverUsdMillion(r.turnover_usd_million) : (r.turnover || "—")}</TableCell>
                         <TableCell className="whitespace-nowrap">{r.company_linkedin_url || "—"}</TableCell>
                       </TableRow>
                     ))}
@@ -784,7 +784,7 @@ export default function FerventRepository() {
                   ["Industry", selectedRecord.industry],
                   ["Sub Industry", selectedRecord.sub_industry],
                   ["Employee Size", selectedRecord.employee_size],
-                  ["Turnover", selectedRecord.turnover_inr_million != null ? formatTurnoverInrMillion(selectedRecord.turnover_inr_million) : selectedRecord.turnover],
+                  ["Turnover", selectedRecord.turnover_usd_million != null ? formatTurnoverUsdMillion(selectedRecord.turnover_usd_million) : selectedRecord.turnover],
                   ["Company LinkedIn", selectedRecord.company_linkedin_url],
                 ].map(([label, value]) => (
                   <div key={label as string}>

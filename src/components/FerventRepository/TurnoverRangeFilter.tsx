@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 type Unit = "M" | "B";
 
 interface TurnoverRangeFilterProps {
-  minM: string; // INR millions as a string, "" = unbounded
+  minM: string; // USD millions as a string, "" = unbounded
   maxM: string;
   onChange: (minM: string, maxM: string) => void;
 }
@@ -33,7 +33,7 @@ export function TurnoverRangeFilter({ minM, maxM, onChange }: TurnoverRangeFilte
 
   const label =
     minM || maxM
-      ? `₹${min.value ? `${min.value}${min.unit}` : "0"} - ${max.value ? `₹${max.value}${max.unit}` : "Any"}`
+      ? `$${min.value ? `${min.value}${min.unit}` : "0"} - ${max.value ? `$${max.value}${max.unit}` : "Any"}`
       : "Turnover";
 
   return (
@@ -44,7 +44,7 @@ export function TurnoverRangeFilter({ minM, maxM, onChange }: TurnoverRangeFilte
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-72 p-3 space-y-3" align="start">
-        <p className="text-xs text-muted-foreground">Turnover range (INR)</p>
+        <p className="text-xs text-muted-foreground">Turnover range (USD)</p>
         <div className="flex items-center gap-2">
           <span className="text-xs w-8 text-muted-foreground">Min</span>
           <Input

@@ -5419,7 +5419,7 @@ export type Database = {
           std_code: string | null
           sub_industry: string | null
           turnover: string | null
-          turnover_inr_million: number | null
+          turnover_usd_million: number | null
           ucdb_status: string | null
           unique_id: string | null
           updated_at: string | null
@@ -5457,7 +5457,7 @@ export type Database = {
           std_code?: string | null
           sub_industry?: string | null
           turnover?: string | null
-          turnover_inr_million?: number | null
+          turnover_usd_million?: number | null
           ucdb_status?: string | null
           unique_id?: string | null
           updated_at?: string | null
@@ -5495,7 +5495,7 @@ export type Database = {
           std_code?: string | null
           sub_industry?: string | null
           turnover?: string | null
-          turnover_inr_million?: number | null
+          turnover_usd_million?: number | null
           ucdb_status?: string | null
           unique_id?: string | null
           updated_at?: string | null

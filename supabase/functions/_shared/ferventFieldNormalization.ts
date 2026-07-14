@@ -23,26 +23,30 @@ export function normalizeEmployeeSize(raw: string): string {
   return bucket ? bucket[1] : trimmed;
 }
 
-export function parseTurnoverInrMillion(raw: string | null | undefined): number | null {
+// Flat reference rate for INR->USD turnover conversion. Not a real/live FX
+// rate — for filtering/reference purposes only, per business decision.
+export const TURNOVER_INR_PER_USD = 100;
+
+export function parseTurnoverUsdMillion(raw: string | null | undefined): number | null {
   if (!raw) return null;
   const text = raw.trim();
-  if (!text || text.includes("$")) return null;
+  if (!text) return null;
   const clean = text.replace(/,/g, "");
   const match = clean.match(/([0-9]+(?:\.[0-9]+)?)\s*(cr|crore|lakh|lac|bn|billion|b|mn|million|m)\b/i);
   if (!match) return null;
   const value = parseFloat(match[1]);
   if (!Number.isFinite(value)) return null;
   const unit = match[2].toLowerCase();
-  if (unit === "cr" || unit === "crore") return value * 10;
-  if (unit === "lakh" || unit === "lac") return value * 0.1;
+  if (unit === "cr" || unit === "crore") return (value * 10) / TURNOVER_INR_PER_USD;
+  if (unit === "lakh" || unit === "lac") return (value * 0.1) / TURNOVER_INR_PER_USD;
   if (unit === "bn" || unit === "billion" || unit === "b") return value * 1000;
-  return value; // mn / million / m
+  return value; // mn / million / m, already USD
 }
 
-export function formatTurnoverInrMillion(m: number): string {
+export function formatTurnoverUsdMillion(m: number): string {
   if (m >= 1000) {
     const b = m / 1000;
-    return `₹${Number.isInteger(b) ? b : b.toFixed(1)}B`;
+    return `$${Number.isInteger(b) ? b : b.toFixed(1)}B`;
   }
-  return `₹${Number.isInteger(m) ? m : m.toFixed(1)}M`;
+  return `$${Number.isInteger(m) ? m : m.toFixed(2)}M`;
 }

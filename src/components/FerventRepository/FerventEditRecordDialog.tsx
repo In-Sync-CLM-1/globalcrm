@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useNotification } from "@/hooks/useNotification";
 import type { RepositoryRecord } from "@/pages/FerventRepository";
-import { normalizeEmployeeSize, parseTurnoverInrMillion, formatTurnoverInrMillion } from "@/components/FerventRepository/ferventFieldNormalization";
+import { normalizeEmployeeSize, parseTurnoverUsdMillion, formatTurnoverUsdMillion } from "@/components/FerventRepository/ferventFieldNormalization";
 
 // All user-editable fields on a repository record. sr_no/db_sourced_year are
 // numeric; everything else is free text. id/org_id/created_at/updated_at/
@@ -60,8 +60,8 @@ export function FerventEditRecordDialog({ open, onOpenChange, record, orgId, onS
     const initial: Record<string, string> = {};
     EDITABLE_FIELDS.forEach(({ key }) => {
       if (key === "turnover") {
-        initial.turnover = record.turnover_inr_million != null
-          ? formatTurnoverInrMillion(record.turnover_inr_million)
+        initial.turnover = record.turnover_usd_million != null
+          ? formatTurnoverUsdMillion(record.turnover_usd_million)
           : (record.turnover ?? "");
         return;
       }
@@ -88,8 +88,8 @@ export function FerventEditRecordDialog({ open, onOpenChange, record, orgId, onS
           newValue = normalizeEmployeeSize(newValue);
         }
         if (key === "turnover" && typeof newValue === "string") {
-          const m = parseTurnoverInrMillion(newValue);
-          if (m != null) newValue = formatTurnoverInrMillion(m);
+          const m = parseTurnoverUsdMillion(newValue);
+          if (m != null) newValue = formatTurnoverUsdMillion(m);
         }
         const oldValue = record[key] ?? null;
         if (String(oldValue ?? "") !== String(newValue ?? "")) {
@@ -101,9 +101,9 @@ export function FerventEditRecordDialog({ open, onOpenChange, record, orgId, onS
       // Keep the hidden numeric range field in sync whenever the visible
       // turnover text changed (or was never backfilled for this record).
       const turnoverText = ("turnover" in updates ? updates.turnover : record.turnover) as string | null;
-      const newTurnoverM = parseTurnoverInrMillion(turnoverText);
-      if (newTurnoverM !== (record.turnover_inr_million ?? null)) {
-        updates.turnover_inr_million = newTurnoverM;
+      const newTurnoverM = parseTurnoverUsdMillion(turnoverText);
+      if (newTurnoverM !== (record.turnover_usd_million ?? null)) {
+        updates.turnover_usd_million = newTurnoverM;
       }
 
       if (Object.keys(updates).length === 0) {
