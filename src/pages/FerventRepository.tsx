@@ -196,6 +196,38 @@ function DisabledAction({ icon: Icon, label }: { icon: any; label: string }) {
   );
 }
 
+const EXPORT_COLUMNS: { key: string; label: string; format?: (v: any, row: RepositoryRecord) => string }[] = [
+  { key: "unique_id", label: "Unique ID" },
+  { key: "upload_status", label: "Status", format: (v: string | null) => (v === "existing" ? "Updated" : "Fresh") },
+  { key: "db_sourced_year", label: "DB Sourced Year" },
+  { key: "ucdb_status", label: "UCDB Status" },
+  { key: "company_name", label: "Company Name" },
+  { key: "first_name", label: "First Name" },
+  { key: "last_name", label: "Last Name" },
+  { key: "designation", label: "Designation" },
+  { key: "department", label: "Department" },
+  { key: "designation_level", label: "Designation Level" },
+  { key: "city", label: "City" },
+  { key: "state", label: "State" },
+  { key: "country", label: "Country" },
+  { key: "std_code", label: "STD Code" },
+  { key: "mobile_number_1", label: "Mobile Number 1" },
+  { key: "mobile_number_2", label: "Mobile Number 2" },
+  { key: "direct_number", label: "Direct Number" },
+  { key: "phone_number", label: "Phone Number" },
+  { key: "official_email", label: "Official Email ID" },
+  { key: "personal_email_1", label: "Personal Email ID 1" },
+  { key: "personal_email_2", label: "Personal Email ID 2" },
+  { key: "linkedin_url", label: "Contact LinkedIn ID" },
+  { key: "domain_name", label: "Domain Name" },
+  { key: "website", label: "Website" },
+  { key: "industry", label: "Industry" },
+  { key: "sub_industry", label: "SubIndustry" },
+  { key: "employee_size", label: "Employee Size" },
+  { key: "turnover", label: "Turnover", format: (v: string | null, row: RepositoryRecord) => row.turnover_usd_million != null ? formatTurnoverUsdMillion(row.turnover_usd_million) : (v || "") },
+  { key: "company_linkedin_url", label: "Company LinkedIn ID" },
+];
+
 export default function FerventRepository() {
   const { effectiveOrgId } = useOrgContext();
   const { data: activeImportJob } = useFerventActiveImportJob(effectiveOrgId || null);
@@ -221,6 +253,8 @@ export default function FerventRepository() {
   const [showUpload, setShowUpload] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState<RepositoryRecord | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [showExportDialog, setShowExportDialog] = useState(false);
+  const [exportFields, setExportFields] = useState<string[]>(EXPORT_COLUMNS.map((c) => c.label));
   const [showExportHistory, setShowExportHistory] = useState(false);
   const [showImportHistory, setShowImportHistory] = useState(false);
   const [showBulkEdit, setShowBulkEdit] = useState(false);
@@ -361,6 +395,12 @@ export default function FerventRepository() {
     // text input has on Enter, so gating export on the *applied* snapshot
     // let a picked-but-not-yet-applied filter silently export everything.
     const exportingAdvanced = searchMode === "advanced" && !isBooleanQueryEmpty(advancedQuery);
+    // Keep canonical column order regardless of the order fields were ticked.
+    const columns = EXPORT_COLUMNS.filter((c) => exportFields.includes(c.label));
+    if (columns.length === 0) {
+      notify.error("No fields selected", "Pick at least one field to export.");
+      return;
+    }
     setExporting(true);
     try {
       const buildQuery = () => {
@@ -397,52 +437,27 @@ export default function FerventRepository() {
         return;
       }
 
-      exportToCSV(rows, [
-        { key: "unique_id", label: "Unique ID" },
-        { key: "upload_status", label: "Status", format: (v: string | null) => (v === "existing" ? "Updated" : "Fresh") },
-        { key: "db_sourced_year", label: "DB Sourced Year" },
-        { key: "ucdb_status", label: "UCDB Status" },
-        { key: "company_name", label: "Company Name" },
-        { key: "first_name", label: "First Name" },
-        { key: "last_name", label: "Last Name" },
-        { key: "designation", label: "Designation" },
-        { key: "department", label: "Department" },
-        { key: "designation_level", label: "Designation Level" },
-        { key: "city", label: "City" },
-        { key: "state", label: "State" },
-        { key: "country", label: "Country" },
-        { key: "std_code", label: "STD Code" },
-        { key: "mobile_number_1", label: "Mobile Number 1" },
-        { key: "mobile_number_2", label: "Mobile Number 2" },
-        { key: "direct_number", label: "Direct Number" },
-        { key: "phone_number", label: "Phone Number" },
-        { key: "official_email", label: "Official Email ID" },
-        { key: "personal_email_1", label: "Personal Email ID 1" },
-        { key: "personal_email_2", label: "Personal Email ID 2" },
-        { key: "linkedin_url", label: "Contact LinkedIn ID" },
-        { key: "domain_name", label: "Domain Name" },
-        { key: "website", label: "Website" },
-        { key: "industry", label: "Industry" },
-        { key: "sub_industry", label: "SubIndustry" },
-        { key: "employee_size", label: "Employee Size" },
-        { key: "turnover", label: "Turnover", format: (v: string | null, row: RepositoryRecord) => row.turnover_usd_million != null ? formatTurnoverUsdMillion(row.turnover_usd_million) : (v || "") },
-        { key: "company_linkedin_url", label: "Company LinkedIn ID" },
-      ], `fervent-database-${exportingSelection ? "selected" : "filtered"}-${new Date().toISOString().slice(0, 10)}.csv`);
+      exportToCSV(rows, columns, `fervent-database-${exportingSelection ? "selected" : "filtered"}-${new Date().toISOString().slice(0, 10)}.csv`);
 
+      setShowExportDialog(false);
       notify.success("Export ready", `${rows.length} record(s) exported${exportingSelection ? " (selected rows)" : ""}.`);
 
       const { data: { user } } = await supabase.auth.getUser();
       if (user && effectiveOrgId) {
+        const detailFilters: Record<string, any> = exportingSelection
+          ? { selection: `${rows.length} manually selected record(s)` }
+          : exportingAdvanced
+            ? { advanced: JSON.stringify(advancedQuery) }
+            : { ...filters };
+        if (columns.length < EXPORT_COLUMNS.length) {
+          detailFilters.fields = `${columns.length} of ${EXPORT_COLUMNS.length} selected (${columns.map((c) => c.label).join(", ")})`;
+        }
         await supabase.from("fervent_activity_log").insert({
           org_id: effectiveOrgId,
           record_id: null,
           actor_id: user.id,
           action: "exported",
-          detail: exportingSelection
-            ? { count: rows.length, filters: { selection: `${rows.length} manually selected record(s)` } }
-            : exportingAdvanced
-              ? { count: rows.length, filters: { advanced: JSON.stringify(advancedQuery) } }
-              : { count: rows.length, filters },
+          detail: { count: rows.length, filters: detailFilters },
         });
       }
     } catch (err: any) {
@@ -496,7 +511,7 @@ export default function FerventRepository() {
               <History className="h-4 w-4 mr-2" />
               Export History
             </Button>
-            <Button variant="outline" size="sm" onClick={handleExport} disabled={exporting}>
+            <Button variant="outline" size="sm" onClick={() => setShowExportDialog(true)} disabled={exporting}>
               <Download className="h-4 w-4 mr-2" />
               {exporting ? "Exporting..." : selectedIds.length > 0 ? `Export Selected (${selectedIds.length})` : "Export"}
             </Button>
@@ -802,6 +817,41 @@ export default function FerventRepository() {
               />
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showExportDialog} onOpenChange={setShowExportDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {selectedIds.length > 0 ? `Export Selected (${selectedIds.length})` : "Export"}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2">
+            <p className="text-sm text-muted-foreground">
+              Choose which fields to include in the CSV. All fields are selected by default.
+            </p>
+            <MultiSelectFilter
+              options={EXPORT_COLUMNS.map((c) => c.label)}
+              selected={exportFields}
+              onChange={setExportFields}
+              placeholder="Search fields..."
+              triggerLabel={
+                exportFields.length === EXPORT_COLUMNS.length
+                  ? "All fields"
+                  : `${exportFields.length} of ${EXPORT_COLUMNS.length} fields`
+              }
+            />
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setShowExportDialog(false)} disabled={exporting}>
+              Cancel
+            </Button>
+            <Button onClick={handleExport} disabled={exporting || exportFields.length === 0}>
+              <Download className="h-4 w-4 mr-2" />
+              {exporting ? "Exporting..." : "Export CSV"}
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
 
