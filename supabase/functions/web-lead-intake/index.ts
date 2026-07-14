@@ -233,6 +233,27 @@ Deno.serve(async (req) => {
 
     console.log(`web-lead-intake: created contact ${contact.id} (${productCanonical}), owner=${contact.assigned_to}`);
 
+    // Relay the raw event to crm — crm owns the decision of whether/how to alert
+    // the owner (email + WhatsApp + call). This function does not decide anything
+    // about that alert, just forwards what it knows. Fire-and-forget: a failure
+    // here must never block lead capture.
+    const alertKick = fetch('https://mlvgqudcwlkolsbighnn.supabase.co/functions/v1/lead-alert-notify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: `${firstName} ${lastName || ''}`.trim(),
+        phone,
+        email,
+        company: clean(payload.company),
+        product: productCanonical,
+        source,
+        stage: isDemoIntake ? 'Demo Requested' : 'New',
+        page: clean(payload.source_url),
+      }),
+    }).catch((e) => console.error('lead-alert-notify kick failed:', String(e)));
+    try { (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime?.waitUntil?.(alertKick); }
+    catch { /* EdgeRuntime unavailable — best-effort only */ }
+
     // Instant dial: the insert above already enqueued the qualify call via the
     // stage trigger. Ping the dispatcher now so an in-window demo request is
     // called within seconds instead of waiting for the next cron tick. The
