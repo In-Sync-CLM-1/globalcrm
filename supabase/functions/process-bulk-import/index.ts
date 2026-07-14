@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { getSupabaseClient } from '../_shared/supabaseClient.ts';
 import { logEdgeError, logStep, logBatchProgress, logValidationError } from '../_shared/errorLogger.ts';
+import { normalizeEmployeeSize, parseTurnoverInrMillion, formatTurnoverInrMillion } from '../_shared/ferventFieldNormalization.ts';
 
 const OPERATION_TIMEOUT = 20 * 60 * 1000; // 20 minutes
 const MAX_RETRIES = 3;
@@ -347,8 +348,12 @@ serve(async (req) => {
             website: row.website || null,
             industry: row.industry || null,
             sub_industry: row.subindustry || row.sub_industry || null,
-            employee_size: row.employee_size || null,
-            turnover: row.turnover || null,
+            employee_size: row.employee_size ? normalizeEmployeeSize(row.employee_size) : null,
+            turnover: (() => {
+              const m = parseTurnoverInrMillion(row.turnover);
+              return m != null ? formatTurnoverInrMillion(m) : (row.turnover || null);
+            })(),
+            turnover_inr_million: parseTurnoverInrMillion(row.turnover),
             company_linkedin_url: row.company_linkedin_id || row.company_linkedin_url || null,
             created_by: importJob.user_id,
             import_job_id: importJob.id

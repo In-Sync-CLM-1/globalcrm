@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useNotification } from "@/hooks/useNotification";
 import type { RepositoryRecord } from "@/pages/FerventRepository";
+import { normalizeEmployeeSize, parseTurnoverInrMillion, formatTurnoverInrMillion } from "@/components/FerventRepository/ferventFieldNormalization";
 
 // All user-editable fields on a repository record. sr_no/db_sourced_year are
 // numeric; everything else is free text. id/org_id/created_at/updated_at/
@@ -58,6 +59,12 @@ export function FerventEditRecordDialog({ open, onOpenChange, record, orgId, onS
     if (!open) return;
     const initial: Record<string, string> = {};
     EDITABLE_FIELDS.forEach(({ key }) => {
+      if (key === "turnover") {
+        initial.turnover = record.turnover_inr_million != null
+          ? formatTurnoverInrMillion(record.turnover_inr_million)
+          : (record.turnover ?? "");
+        return;
+      }
       const v = record[key];
       initial[key as string] = v == null ? "" : String(v);
     });
@@ -75,14 +82,29 @@ export function FerventEditRecordDialog({ open, onOpenChange, record, orgId, onS
 
       EDITABLE_FIELDS.forEach(({ key, type }) => {
         const raw = values[key as string] ?? "";
-        const newValue: string | number | null =
+        let newValue: string | number | null =
           type === "number" ? (raw.trim() === "" ? null : parseInt(raw, 10)) : (raw.trim() === "" ? null : raw);
+        if (key === "employee_size" && typeof newValue === "string") {
+          newValue = normalizeEmployeeSize(newValue);
+        }
+        if (key === "turnover" && typeof newValue === "string") {
+          const m = parseTurnoverInrMillion(newValue);
+          if (m != null) newValue = formatTurnoverInrMillion(m);
+        }
         const oldValue = record[key] ?? null;
         if (String(oldValue ?? "") !== String(newValue ?? "")) {
           updates[key as string] = newValue;
           changes[key as string] = { from: oldValue, to: newValue };
         }
       });
+
+      // Keep the hidden numeric range field in sync whenever the visible
+      // turnover text changed (or was never backfilled for this record).
+      const turnoverText = ("turnover" in updates ? updates.turnover : record.turnover) as string | null;
+      const newTurnoverM = parseTurnoverInrMillion(turnoverText);
+      if (newTurnoverM !== (record.turnover_inr_million ?? null)) {
+        updates.turnover_inr_million = newTurnoverM;
+      }
 
       if (Object.keys(updates).length === 0) {
         onOpenChange(false);

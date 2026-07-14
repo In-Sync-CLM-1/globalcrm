@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useNotification } from "@/hooks/useNotification";
+import { normalizeEmployeeSize, parseTurnoverInrMillion, formatTurnoverInrMillion } from "@/components/FerventRepository/ferventFieldNormalization";
 
 const BULK_EDITABLE_FIELDS: { key: string; label: string }[] = [
   { key: "ucdb_status", label: "UCDB Status" },
@@ -41,11 +42,22 @@ export function FerventBulkEditDialog({ open, onOpenChange, selectedIds, orgId, 
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Not authenticated");
 
-      const newValue = value.trim() === "" ? null : value.trim();
+      let newValue: string | null = value.trim() === "" ? null : value.trim();
+      const updatePayload: Record<string, string | number | null> = {};
+
+      if (field === "employee_size" && newValue) {
+        newValue = normalizeEmployeeSize(newValue);
+      }
+      if (field === "turnover") {
+        const m = parseTurnoverInrMillion(newValue);
+        if (m != null) newValue = formatTurnoverInrMillion(m);
+        updatePayload.turnover_inr_million = m;
+      }
+      updatePayload[field] = newValue;
 
       const { error } = await supabase
         .from("fervent_data_repository")
-        .update({ [field]: newValue })
+        .update(updatePayload)
         .in("id", selectedIds)
         .eq("org_id", orgId);
       if (error) throw error;
