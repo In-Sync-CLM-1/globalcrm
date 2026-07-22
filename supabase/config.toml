@@ -115,31 +115,19 @@ verify_jwt = false
 [functions.enrich-contact]
 verify_jwt = true
 
-[functions.bulk-enrich-contacts]
-verify_jwt = true
-
 [functions.extract-invoice-client-data]
 verify_jwt = true
 
 [functions.process-invoice-import]
 verify_jwt = true
 
-[functions.capture-carry-forward]
-verify_jwt = true
-
 [functions.freeze-monthly-actuals]
 verify_jwt = false
-
-[functions.get-monthly-actuals]
-verify_jwt = true
 
 [functions.auto-sync-stale-calls]
 verify_jwt = true
 
 [functions.create-exotel-whatsapp-template]
-verify_jwt = false
-
-[functions.submit-help-ticket]
 verify_jwt = false
 
 [functions.send-otp]

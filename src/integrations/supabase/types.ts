@@ -1221,41 +1221,6 @@ export type Database = {
           },
         ]
       }
-      bulk_import_records: {
-        Row: {
-          created_at: string | null
-          id: string
-          import_id: string
-          record_id: string
-          row_number: number
-          table_name: string
-        }
-        Insert: {
-          created_at?: string | null
-          id?: string
-          import_id: string
-          record_id: string
-          row_number: number
-          table_name: string
-        }
-        Update: {
-          created_at?: string | null
-          id?: string
-          import_id?: string
-          record_id?: string
-          row_number?: number
-          table_name?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "bulk_import_records_import_id_fkey"
-            columns: ["import_id"]
-            isOneToOne: false
-            referencedRelation: "bulk_import_history"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       calendar_shares: {
         Row: {
           created_at: string | null
@@ -5332,50 +5297,6 @@ export type Database = {
         }
         Relationships: []
       }
-      google_oauth_tokens: {
-        Row: {
-          access_token: string | null
-          calendar_id: string | null
-          created_at: string | null
-          id: string
-          org_id: string
-          refresh_token: string
-          token_expires_at: string | null
-          updated_at: string | null
-          user_email: string | null
-        }
-        Insert: {
-          access_token?: string | null
-          calendar_id?: string | null
-          created_at?: string | null
-          id?: string
-          org_id: string
-          refresh_token: string
-          token_expires_at?: string | null
-          updated_at?: string | null
-          user_email?: string | null
-        }
-        Update: {
-          access_token?: string | null
-          calendar_id?: string | null
-          created_at?: string | null
-          id?: string
-          org_id?: string
-          refresh_token?: string
-          token_expires_at?: string | null
-          updated_at?: string | null
-          user_email?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "google_oauth_tokens_org_id_fkey"
-            columns: ["org_id"]
-            isOneToOne: true
-            referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       gst_payment_tracking: {
         Row: {
           amount_paid: number | null
@@ -5517,33 +5438,6 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
-      }
-      import_staging: {
-        Row: {
-          created_at: string | null
-          id: string
-          import_id: string
-          processed: boolean | null
-          raw_data: Json
-          row_number: number
-        }
-        Insert: {
-          created_at?: string | null
-          id?: string
-          import_id: string
-          processed?: boolean | null
-          raw_data: Json
-          row_number: number
-        }
-        Update: {
-          created_at?: string | null
-          id?: string
-          import_id?: string
-          processed?: boolean | null
-          raw_data?: Json
-          row_number?: number
-        }
-        Relationships: []
       }
       invoice_import_items: {
         Row: {
@@ -9363,10 +9257,6 @@ export type Database = {
         Args: { _org_id: string; _user_id: string }
         Returns: boolean
       }
-      capture_carry_forward_optimized: {
-        Args: { _org_id: string; _reference_year: number }
-        Returns: Json
-      }
       check_and_increment_daily_limit: {
         Args: { _contact_id: string; _max_per_day: number; _org_id: string }
         Returns: boolean
@@ -9567,22 +9457,6 @@ export type Database = {
           total_count: number
         }[]
       }
-      get_monthly_actuals_optimized: {
-        Args: { _org_id: string; _year: number }
-        Returns: {
-          deal_contact_ids: string[]
-          deals: number
-          invoiced: number
-          invoiced_invoice_ids: string[]
-          month: number
-          proposal_contact_ids: string[]
-          proposals: number
-          qualified: number
-          qualified_contact_ids: string[]
-          received: number
-          received_invoice_ids: string[]
-        }[]
-      }
       get_optimal_send_time: {
         Args: { _contact_id: string; _default_hour?: number; _org_id: string }
         Returns: Json
@@ -9750,36 +9624,15 @@ export type Database = {
         }
         Returns: undefined
       }
-      merge_clients_atomic: {
-        Args: {
-          _duplicate_client_ids: string[]
-          _org_id: string
-          _primary_client_id: string
-        }
-        Returns: Json
-      }
       merge_fervent_repository_batch: {
         Args: { p_import_job_id: string; p_merges: Json; p_org_id: string }
         Returns: number
-      }
-      process_bulk_import_batch: {
-        Args: {
-          p_import_id: string
-          p_org_id: string
-          p_table_name: string
-          p_user_id: string
-        }
-        Returns: Json
       }
       process_time_based_triggers: { Args: never; Returns: undefined }
       refresh_contacts_with_stages: { Args: never; Returns: undefined }
       reserve_wallet_funds: {
         Args: { p_amount: number; p_floor: number; p_org: string }
         Returns: number
-      }
-      revert_bulk_import: {
-        Args: { p_import_id: string; p_org_id: string }
-        Returns: Json
       }
       sync_platform_email_list: { Args: never; Returns: undefined }
       trigger_retry_failed_whatsapp: { Args: never; Returns: undefined }
