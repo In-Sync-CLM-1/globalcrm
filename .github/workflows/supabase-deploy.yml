@@ -61,7 +61,9 @@ jobs:
             NEW=$(git show "HEAD:supabase/config.toml" 2>/dev/null | parse | sort)
             CFG_SLUGS=$(comm -13 <(printf '%s\n' "$OLD") <(printf '%s\n' "$NEW") | sed -E 's/=.*//')
           fi
-          SLUGS=$(printf '%s\n%s\n' "$DIR_SLUGS" "$CFG_SLUGS" | sed '/^$/d' | sort -u | tr '\n' ' ')
+          # A diff hit on a directory that no longer exists means the function was
+          # deleted in this push - nothing to deploy for it.
+          SLUGS=$(printf '%s\n%s\n' "$DIR_SLUGS" "$CFG_SLUGS" | sed '/^$/d' | sort -u | while read -r s; do [ -d "supabase/functions/$s" ] && echo "$s"; done | tr '\n' ' ')
           if [ -z "$SLUGS" ]; then echo "mode=none" >> "$GITHUB_OUTPUT"; else echo "mode=changed" >> "$GITHUB_OUTPUT"; echo "slugs=$SLUGS" >> "$GITHUB_OUTPUT"; fi
       - name: Deploy edge functions
         run: |
