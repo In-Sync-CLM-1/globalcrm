@@ -17,7 +17,7 @@ function restHeaders(env, extra) {
 }
 async function pgSelect(env, table, qs) {
   const r = await fetch(`${restBase(env)}/${table}?${qs}`, { headers: restHeaders(env) });
-  if (!r.ok) { console.error(`select ${table} failed:`, r.status, await r.text()); return []; }
+  if (!r.ok) { const t = await r.text(); console.error(`select ${table} failed:`, r.status, t); throw new Error(`select ${table} failed: ${r.status} ${t}`); }
   return r.json();
 }
 async function pgSelectOne(env, table, qs) {
@@ -238,7 +238,8 @@ async function tick(env) {
 export default {
   async scheduled(_event, env, ctx) { ctx.waitUntil(tick(env)); },
   async fetch(_req, env) {
-    const out = await tick(env);
+    let out;
+    try { out = await tick(env); } catch (e) { out = { ok: false, error: String(e && e.stack || e) }; }
     return new Response(JSON.stringify(out), { headers: { "Content-Type": "application/json" } });
   },
 };

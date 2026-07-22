@@ -21,6 +21,7 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      SUPABASE_SERVICE_ROLE_KEY_REST: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY_REST }}
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
       BOLNA_API_KEY: ${{ secrets.BOLNA_API_KEY }}
@@ -70,7 +71,7 @@ jobs:
         run: |
           set -uo pipefail
           : "${CLOUDFLARE_API_TOKEN:?missing}"
-          : "${SUPABASE_SERVICE_ROLE_KEY:?missing}"
+          : "${SUPABASE_SERVICE_ROLE_KEY_REST:?missing}"
           : "${SUPABASE_URL:?missing}"
           if [ ! -f native-jobs.txt ]; then echo "no native-jobs.txt"; exit 0; fi
           ok=0; fail=0
@@ -85,7 +86,11 @@ jobs:
           crons = ["$sched"]
           EOF
             if npx wrangler@latest deploy --config .tmp-native.toml; then
-              printf '%s' "$SUPABASE_SERVICE_ROLE_KEY" | npx wrangler@latest secret put SUPABASE_SERVICE_ROLE_KEY --config .tmp-native.toml
+              # Native workers call PostgREST directly (not the Functions Gateway),
+              # which needs the NEW-format secret key -- the legacy-format
+              # SUPABASE_SERVICE_ROLE_KEY used by the thin-dispatcher fleet above
+              # was disabled project-wide and 401s here (see PR that added this).
+              printf '%s' "$SUPABASE_SERVICE_ROLE_KEY_REST" | npx wrangler@latest secret put SUPABASE_SERVICE_ROLE_KEY --config .tmp-native.toml
               printf '%s' "$SUPABASE_URL" | npx wrangler@latest secret put SUPABASE_URL --config .tmp-native.toml
               IFS=',' read -ra SECRET_NAMES <<< "$secrets"
               for sn in "${SECRET_NAMES[@]}"; do
@@ -104,3 +109,17 @@ jobs:
           rm -f .tmp-native.toml
           echo "---- native deployed $ok, failed $fail ----"
           [ "$fail" = "0" ]
+      - name: E2E verify native workers
+        working-directory: cron-worker
+        run: |
+          set -uo pipefail
+          : "${SUPABASE_SERVICE_ROLE_KEY_REST:?missing}"
+          : "${SUPABASE_URL:?missing}"
+          SUBDOMAIN=$(curl -sf -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" \
+            | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>console.log(JSON.parse(d).result.subdomain))")
+          : "${SUBDOMAIN:?could not resolve workers.dev subdomain}"
+          SUPABASE_URL="$SUPABASE_URL" \
+          SUPABASE_SERVICE_ROLE_KEY="$SUPABASE_SERVICE_ROLE_KEY_REST" \
+          CF_WORKERS_SUBDOMAIN="$SUBDOMAIN" \
+          node e2e/run-all.mjs
