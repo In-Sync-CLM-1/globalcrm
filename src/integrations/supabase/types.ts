@@ -12,31 +12,6 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "14.5"
   }
-  graphql_public: {
-    Tables: {
-      [_ in never]: never
-    }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      graphql: {
-        Args: {
-          extensions?: Json
-          operationName?: string
-          query?: string
-          variables?: Json
-        }
-        Returns: Json
-      }
-    }
-    Enums: {
-      [_ in never]: never
-    }
-    CompositeTypes: {
-      [_ in never]: never
-    }
-  }
   public: {
     Tables: {
       activity_participants: {
@@ -2652,6 +2627,7 @@ export type Database = {
           created_at: string | null
           created_by: string | null
           demo_date: string | null
+          demo_followup_sent_at: string | null
           demo_reminder_1h_sent_at: string | null
           demo_reminder_9am_sent_at: string | null
           demo_reminder_call_sent_at: string | null
@@ -2696,6 +2672,7 @@ export type Database = {
           created_at?: string | null
           created_by?: string | null
           demo_date?: string | null
+          demo_followup_sent_at?: string | null
           demo_reminder_1h_sent_at?: string | null
           demo_reminder_9am_sent_at?: string | null
           demo_reminder_call_sent_at?: string | null
@@ -2740,6 +2717,7 @@ export type Database = {
           created_at?: string | null
           created_by?: string | null
           demo_date?: string | null
+          demo_followup_sent_at?: string | null
           demo_reminder_1h_sent_at?: string | null
           demo_reminder_9am_sent_at?: string | null
           demo_reminder_call_sent_at?: string | null
@@ -3713,348 +3691,6 @@ export type Database = {
           updated_at?: string | null
         }
         Relationships: []
-      }
-      edu_attendance_punches: {
-        Row: {
-          attempts: number
-          claimed_at: string | null
-          created_at: string | null
-          device_id: string
-          direction: string
-          id: string
-          last_error: string | null
-          org_id: string
-          person_type: string
-          photo: string | null
-          punch_time: string
-          pushed_at: string | null
-          source: string
-          student_id: string | null
-          sync_status: string
-          teacher_id: string | null
-          upsmf_entry_id: number | null
-          upsmf_identifier: string
-        }
-        Insert: {
-          attempts?: number
-          claimed_at?: string | null
-          created_at?: string | null
-          device_id: string
-          direction: string
-          id?: string
-          last_error?: string | null
-          org_id: string
-          person_type: string
-          photo?: string | null
-          punch_time: string
-          pushed_at?: string | null
-          source?: string
-          student_id?: string | null
-          sync_status?: string
-          teacher_id?: string | null
-          upsmf_entry_id?: number | null
-          upsmf_identifier: string
-        }
-        Update: {
-          attempts?: number
-          claimed_at?: string | null
-          created_at?: string | null
-          device_id?: string
-          direction?: string
-          id?: string
-          last_error?: string | null
-          org_id?: string
-          person_type?: string
-          photo?: string | null
-          punch_time?: string
-          pushed_at?: string | null
-          source?: string
-          student_id?: string | null
-          sync_status?: string
-          teacher_id?: string | null
-          upsmf_entry_id?: number | null
-          upsmf_identifier?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "edu_attendance_punches_org_id_fkey"
-            columns: ["org_id"]
-            isOneToOne: false
-            referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "edu_attendance_punches_student_id_fkey"
-            columns: ["student_id"]
-            isOneToOne: false
-            referencedRelation: "edu_students"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "edu_attendance_punches_teacher_id_fkey"
-            columns: ["teacher_id"]
-            isOneToOne: false
-            referencedRelation: "edu_teachers"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      edu_courses: {
-        Row: {
-          code: string
-          created_at: string | null
-          duration_months: number | null
-          id: string
-          name: string
-          org_id: string
-          status: string
-          updated_at: string | null
-        }
-        Insert: {
-          code: string
-          created_at?: string | null
-          duration_months?: number | null
-          id?: string
-          name: string
-          org_id: string
-          status?: string
-          updated_at?: string | null
-        }
-        Update: {
-          code?: string
-          created_at?: string | null
-          duration_months?: number | null
-          id?: string
-          name?: string
-          org_id?: string
-          status?: string
-          updated_at?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "edu_courses_org_id_fkey"
-            columns: ["org_id"]
-            isOneToOne: false
-            referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      edu_devices: {
-        Row: {
-          created_at: string | null
-          device_id: string
-          id: string
-          label: string | null
-          org_id: string
-          status: string
-          updated_at: string | null
-        }
-        Insert: {
-          created_at?: string | null
-          device_id: string
-          id?: string
-          label?: string | null
-          org_id: string
-          status?: string
-          updated_at?: string | null
-        }
-        Update: {
-          created_at?: string | null
-          device_id?: string
-          id?: string
-          label?: string | null
-          org_id?: string
-          status?: string
-          updated_at?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "edu_devices_org_id_fkey"
-            columns: ["org_id"]
-            isOneToOne: false
-            referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      edu_students: {
-        Row: {
-          admission_date: string | null
-          course_id: string | null
-          created_at: string | null
-          date_of_birth: string | null
-          device_enrollment_id: string | null
-          enrollment_no: string
-          father_name: string | null
-          gender: string | null
-          id: string
-          mother_name: string | null
-          name: string
-          notes: string | null
-          org_id: string
-          phone: string | null
-          status: string
-          updated_at: string | null
-        }
-        Insert: {
-          admission_date?: string | null
-          course_id?: string | null
-          created_at?: string | null
-          date_of_birth?: string | null
-          device_enrollment_id?: string | null
-          enrollment_no: string
-          father_name?: string | null
-          gender?: string | null
-          id?: string
-          mother_name?: string | null
-          name: string
-          notes?: string | null
-          org_id: string
-          phone?: string | null
-          status?: string
-          updated_at?: string | null
-        }
-        Update: {
-          admission_date?: string | null
-          course_id?: string | null
-          created_at?: string | null
-          date_of_birth?: string | null
-          device_enrollment_id?: string | null
-          enrollment_no?: string
-          father_name?: string | null
-          gender?: string | null
-          id?: string
-          mother_name?: string | null
-          name?: string
-          notes?: string | null
-          org_id?: string
-          phone?: string | null
-          status?: string
-          updated_at?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "edu_students_course_id_fkey"
-            columns: ["course_id"]
-            isOneToOne: false
-            referencedRelation: "edu_courses"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "edu_students_org_id_fkey"
-            columns: ["org_id"]
-            isOneToOne: false
-            referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      edu_teachers: {
-        Row: {
-          created_at: string | null
-          designation: string | null
-          device_enrollment_id: string | null
-          email: string | null
-          id: string
-          name: string
-          notes: string | null
-          org_id: string
-          phone: string | null
-          qualification: string | null
-          registration_detail: string | null
-          status: string
-          tutor_id: string
-          updated_at: string | null
-        }
-        Insert: {
-          created_at?: string | null
-          designation?: string | null
-          device_enrollment_id?: string | null
-          email?: string | null
-          id?: string
-          name: string
-          notes?: string | null
-          org_id: string
-          phone?: string | null
-          qualification?: string | null
-          registration_detail?: string | null
-          status?: string
-          tutor_id: string
-          updated_at?: string | null
-        }
-        Update: {
-          created_at?: string | null
-          designation?: string | null
-          device_enrollment_id?: string | null
-          email?: string | null
-          id?: string
-          name?: string
-          notes?: string | null
-          org_id?: string
-          phone?: string | null
-          qualification?: string | null
-          registration_detail?: string | null
-          status?: string
-          tutor_id?: string
-          updated_at?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "edu_teachers_org_id_fkey"
-            columns: ["org_id"]
-            isOneToOne: false
-            referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      edu_upload_log: {
-        Row: {
-          absent: number
-          absentees: Json | null
-          created_at: string | null
-          direction: string
-          id: string
-          org_id: string
-          present: number
-          source: string
-          total_active: number
-          upload_date: string
-        }
-        Insert: {
-          absent: number
-          absentees?: Json | null
-          created_at?: string | null
-          direction: string
-          id?: string
-          org_id: string
-          present: number
-          source: string
-          total_active: number
-          upload_date: string
-        }
-        Update: {
-          absent?: number
-          absentees?: Json | null
-          created_at?: string | null
-          direction?: string
-          id?: string
-          org_id?: string
-          present?: number
-          source?: string
-          total_active?: number
-          upload_date?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "edu_upload_log_org_id_fkey"
-            columns: ["org_id"]
-            isOneToOne: false
-            referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-        ]
       }
       email_automation_cooldowns: {
         Row: {
@@ -5386,6 +5022,58 @@ export type Database = {
         }
         Relationships: []
       }
+      fervent_activity_log: {
+        Row: {
+          action: string
+          actor_id: string | null
+          created_at: string | null
+          detail: Json | null
+          id: string
+          org_id: string
+          record_id: string | null
+        }
+        Insert: {
+          action: string
+          actor_id?: string | null
+          created_at?: string | null
+          detail?: Json | null
+          id?: string
+          org_id: string
+          record_id?: string | null
+        }
+        Update: {
+          action?: string
+          actor_id?: string | null
+          created_at?: string | null
+          detail?: Json | null
+          id?: string
+          org_id?: string
+          record_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fervent_activity_log_actor_id_fkey"
+            columns: ["actor_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fervent_activity_log_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fervent_activity_log_record_id_fkey"
+            columns: ["record_id"]
+            isOneToOne: false
+            referencedRelation: "fervent_data_repository"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       fervent_data_repository: {
         Row: {
           city: string | null
@@ -5423,6 +5111,7 @@ export type Database = {
           ucdb_status: string | null
           unique_id: string | null
           updated_at: string | null
+          upload_status: string
           website: string | null
         }
         Insert: {
@@ -5461,6 +5150,7 @@ export type Database = {
           ucdb_status?: string | null
           unique_id?: string | null
           updated_at?: string | null
+          upload_status?: string
           website?: string | null
         }
         Update: {
@@ -5499,16 +5189,10 @@ export type Database = {
           ucdb_status?: string | null
           unique_id?: string | null
           updated_at?: string | null
+          upload_status?: string
           website?: string | null
         }
         Relationships: [
-          {
-            foreignKeyName: "fervent_data_repository_org_id_fkey"
-            columns: ["org_id"]
-            isOneToOne: false
-            referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
           {
             foreignKeyName: "fervent_data_repository_import_job_id_fkey"
             columns: ["import_job_id"]
@@ -5516,56 +5200,11 @@ export type Database = {
             referencedRelation: "import_jobs"
             referencedColumns: ["id"]
           },
-        ]
-      }
-      fervent_activity_log: {
-        Row: {
-          action: string
-          actor_id: string | null
-          created_at: string | null
-          detail: Json | null
-          id: string
-          org_id: string
-          record_id: string | null
-        }
-        Insert: {
-          action: string
-          actor_id?: string | null
-          created_at?: string | null
-          detail?: Json | null
-          id?: string
-          org_id: string
-          record_id?: string | null
-        }
-        Update: {
-          action?: string
-          actor_id?: string | null
-          created_at?: string | null
-          detail?: Json | null
-          id?: string
-          org_id?: string
-          record_id?: string | null
-        }
-        Relationships: [
           {
-            foreignKeyName: "fervent_activity_log_org_id_fkey"
+            foreignKeyName: "fervent_data_repository_org_id_fkey"
             columns: ["org_id"]
             isOneToOne: false
             referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "fervent_activity_log_record_id_fkey"
-            columns: ["record_id"]
-            isOneToOne: false
-            referencedRelation: "fervent_data_repository"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "fervent_activity_log_actor_id_fkey"
-            columns: ["actor_id"]
-            isOneToOne: false
-            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -5597,17 +5236,17 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "fervent_saved_searches_org_id_fkey"
-            columns: ["org_id"]
-            isOneToOne: false
-            referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-          {
             foreignKeyName: "fervent_saved_searches_created_by_fkey"
             columns: ["created_by"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fervent_saved_searches_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
         ]
@@ -5816,6 +5455,7 @@ export type Database = {
           target_id: string | null
           total_rows: number | null
           updated_at: string | null
+          updated_count: number | null
           user_id: string
         }
         Insert: {
@@ -5840,6 +5480,7 @@ export type Database = {
           target_id?: string | null
           total_rows?: number | null
           updated_at?: string | null
+          updated_count?: number | null
           user_id: string
         }
         Update: {
@@ -5864,6 +5505,7 @@ export type Database = {
           target_id?: string | null
           total_rows?: number | null
           updated_at?: string | null
+          updated_count?: number | null
           user_id?: string
         }
         Relationships: [
@@ -6765,6 +6407,7 @@ export type Database = {
           wallet_auto_topup_enabled: boolean | null
           wallet_balance: number
           wallet_last_topup_date: string | null
+          wallet_lock_exempt: boolean
           wallet_low_alert_threshold: number
           wallet_minimum_balance: number
         }
@@ -6794,6 +6437,7 @@ export type Database = {
           wallet_auto_topup_enabled?: boolean | null
           wallet_balance?: number
           wallet_last_topup_date?: string | null
+          wallet_lock_exempt?: boolean
           wallet_low_alert_threshold?: number
           wallet_minimum_balance?: number
         }
@@ -6823,6 +6467,7 @@ export type Database = {
           wallet_auto_topup_enabled?: boolean | null
           wallet_balance?: number
           wallet_last_topup_date?: string | null
+          wallet_lock_exempt?: boolean
           wallet_low_alert_threshold?: number
           wallet_minimum_balance?: number
         }
@@ -9739,35 +9384,6 @@ export type Database = {
         Returns: boolean
       }
       check_inactive_contacts: { Args: never; Returns: undefined }
-      claim_edu_punches: {
-        Args: { _limit?: number }
-        Returns: {
-          attempts: number
-          claimed_at: string | null
-          created_at: string | null
-          device_id: string
-          direction: string
-          id: string
-          last_error: string | null
-          org_id: string
-          person_type: string
-          photo: string | null
-          punch_time: string
-          pushed_at: string | null
-          source: string
-          student_id: string | null
-          sync_status: string
-          teacher_id: string | null
-          upsmf_entry_id: number | null
-          upsmf_identifier: string
-        }[]
-        SetofOptions: {
-          from: "*"
-          to: "edu_attendance_punches"
-          isOneToOne: false
-          isSetofReturn: true
-        }
-      }
       cleanup_orphaned_profile: {
         Args: { user_id: string }
         Returns: undefined
@@ -9824,7 +9440,19 @@ export type Database = {
         Args: { p_contact_id: string; p_request_id?: string }
         Returns: Json
       }
+      find_fervent_duplicate_candidates: {
+        Args: { p_org_id: string; p_records: Json }
+        Returns: {
+          existing_record: Json
+          incoming_idx: number
+          match_type: string
+        }[]
+      }
       generate_api_key: { Args: never; Returns: string }
+      generate_fervent_unique_ids: {
+        Args: { p_count: number; p_org_id: string }
+        Returns: string[]
+      }
       generate_unique_slug: { Args: { base_slug: string }; Returns: string }
       generate_webhook_token: { Args: never; Returns: string }
       get_active_pricing: {
@@ -10130,6 +9758,10 @@ export type Database = {
         }
         Returns: Json
       }
+      merge_fervent_repository_batch: {
+        Args: { p_import_job_id: string; p_merges: Json; p_org_id: string }
+        Returns: number
+      }
       process_bulk_import_batch: {
         Args: {
           p_import_id: string
@@ -10159,6 +9791,18 @@ export type Database = {
           _score_delta: number
         }
         Returns: undefined
+      }
+      upsert_fervent_repository_batch: {
+        Args: {
+          p_created_by: string
+          p_import_job_id: string
+          p_org_id: string
+          p_records: Json
+        }
+        Returns: {
+          inserted_count: number
+          updated_count: number
+        }[]
       }
     }
     Enums: {
@@ -10319,9 +9963,6 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
-  graphql_public: {
-    Enums: {},
-  },
   public: {
     Enums: {
       app_role: [
