@@ -21,6 +21,9 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      BOLNA_API_KEY: ${{ secrets.BOLNA_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -61,4 +64,43 @@ jobs:
           done < jobs.txt
           rm -f .tmp.toml
           echo "---- deployed $ok, failed $fail ----"
+          [ "$fail" = "0" ]
+      - name: Deploy native workers (full logic, no target edge function)
+        working-directory: cron-worker
+        run: |
+          set -uo pipefail
+          : "${CLOUDFLARE_API_TOKEN:?missing}"
+          : "${SUPABASE_SERVICE_ROLE_KEY:?missing}"
+          : "${SUPABASE_URL:?missing}"
+          if [ ! -f native-jobs.txt ]; then echo "no native-jobs.txt"; exit 0; fi
+          ok=0; fail=0
+          while IFS='|' read -r name sched secrets; do
+            [ -z "$name" ] && continue
+            workername="globalcrm-cron-$name"
+            cat > .tmp-native.toml <<EOF
+          name = "$workername"
+          main = "native/$name.js"
+          compatibility_date = "2026-05-01"
+          [triggers]
+          crons = ["$sched"]
+          EOF
+            if npx wrangler@latest deploy --config .tmp-native.toml; then
+              printf '%s' "$SUPABASE_SERVICE_ROLE_KEY" | npx wrangler@latest secret put SUPABASE_SERVICE_ROLE_KEY --config .tmp-native.toml
+              printf '%s' "$SUPABASE_URL" | npx wrangler@latest secret put SUPABASE_URL --config .tmp-native.toml
+              IFS=',' read -ra SECRET_NAMES <<< "$secrets"
+              for sn in "${SECRET_NAMES[@]}"; do
+                [ -z "$sn" ] && continue
+                val="${!sn:-}"
+                : "${val:?missing secret value for $sn}"
+                printf '%s' "$val" | npx wrangler@latest secret put "$sn" --config .tmp-native.toml
+              done
+              echo "OK    $workername ($sched)"
+              ok=$((ok+1))
+            else
+              echo "FAIL  $workername"
+              fail=$((fail+1))
+            fi
+          done < native-jobs.txt
+          rm -f .tmp-native.toml
+          echo "---- native deployed $ok, failed $fail ----"
           [ "$fail" = "0" ]
