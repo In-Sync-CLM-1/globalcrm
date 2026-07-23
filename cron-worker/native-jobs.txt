@@ -1,1 +1,13 @@
 demo-reminders|*/5 * * * *|RESEND_API_KEY,BOLNA_API_KEY
+subscription-status-checker|0 1 * * *|
+ai-bolna-daily-insights|5 12 * * *|ANTHROPIC_API_KEY
+migrate-recording-to-r2|0 13 * * *|R2_RECORDINGS_WORKER_URL,R2_RECORDINGS_SECRET
+transcribe-and-analyze-recordings|5 13 * * *|R2_RECORDINGS_WORKER_URL,R2_RECORDINGS_SECRET,GROQ_API_KEY,ANTHROPIC_API_KEY
+ai-callback-dispatcher|*/5 * * * *|BOLNA_API_KEY
+wallet-alert-check|*/10 * * * *|SUPABASE_FUNCTIONS_KEY,EXOTEL_API_KEY,EXOTEL_API_TOKEN,EXOTEL_SID,EXOTEL_SUBDOMAIN,EXOTEL_SENDER_NUMBER
+send-payment-reminders|0 10 * * *|SUPABASE_FUNCTIONS_KEY
+generate-monthly-invoices|0 2 1 * *|SUPABASE_FUNCTIONS_KEY
+daily-lead-scoring|0 2 * * *|SUPABASE_FUNCTIONS_KEY
+queue-processor|*/5 * * * *|SUPABASE_FUNCTIONS_KEY
+automation-email-sender|*/5 * * * *|SUPABASE_FUNCTIONS_KEY
+scheduled-messages-processor|*/5 * * * *|SUPABASE_FUNCTIONS_KEY,RESEND_API_KEY
