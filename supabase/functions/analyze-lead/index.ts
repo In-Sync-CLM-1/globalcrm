@@ -86,6 +86,24 @@ Return the IDs of contacts that match the search criteria.`;
           messages: [
             { role: 'user', content: searchUserPrompt }
           ],
+          // Enforces valid JSON in the reply instead of relying on prompt
+          // instructions alone -- an unenforced "Return ONLY JSON" was
+          // occasionally answered with markdown-fenced or prose-wrapped
+          // JSON, which JSON.parse below then threw on (found 2026-07-22,
+          // see project_globalcrm_native_worker_migration memory).
+          output_config: {
+            format: {
+              type: 'json_schema',
+              schema: {
+                type: 'object',
+                properties: {
+                  filteredContactIds: { type: 'array', items: { type: 'string' } },
+                },
+                required: ['filteredContactIds'],
+                additionalProperties: false,
+              },
+            },
+          },
         }),
       });
 
@@ -245,6 +263,33 @@ Focus heavily on the pipeline_stage (especially stage_order) and engagement_metr
         messages: [
           { role: 'user', content: userPrompt }
         ],
+        // See the search-branch call above -- same enforced-JSON fix.
+        output_config: {
+          format: {
+            type: 'json_schema',
+            schema: {
+              type: 'object',
+              properties: {
+                score: { type: 'integer' },
+                category: { type: 'string', enum: ['hot', 'warm', 'cool', 'cold', 'unqualified'] },
+                breakdown: {
+                  type: 'object',
+                  properties: {
+                    'Pipeline Stage': { type: 'integer' },
+                    'Activity Engagement': { type: 'integer' },
+                    'Business Profile': { type: 'integer' },
+                    'Data Quality': { type: 'integer' },
+                  },
+                  required: ['Pipeline Stage', 'Activity Engagement', 'Business Profile', 'Data Quality'],
+                  additionalProperties: false,
+                },
+                reasoning: { type: 'string' },
+              },
+              required: ['score', 'category', 'breakdown', 'reasoning'],
+              additionalProperties: false,
+            },
+          },
+        },
       }),
     });
 
