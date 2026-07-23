@@ -20,16 +20,8 @@ import { useNotification } from "@/hooks/useNotification";
 import { Users, Target, Phone, Mail, MessageCircle, TrendingUp, RefreshCw, Sparkles, ArrowRight, Search, GraduationCap, Award, AlertCircle, Dumbbell, Drama, Bot, PlayCircle, PauseCircle } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { format, eachDayOfInterval } from "date-fns";
-import {
-  ResponsiveContainer,
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-} from "recharts";
+import { EChart } from "@/components/charts/EChart";
+import type { EChartsOption } from "echarts";
 
 interface Props {
   orgId: string;
@@ -39,6 +31,72 @@ const DISPO_COLORS = [
   "#10b981", "#3b82f6", "#f59e0b", "#ef4444", "#8b5cf6",
   "#ec4899", "#14b8a6", "#f97316", "#6366f1", "#84cc16",
 ];
+
+// Rich stacked-area ECharts option: soft vertical gradients, smooth curves and
+// a hover crosshair — the same visual language as the ROI/analytics pages.
+function stackedAreaOption(
+  rows: Array<Record<string, any>>,
+  seriesNames: string[],
+  colors: string[],
+  opts: { smallText?: boolean } = {},
+): EChartsOption {
+  const f = opts.smallText ? 9 : 11;
+  const alpha = (hex: string, a: number) => {
+    const n = parseInt(hex.slice(1), 16);
+    return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+  };
+  return {
+    grid: { top: 28, left: 8, right: 12, bottom: 4, containLabel: true },
+    tooltip: {
+      trigger: "axis",
+      axisPointer: { type: "line", lineStyle: { color: "rgba(148,163,184,.55)", width: 1, type: "dashed" } },
+      backgroundColor: "rgba(15,23,42,.94)",
+      borderWidth: 0,
+      textStyle: { color: "#e2e8f0", fontSize: 11 },
+      padding: [8, 12],
+    },
+    legend: {
+      show: true, top: 0, right: 0, icon: "roundRect",
+      itemWidth: 9, itemHeight: 9, itemGap: 12,
+      textStyle: { fontSize: f, color: "#64748b" },
+    },
+    xAxis: {
+      type: "category",
+      data: rows.map((r) => r.date),
+      boundaryGap: false,
+      axisLine: { lineStyle: { color: "rgba(148,163,184,.25)" } },
+      axisTick: { show: false },
+      axisLabel: { fontSize: f, color: "#94a3b8", hideOverlap: true },
+    },
+    yAxis: {
+      type: "value",
+      minInterval: 1,
+      splitLine: { lineStyle: { color: "rgba(148,163,184,.16)", type: "dashed" } },
+      axisLabel: { fontSize: f, color: "#94a3b8" },
+    },
+    series: seriesNames.map((name, i) => {
+      const c = colors[i % colors.length];
+      return {
+        name, type: "line", stack: "total", smooth: 0.42, showSymbol: false,
+        symbol: "circle", symbolSize: 7,
+        lineStyle: { width: 2, color: c },
+        itemStyle: { color: c, borderWidth: 2, borderColor: "#fff" },
+        emphasis: { focus: "series", scale: true },
+        areaStyle: {
+          opacity: 1,
+          color: {
+            type: "linear", x: 0, y: 0, x2: 0, y2: 1,
+            colorStops: [
+              { offset: 0, color: alpha(c, 0.5) },
+              { offset: 1, color: alpha(c, 0.02) },
+            ],
+          },
+        },
+        data: rows.map((r) => r[name] ?? 0),
+      };
+    }),
+  } as EChartsOption;
+}
 
 export function CompactDashboard({ orgId }: Props) {
   const queryClient = useQueryClient();
@@ -484,33 +542,10 @@ export function CompactDashboard({ orgId }: Props) {
               No calls in this period
             </div>
           ) : (
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={dispoChartData} margin={{ top: 10, right: 12, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                <XAxis dataKey="date" tick={{ fontSize: 10 }} />
-                <YAxis tick={{ fontSize: 10 }} allowDecimals={false} />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: "hsl(var(--card))",
-                    border: "1px solid hsl(var(--border))",
-                    borderRadius: 6,
-                    fontSize: 11,
-                  }}
-                />
-                <Legend wrapperStyle={{ fontSize: 11 }} />
-                {dispoNames.map((name, idx) => (
-                  <Area
-                    key={name}
-                    type="monotone"
-                    dataKey={name}
-                    stackId="1"
-                    stroke={DISPO_COLORS[idx % DISPO_COLORS.length]}
-                    fill={DISPO_COLORS[idx % DISPO_COLORS.length]}
-                    fillOpacity={0.55}
-                  />
-                ))}
-              </AreaChart>
-            </ResponsiveContainer>
+            <EChart
+              option={stackedAreaOption(dispoChartData as any, dispoNames as string[], DISPO_COLORS)}
+              style={{ width: "100%", height: "100%" }}
+            />
           )}
         </div>
       </Card>
@@ -528,24 +563,10 @@ export function CompactDashboard({ orgId }: Props) {
             <p className="text-[11px] text-muted-foreground">{totalEmails} emails · {totalWa} WhatsApp sent</p>
           </div>
           <div className="h-[200px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={commsChartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                <XAxis dataKey="date" tick={{ fontSize: 9 }} />
-                <YAxis tick={{ fontSize: 9 }} allowDecimals={false} width={28} />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: "hsl(var(--card))",
-                    border: "1px solid hsl(var(--border))",
-                    borderRadius: 6,
-                    fontSize: 11,
-                  }}
-                />
-                <Legend wrapperStyle={{ fontSize: 10 }} />
-                <Area type="monotone" dataKey="Emails" stroke="#f59e0b" fill="#f59e0b" fillOpacity={0.4} />
-                <Area type="monotone" dataKey="WhatsApp" stroke="#16a34a" fill="#16a34a" fillOpacity={0.4} />
-              </AreaChart>
-            </ResponsiveContainer>
+            <EChart
+              option={stackedAreaOption(commsChartData as any, ["Emails", "WhatsApp"], ["#f59e0b", "#22c55e"], { smallText: true })}
+              style={{ width: "100%", height: "100%" }}
+            />
           </div>
         </Card>
 

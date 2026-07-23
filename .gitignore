@@ -42,3 +42,10 @@ tmp/
 .tmp_*
 .tmp.*
 cron-worker/.tmp.toml
+
+# promo pipeline artifacts
+remotion-promo/node_modules/
+remotion-promo/out/
+scripts/recordings/
+scripts/assets/recon/
+all_templates.json
