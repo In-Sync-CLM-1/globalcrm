@@ -98,14 +98,17 @@ serve(async (req) => {
 
   const startTime = Date.now();
   let supabase: any;
+  // Held outside the try so the catch below can mark the job failed. The body
+  // is a stream and can only be read once, so the catch must not re-read it.
+  let importJobId: string | undefined;
 
   try {
     console.log('[INIT] Starting bulk import processor');
-    
+
     supabase = getSupabaseClient();
 
-    const { importJobId } = await req.json();
-    
+    ({ importJobId } = await req.json());
+
     if (!importJobId) {
       throw new Error('Missing importJobId');
     }
@@ -149,11 +152,9 @@ serve(async (req) => {
       throw new Error('CSV file is empty');
     }
 
-    // Validate row count for fervent_repository before processing
-    const dataRowCount = lines.length - 1; // Exclude header row
-    if (importJob.import_type === 'fervent_repository' && dataRowCount > 5000) {
-      throw new Error('CSV file contains too many rows. Maximum allowed is 5,000 records.');
-    }
+    // Fervent's row cap is enforced inside runFerventSmartImport against
+    // FERVENT_MAX_RECORDS (10,000, matching what the upload dialog states).
+    // A stale 5,000 check used to run here and rejected valid files.
 
     // Parse headers
     await updateJobStage(supabase, importJobId, 'validating', {
@@ -489,9 +490,8 @@ serve(async (req) => {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     const errorStack = error instanceof Error ? error.stack : undefined;
     
-    if (supabase && req.body) {
+    if (supabase && importJobId) {
       try {
-        const body = await req.json();
         await supabase.from('import_jobs').update({
           status: 'failed',
           current_stage: 'failed',
@@ -502,7 +502,7 @@ serve(async (req) => {
             timestamp: new Date().toISOString()
           }],
           stage_details: { error: errorMessage }
-        }).eq('id', body.importJobId);
+        }).eq('id', importJobId);
       } catch (updateError) {
         console.error('[ERROR] Failed to update job status:', updateError);
       }
