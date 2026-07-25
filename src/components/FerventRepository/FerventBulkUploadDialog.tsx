@@ -7,7 +7,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useNotification } from "@/hooks/useNotification";
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
-const MAX_RECORDS = 5000;
+const MAX_RECORDS = 10000;
 
 const TEMPLATE_HEADERS = [
   "Sr. No.", "Unique ID", "DB Sourced Year", "UCDB Status", "Company Name",
@@ -146,13 +146,6 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
         return;
       }
 
-      const headerLine = lines[0].toLowerCase();
-      if (!headerLine.includes("first name") && !headerLine.includes("first_name")) {
-        setValidationError("CSV must contain a 'First Name' column");
-        setIsUploading(false);
-        return;
-      }
-
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("User not authenticated");
 
@@ -198,8 +191,8 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
       onOpenChange(false);
       setFile(null);
       setPreview(null);
-    } catch (error: any) {
-      notification.error("Upload failed", error.message);
+    } catch (error) {
+      notification.error("Upload failed", error instanceof Error ? error.message : "Something went wrong");
     } finally {
       setIsUploading(false);
     }
@@ -220,15 +213,20 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
         <DialogHeader>
           <DialogTitle>Bulk Upload Fervent Database</DialogTitle>
           <DialogDescription>
-            Upload a CSV file with your database. Maximum 5,000 records and 10MB file size.
+            Upload your data in whatever column layout you have — we'll recognise the fields,
+            fill in what can be inferred (like a name from an email), and format it for the database.
+            Any rows we can't use are emailed back to you to fix. Max 10,000 records, 10MB.
           </DialogDescription>
         </DialogHeader>
 
         <div className="mb-4">
           <Button type="button" variant="outline" size="sm" onClick={downloadTemplate} className="w-full">
             <Download className="w-4 h-4 mr-2" />
-            Download CSV Template
+            Download CSV Template (optional)
           </Button>
+          <p className="mt-1 text-xs text-muted-foreground text-center">
+            The template is just a convenience — your file doesn't need to match it.
+          </p>
         </div>
 
         <div className="space-y-4">
@@ -282,15 +280,15 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
           </div>
 
           <div className="bg-muted p-3 rounded-lg text-xs space-y-1">
-            <p className="font-medium">Requirements:</p>
+            <p className="font-medium">How it works:</p>
             <ul className="list-disc list-inside space-y-1 text-muted-foreground">
               <li>UTF-8 encoded CSV file</li>
-              <li>Required column: <code className="bg-background px-1 rounded">First Name</code></li>
-              <li><code className="bg-background px-1 rounded">Mobile Number 1</code> should include the country code, e.g. <code className="bg-background px-1 rounded">+919876543210</code></li>
-              <li>Rows are matched on <code className="bg-background px-1 rounded">Unique ID</code> when given — a matching ID updates that existing record with this upload's data; a new ID adds a new record</li>
-              <li>Rows with no Unique ID are matched automatically against existing records (by phone, email, or AI name verification) and merged in, or added as new with a system-assigned ID if no match is found</li>
-              <li>Maximum 5,000 records per upload</li>
-              <li>Maximum file size: 10MB</li>
+              <li>Columns can be in any order and named however your source names them — we auto-detect them</li>
+              <li>Each row needs at least a name, an email, or a phone number so it can be identified; rows with none of these are skipped and emailed back to you</li>
+              <li>Mobile numbers should include the country code, e.g. <code className="bg-background px-1 rounded">+919876543210</code></li>
+              <li>Rows are matched on <code className="bg-background px-1 rounded">Unique ID</code> when given — a matching ID updates that existing record; a new ID adds a new record</li>
+              <li>Rows with no Unique ID are matched automatically (by phone, email, or AI name verification) and merged, or added as new with a system-assigned ID</li>
+              <li>Maximum 10,000 records per upload; maximum file size 10MB</li>
             </ul>
           </div>
 

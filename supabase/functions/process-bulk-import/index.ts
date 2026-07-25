@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { getSupabaseClient } from '../_shared/supabaseClient.ts';
 import { logEdgeError, logStep, logBatchProgress, logValidationError } from '../_shared/errorLogger.ts';
 import { normalizeEmployeeSize, parseTurnoverUsdMillion, formatTurnoverUsdMillion } from '../_shared/ferventFieldNormalization.ts';
+import { buildFerventMapping, applyFerventMapping, isSalvageable } from '../_shared/ferventSmartMapping.ts';
 
 const OPERATION_TIMEOUT = 20 * 60 * 1000; // 20 minutes
 const MAX_RETRIES = 3;
@@ -175,6 +176,12 @@ serve(async (req) => {
         throw new Error('This import type is exclusive to Fervent Communication');
       }
       console.log('[VALIDATE] Organization validated for fervent repository');
+
+      // Smart-formatting path: understand whatever layout the file arrived in,
+      // derive fields that are missing but inferable (e.g. a name from an
+      // email), reject the whole file if its shape can't be understood, then
+      // import the good rows and email any unusable rows back to the uploader.
+      return await runFerventSmartImport(supabase, importJob, lines, fileSizeKB, startTime);
     }
 
     // Validate required columns based on import type
@@ -318,45 +325,6 @@ serve(async (req) => {
             phone_number: row.phone,
             custom_data: row,
             status: 'pending'
-          };
-        } else if (importJob.import_type === 'fervent_repository') {
-          record = {
-            org_id: importJob.org_id,
-            sr_no: row.sr_no ? parseInt(row.sr_no) : null,
-            unique_id: row.unique_id || null,
-            db_sourced_year: row.db_sourced_year ? parseInt(row.db_sourced_year) : null,
-            ucdb_status: row.ucdb_status || null,
-            company_name: row.company_name || null,
-            first_name: row.first_name || null,
-            last_name: row.last_name || null,
-            designation: row.designation || null,
-            department: row.department || null,
-            designation_level: row.designation_level || null,
-            city: row.city || null,
-            state: row.state || null,
-            country: row.country || null,
-            std_code: row.std_code || null,
-            mobile_number_1: row.mobile_number_1 || null,
-            mobile_number_2: row.mobile_number_2 || null,
-            direct_number: row.direct_number || null,
-            phone_number: row.phone_number || null,
-            official_email: row.official_email_id || row.official_email || null,
-            personal_email_1: row.personal_email_id_1 || row.personal_email_1 || null,
-            personal_email_2: row.personal_email_id_2 || row.personal_email_2 || null,
-            linkedin_url: row.contact_linkedin_id || row.linkedin_url || null,
-            domain_name: row.domain_name || null,
-            website: row.website || null,
-            industry: row.industry || null,
-            sub_industry: row.subindustry || row.sub_industry || null,
-            employee_size: row.employee_size ? normalizeEmployeeSize(row.employee_size) : null,
-            turnover: (() => {
-              const m = parseTurnoverUsdMillion(row.turnover);
-              return m != null ? formatTurnoverUsdMillion(m) : (row.turnover || null);
-            })(),
-            turnover_usd_million: parseTurnoverUsdMillion(row.turnover),
-            company_linkedin_url: row.company_linkedin_id || row.company_linkedin_url || null,
-            created_by: importJob.user_id,
-            import_job_id: importJob.id
           };
         }
 
@@ -1039,4 +1007,314 @@ async function processFerventBatch(
 
   console.log(`[DB] Fervent batch ${batchNumber}: ${insertedCount} inserted, ${updatedCount} updated (${mergedCount} via AI containment merge), ${skippedCount} folded/collided in-file, ${dbErrorCount} row errors`);
   return { inserted: insertedCount, updated: updatedCount, skipped: skippedCount, dbErrors: dbErrorCount, duplicateSamples, dbErrorSamples };
+}
+
+// =============================================================================
+// FERVENT SMART-FORMATTING IMPORT
+// Entry point for fervent_repository uploads. Understands whatever layout the
+// file arrived in (AI-assisted, Groq -> Haiku), derives inferable fields,
+// rejects the whole file if its shape is unusable or too many rows can't be
+// identified, imports the good rows through the existing dedup/upsert pipeline,
+// and emails any unusable rows back to the uploader to fix and re-upload.
+// =============================================================================
+
+const FERVENT_MAX_RECORDS = 10000;
+const SKIP_REJECT_THRESHOLD = 0.10; // reject the whole file if >10% of rows are unusable
+
+function jsonResponse(body: any, status: number): Response {
+  return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+}
+
+function intOrNull(v: any): number | null {
+  if (v === null || v === undefined || String(v).trim() === '') return null;
+  const n = parseInt(String(v).replace(/[^0-9-]/g, ''), 10);
+  return Number.isFinite(n) ? n : null;
+}
+
+// Marks a fervent job as failed/rejected with an in-app reason the UI shows.
+// No email is sent for a whole-file rejection — the uploader still has the file.
+async function failFerventJob(supabase: any, jobId: string, reason: string, extra: Record<string, any> = {}) {
+  await supabase.from('import_jobs').update({
+    status: 'failed',
+    current_stage: 'failed',
+    completed_at: new Date().toISOString(),
+    stage_details: { rejected: true, rejection_reason: reason, error: reason, ...extra },
+    error_details: [{ error: reason, timestamp: new Date().toISOString() }],
+  }).eq('id', jobId);
+}
+
+// Builds the DB record from a canonical row (mapping + derivations already
+// applied). Numeric fields are guarded so one stray value can't fail a batch.
+function buildFerventRecord(row: Record<string, string>, importJob: ImportJob): any {
+  return {
+    org_id: importJob.org_id,
+    sr_no: intOrNull(row.sr_no),
+    unique_id: row.unique_id || null,
+    db_sourced_year: intOrNull(row.db_sourced_year),
+    ucdb_status: row.ucdb_status || null,
+    company_name: row.company_name || null,
+    first_name: row.first_name || null,
+    last_name: row.last_name || null,
+    designation: row.designation || null,
+    department: row.department || null,
+    designation_level: row.designation_level || null,
+    city: row.city || null,
+    state: row.state || null,
+    country: row.country || null,
+    std_code: row.std_code || null,
+    mobile_number_1: row.mobile_number_1 || null,
+    mobile_number_2: row.mobile_number_2 || null,
+    direct_number: row.direct_number || null,
+    phone_number: row.phone_number || null,
+    official_email: row.official_email || null,
+    personal_email_1: row.personal_email_1 || null,
+    personal_email_2: row.personal_email_2 || null,
+    linkedin_url: row.linkedin_url || null,
+    domain_name: row.domain_name || null,
+    website: row.website || null,
+    industry: row.industry || null,
+    sub_industry: row.sub_industry || null,
+    employee_size: row.employee_size ? normalizeEmployeeSize(row.employee_size) : null,
+    turnover: (() => {
+      const m = parseTurnoverUsdMillion(row.turnover);
+      return m != null ? formatTurnoverUsdMillion(m) : (row.turnover || null);
+    })(),
+    turnover_usd_million: parseTurnoverUsdMillion(row.turnover),
+    company_linkedin_url: row.company_linkedin_url || null,
+    created_by: importJob.user_id,
+    import_job_id: importJob.id,
+  };
+}
+
+function csvCell(v: any): string {
+  const s = (v ?? '').toString();
+  return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+function buildSkippedCsv(rawHeaders: string[], skippedRows: Array<{ values: string[]; reason: string }>): string {
+  const header = [...rawHeaders, 'Reason skipped'].map(csvCell).join(',');
+  const body = skippedRows.map(({ values, reason }) => {
+    const cells = rawHeaders.map((_, i) => csvCell(values[i] ?? ''));
+    cells.push(csvCell(reason));
+    return cells.join(',');
+  });
+  return [header, ...body].join('\r\n');
+}
+
+function toBase64(str: string): string {
+  const bytes = new TextEncoder().encode(str);
+  let bin = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(bin);
+}
+
+function escapeHtml(s: any): string {
+  return (s ?? '').toString().replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string));
+}
+
+// Emails the unusable rows back to the uploader as a CSV attachment, from the
+// platform's transactional sender (no wallet charge, no unsubscribe footer).
+async function emailSkippedRows(
+  supabase: any,
+  importJob: ImportJob,
+  rawHeaders: string[],
+  skippedRows: Array<{ values: string[]; reason: string }>,
+  stats: { imported: number; total: number },
+): Promise<{ sent: boolean; to: string | null }> {
+  try {
+    const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY');
+    if (!RESEND_API_KEY) { console.warn('[SKIP-EMAIL] RESEND_API_KEY not set; cannot email skipped rows'); return { sent: false, to: null }; }
+
+    const { data: userData } = await supabase.auth.admin.getUserById(importJob.user_id);
+    const to = userData?.user?.email as string | undefined;
+    if (!to) { console.warn('[SKIP-EMAIL] uploader email not found for user', importJob.user_id); return { sent: false, to: null }; }
+
+    const csv = buildSkippedCsv(rawHeaders, skippedRows);
+    const cleanName = (importJob.file_name || 'upload').replace(/\.csv$/i, '');
+    const filename = `${cleanName}-unimported-rows.csv`;
+    const skippedN = skippedRows.length.toLocaleString();
+
+    const subject = `${stats.imported.toLocaleString()} of ${stats.total.toLocaleString()} rows imported — ${skippedN} need attention`;
+    const html = `<div style="font-family:Arial,sans-serif;font-size:14px;color:#111;line-height:1.5;">
+      <p>Hi,</p>
+      <p>Your upload <strong>${escapeHtml(importJob.file_name)}</strong> has finished processing.</p>
+      <ul>
+        <li><strong>${stats.imported.toLocaleString()}</strong> of ${stats.total.toLocaleString()} rows were imported into the Fervent database.</li>
+        <li><strong>${skippedN}</strong> rows couldn't be identified (no name, email, or phone number) and were <strong>not</strong> imported.</li>
+      </ul>
+      <p>The ${skippedN} unimported rows are attached as a CSV, with a <strong>&ldquo;Reason skipped&rdquo;</strong> column explaining each one. Please correct them and upload just that file again.</p>
+      <p style="color:#666;font-size:12px;">This is an automated message from the In-Sync CRM data importer.</p>
+    </div>`;
+
+    const resp = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${RESEND_API_KEY}` },
+      body: JSON.stringify({
+        from: 'In-Sync Data <notifications@globalcrm.in-sync.co.in>',
+        to: [to],
+        subject,
+        html,
+        attachments: [{ filename, content: toBase64(csv) }],
+      }),
+    });
+    if (!resp.ok) { console.error('[SKIP-EMAIL] send failed:', resp.status, await resp.text()); return { sent: false, to }; }
+    console.log('[SKIP-EMAIL] sent', skippedRows.length, 'skipped rows to', to);
+    return { sent: true, to };
+  } catch (e) {
+    console.error('[SKIP-EMAIL] error:', e);
+    return { sent: false, to: null };
+  }
+}
+
+async function runFerventSmartImport(
+  supabase: any,
+  importJob: ImportJob,
+  lines: string[],
+  fileSizeKB: number,
+  startTime: number,
+): Promise<Response> {
+  const totalRows = lines.length - 1;
+
+  if (totalRows > FERVENT_MAX_RECORDS) {
+    await failFerventJob(supabase, importJob.id, `File contains ${totalRows.toLocaleString()} rows. Maximum allowed is ${FERVENT_MAX_RECORDS.toLocaleString()} records.`);
+    return jsonResponse({ success: false, rejected: true, reason: 'too_many_rows' }, 200);
+  }
+
+  const rawHeaders = parseCSVLine(lines[0]);
+  const sampleRows: string[][] = [];
+  for (let i = 1; i < lines.length && sampleRows.length < 15; i++) {
+    const l = lines[i].trim();
+    if (l) sampleRows.push(parseCSVLine(l));
+  }
+
+  // --- Understand the file's shape -----------------------------------------
+  await updateJobStage(supabase, importJob.id, 'validating', { message: 'Understanding your file…', file_size_kb: fileSizeKB });
+
+  const mapResult = await buildFerventMapping(rawHeaders, sampleRows);
+  if (mapResult.reject || !mapResult.mapping) {
+    await failFerventJob(supabase, importJob.id, mapResult.rejectReason || 'The file could not be understood as a contact list.', {
+      resolved_columns: mapResult.resolved,
+      used_ai: mapResult.usedAi,
+    });
+    return jsonResponse({ success: false, rejected: true, reason: mapResult.rejectReason }, 200);
+  }
+  const mapping = mapResult.mapping;
+  console.log('[SMART-MAP] resolved columns:', mapResult.resolved, 'ai:', mapResult.usedAi);
+
+  // --- Pass 1: format every row, classify salvageable vs unusable ----------
+  await updateJobStage(supabase, importJob.id, 'parsing', {
+    message: 'Formatting your data…',
+    columns_mapped: Object.keys(mapping.fieldToIndex).length,
+  });
+
+  const canonicalRows: Record<string, string>[] = [];
+  const skippedRows: Array<{ values: string[]; reason: string }> = [];
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    let values: string[];
+    try {
+      values = parseCSVLine(line);
+    } catch {
+      skippedRows.push({ values: [line], reason: 'Row could not be read' });
+      continue;
+    }
+    const row = applyFerventMapping(values, mapping);
+    const salv = isSalvageable(row);
+    if (!salv.ok) { skippedRows.push({ values, reason: salv.reason }); continue; }
+    canonicalRows.push(row);
+  }
+
+  // --- Gate: too many unusable rows -> reject the whole file ----------------
+  const skipRatio = totalRows > 0 ? skippedRows.length / totalRows : 0;
+  if (skipRatio > SKIP_REJECT_THRESHOLD) {
+    const pct = Math.round(skipRatio * 100);
+    await failFerventJob(
+      supabase,
+      importJob.id,
+      `${skippedRows.length.toLocaleString()} of ${totalRows.toLocaleString()} rows (${pct}%) couldn't be identified — that's too many to process safely. Please check this is the right file and that it's formatted correctly, then upload again.`,
+      { skipped_count: skippedRows.length, total_rows: totalRows, used_ai: mapResult.usedAi },
+    );
+    return jsonResponse({ success: false, rejected: true, reason: 'too_many_unusable_rows' }, 200);
+  }
+
+  // --- Pass 2: import the good rows through the existing dedup pipeline -----
+  let successCount = 0, updatedCount = 0, duplicateCount = 0, errorCount = 0;
+  const duplicateSamples: Array<{ matched_on: string; value: string }> = [];
+  const errors: Array<{ row?: number; field?: string; message: string; sample?: string }> = [];
+  let batch: any[] = [];
+  let batchNumber = 0;
+
+  const flush = async () => {
+    batchNumber++;
+    const result = await processFerventBatch(supabase, importJob, batch, batchNumber);
+    successCount += result.inserted;
+    updatedCount += result.updated;
+    duplicateCount += result.skipped;
+    if (result.dbErrors) { errorCount += result.dbErrors; if (result.dbErrorSamples) errors.push(...result.dbErrorSamples); }
+    if (result.duplicateSamples) duplicateSamples.push(...result.duplicateSamples.slice(0, Math.max(0, 200 - duplicateSamples.length)));
+    batch = [];
+    await updateJobProgress(supabase, importJob.id, {
+      total_rows: totalRows,
+      processed_rows: Math.min(batchNumber * BATCH_SIZE, canonicalRows.length),
+      success_count: successCount,
+      updated_count: updatedCount,
+      duplicate_count: duplicateCount,
+      error_count: errorCount,
+      current_stage: 'inserting',
+      stage_details: { message: `Imported ${(successCount + updatedCount).toLocaleString()} of ${canonicalRows.length.toLocaleString()}…` },
+    });
+  };
+
+  for (const row of canonicalRows) {
+    batch.push(buildFerventRecord(row, importJob));
+    if (batch.length >= BATCH_SIZE) await flush();
+  }
+  if (batch.length > 0) await flush();
+
+  // --- Email the unusable rows back to the uploader ------------------------
+  await updateJobStage(supabase, importJob.id, 'finalizing', { message: 'Finalizing…' });
+  let skippedEmail: { sent: boolean; to: string | null } = { sent: false, to: null };
+  if (skippedRows.length > 0) {
+    skippedEmail = await emailSkippedRows(supabase, importJob, rawHeaders, skippedRows, { imported: successCount + updatedCount, total: totalRows });
+  }
+
+  // Cleanup uploaded file (best-effort).
+  const { error: deleteError } = await supabase.storage.from('import-files').remove([importJob.file_path]);
+  if (deleteError) console.error('[CLEANUP] Failed to delete import file:', deleteError);
+
+  const duration = Math.round((Date.now() - startTime) / 1000);
+  await supabase.from('import_jobs').update({
+    status: 'completed',
+    current_stage: 'completed',
+    total_rows: totalRows,
+    processed_rows: totalRows,
+    success_count: successCount,
+    updated_count: updatedCount,
+    duplicate_count: duplicateCount,
+    error_count: errorCount,
+    error_details: errors.slice(-500),
+    completed_at: new Date().toISOString(),
+    file_cleaned_up: !deleteError,
+    file_cleanup_at: new Date().toISOString(),
+    stage_details: {
+      message: `Import completed in ${duration}s`,
+      total_success: successCount,
+      total_updated: updatedCount,
+      total_errors: errorCount,
+      total_duplicates: duplicateCount,
+      duplicate_samples: duplicateSamples,
+      skipped_count: skippedRows.length,
+      skipped_email_sent: skippedEmail.sent,
+      skipped_email_to: skippedEmail.to,
+      used_ai: mapResult.usedAi,
+      resolved_columns: mapResult.resolved,
+    },
+  }).eq('id', importJob.id);
+
+  console.log(`[SUCCESS] Fervent smart import in ${duration}s: ${successCount} inserted, ${updatedCount} updated, ${skippedRows.length} skipped/emailed(${skippedEmail.sent})`);
+  return jsonResponse({ success: true, processed: successCount, updated: updatedCount, skipped: skippedRows.length }, 200);
 }
