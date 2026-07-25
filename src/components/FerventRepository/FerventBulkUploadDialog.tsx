@@ -5,6 +5,7 @@ import { Upload, FileText, AlertCircle, Download } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { supabase } from "@/integrations/supabase/client";
 import { useNotification } from "@/hooks/useNotification";
+import { convertExcelToCsv, isExcelFile, isLegacyExcelFile, toCsvFileName } from "./ferventExcelToCsv";
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const MAX_RECORDS = 10000;
@@ -77,26 +78,75 @@ function computePreview(text: string): UploadPreview {
 
 export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadStarted }: FerventBulkUploadDialogProps) {
   const [file, setFile] = useState<File | null>(null);
+  // Excel files are converted to CSV before upload, so this is what actually
+  // gets stored and processed — the same file for a CSV pick.
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [isReading, setIsReading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [validationError, setValidationError] = useState<string>("");
   const [preview, setPreview] = useState<UploadPreview | null>(null);
+  const [sheetNotice, setSheetNotice] = useState<string>("");
   const notification = useNotification();
 
   const validateFile = (f: File): string | null => {
-    if (!f.type.includes("csv") && !f.name.endsWith(".csv")) return "Please select a CSV file";
+    const isCsv = f.type.includes("csv") || f.name.toLowerCase().endsWith(".csv");
+    if (!isCsv && !isExcelFile(f)) {
+      if (isLegacyExcelFile(f)) {
+        return "This is an old Excel format (.xls). Please open it in Excel and save it as .xlsx, then upload again.";
+      }
+      return "Please select a CSV or Excel (.xlsx) file";
+    }
     if (f.size > MAX_FILE_SIZE) return "File size must be less than 10MB";
     return null;
   };
 
+  const resetSelection = () => {
+    setFile(null);
+    setUploadFile(null);
+    setPreview(null);
+    setSheetNotice("");
+  };
+
   const acceptFile = async (f: File) => {
     setFile(f);
+    setUploadFile(null);
     setPreview(null);
+    setSheetNotice("");
+
+    if (!isExcelFile(f)) {
+      setUploadFile(f);
+      try {
+        setPreview(computePreview(await f.text()));
+      } catch {
+        // Preview is best-effort; the real validation happens on Upload.
+      }
+      return;
+    }
+
+    setIsReading(true);
     try {
-      const text = await f.text();
-      setPreview(computePreview(text));
-    } catch {
-      // Preview is best-effort; the real validation happens on Upload.
+      const { csvText, sheetName, ignoredSheets, rowCount } = await convertExcelToCsv(f);
+      const converted = new File([csvText], toCsvFileName(f.name), { type: "text/csv" });
+      if (converted.size > MAX_FILE_SIZE) {
+        throw new Error("This spreadsheet holds more than 10MB of data. Please split it into smaller files.");
+      }
+      if (rowCount > MAX_RECORDS) {
+        throw new Error(`This spreadsheet has ${rowCount.toLocaleString()} records. Maximum allowed is ${MAX_RECORDS.toLocaleString()}`);
+      }
+      setUploadFile(converted);
+      setPreview(computePreview(csvText));
+      if (ignoredSheets.length > 0) {
+        const skipped = ignoredSheets.length === 1
+          ? `The sheet "${ignoredSheets[0]}" was not included`
+          : `${ignoredSheets.length} other sheets were not included`;
+        setSheetNotice(`Reading the sheet "${sheetName}". ${skipped} — upload those separately if you need them.`);
+      }
+    } catch (err) {
+      setValidationError(err instanceof Error ? err.message : "This Excel file couldn't be read.");
+      resetSelection();
+    } finally {
+      setIsReading(false);
     }
   };
 
@@ -109,14 +159,15 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
     const dropped = e.dataTransfer.files[0];
     if (!dropped) return;
     const error = validateFile(dropped);
-    if (error) { setValidationError(error); setFile(null); setPreview(null); } else { setValidationError(""); acceptFile(dropped); }
+    if (error) { setValidationError(error); resetSelection(); } else { setValidationError(""); acceptFile(dropped); }
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = e.target.files?.[0];
     if (!selected) return;
     const error = validateFile(selected);
-    if (error) { setValidationError(error); setFile(null); setPreview(null); } else { setValidationError(""); acceptFile(selected); }
+    if (error) { setValidationError(error); resetSelection(); } else { setValidationError(""); acceptFile(selected); }
+    e.target.value = "";
   };
 
   const downloadTemplate = () => {
@@ -134,10 +185,10 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
   };
 
   const handleUpload = async () => {
-    if (!file) return;
+    if (!uploadFile) return;
     setIsUploading(true);
     try {
-      const text = await file.text();
+      const text = await uploadFile.text();
       const lines = text.trim().split("\n");
       const recordCount = lines.length - 1;
       if (recordCount > MAX_RECORDS) {
@@ -149,10 +200,10 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("User not authenticated");
 
-      const fileName = `${Date.now()}-${file.name}`;
+      const fileName = `${Date.now()}-${uploadFile.name}`;
       const filePath = `${orgId}/bulk-imports/${fileName}`;
 
-      const { error: uploadError } = await supabase.storage.from("import-files").upload(filePath, file);
+      const { error: uploadError } = await supabase.storage.from("import-files").upload(filePath, uploadFile);
       if (uploadError) throw new Error(`Failed to upload file: ${uploadError.message}`);
 
       const { data: job, error: jobError } = await supabase
@@ -160,7 +211,7 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
         .insert({
           org_id: orgId,
           user_id: user.id,
-          file_name: file.name,
+          file_name: uploadFile.name,
           file_path: filePath,
           import_type: "fervent_repository",
           status: "pending",
@@ -189,8 +240,7 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
       notification.success("Upload started", countMessage);
       onUploadStarted();
       onOpenChange(false);
-      setFile(null);
-      setPreview(null);
+      resetSelection();
     } catch (error) {
       notification.error("Upload failed", error instanceof Error ? error.message : "Something went wrong");
     } finally {
@@ -200,8 +250,7 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
 
   const handleClose = () => {
     if (!isUploading) {
-      setFile(null);
-      setPreview(null);
+      resetSelection();
       setValidationError("");
       onOpenChange(false);
     }
@@ -250,6 +299,8 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
                 <FileText className="h-12 w-12 mx-auto text-primary" />
                 <p className="text-sm font-medium">{file.name}</p>
                 <p className="text-xs text-muted-foreground">{(file.size / 1024).toFixed(2)} KB</p>
+                {isReading && <p className="text-xs text-muted-foreground">Reading spreadsheet…</p>}
+                {sheetNotice && <p className="text-xs text-amber-600">{sheetNotice}</p>}
                 {preview && (
                   <p className="text-xs">
                     {preview.missingUniqueId > 0 ? (
@@ -261,15 +312,15 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
                     )}
                   </p>
                 )}
-                <Button type="button" variant="ghost" size="sm" onClick={() => { setFile(null); setPreview(null); setValidationError(""); }}>
+                <Button type="button" variant="ghost" size="sm" disabled={isReading} onClick={() => { resetSelection(); setValidationError(""); }}>
                   Remove
                 </Button>
               </div>
             ) : (
               <div className="space-y-2">
                 <Upload className="h-12 w-12 mx-auto text-muted-foreground" />
-                <p className="text-sm text-muted-foreground">Drag and drop your CSV file here, or click to browse</p>
-                <input type="file" accept=".csv" onChange={handleFileSelect} className="hidden" id="fervent-file-upload" />
+                <p className="text-sm text-muted-foreground">Drag and drop your CSV or Excel file here, or click to browse</p>
+                <input type="file" accept=".csv,.xlsx,.xlsm" onChange={handleFileSelect} className="hidden" id="fervent-file-upload" />
                 <label htmlFor="fervent-file-upload">
                   <Button type="button" variant="outline" size="sm" asChild>
                     <span>Browse Files</span>
@@ -282,7 +333,7 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
           <div className="bg-muted p-3 rounded-lg text-xs space-y-1">
             <p className="font-medium">How it works:</p>
             <ul className="list-disc list-inside space-y-1 text-muted-foreground">
-              <li>UTF-8 encoded CSV file</li>
+              <li>Excel (.xlsx) or UTF-8 encoded CSV file — for Excel, the first sheet containing data is used</li>
               <li>Columns can be in any order and named however your source names them — we auto-detect them</li>
               <li>Each row needs at least a name, an email, or a phone number so it can be identified; rows with none of these are skipped and emailed back to you</li>
               <li>Mobile numbers should include the country code, e.g. <code className="bg-background px-1 rounded">+919876543210</code></li>
@@ -296,8 +347,8 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
             <Button type="button" variant="outline" onClick={handleClose} disabled={isUploading}>
               Cancel
             </Button>
-            <Button type="button" onClick={handleUpload} disabled={!file || isUploading}>
-              {isUploading ? "Uploading..." : "Upload"}
+            <Button type="button" onClick={handleUpload} disabled={!uploadFile || isUploading || isReading}>
+              {isUploading ? "Uploading..." : isReading ? "Reading..." : "Upload"}
             </Button>
           </div>
         </div>

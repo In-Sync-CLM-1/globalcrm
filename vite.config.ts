@@ -35,6 +35,11 @@ export default defineConfig(({ mode }) => ({
             if (id.includes('echarts') || id.includes('zrender')) {
               return 'vendor-echarts';
             }
+            // Only pulled in when someone actually picks an Excel file to import,
+            // so keep it out of the always-loaded vendor bundle.
+            if (id.includes('read-excel-file')) {
+              return 'vendor-excel';
+            }
             return 'vendor';
           }
         },
