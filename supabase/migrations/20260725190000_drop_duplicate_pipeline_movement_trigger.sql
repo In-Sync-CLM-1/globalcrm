@@ -1,0 +1,12 @@
+-- Two triggers on public.contacts both call track_pipeline_movement(), created
+-- 15 minutes apart on 2025-10-21 (the second was meant to replace the first, but
+-- the first was never dropped):
+--
+--   track_contact_pipeline_movement  AFTER UPDATE                      -- redundant
+--   track_pipeline_movement_trigger  AFTER UPDATE OF pipeline_stage_id -- correct
+--
+-- The function already guards on OLD.pipeline_stage_id IS DISTINCT FROM NEW, so
+-- every genuine stage change wrote the history row twice — 9,379 duplicate pairs
+-- across 18,758 rows, doubling every stage-velocity and conversion figure built
+-- on this table. Keep the column-scoped trigger; drop the blanket one.
+DROP TRIGGER IF EXISTS track_contact_pipeline_movement ON public.contacts;
