@@ -230,22 +230,22 @@ const EXPORT_COLUMNS: { key: string; label: string; format?: (v: any, row: Repos
 
 export default function FerventRepository() {
   const { effectiveOrgId } = useOrgContext();
-  const { data: activeImportJob } = useFerventActiveImportJob(effectiveOrgId || null);
+  const { isRunning: isImportRunning } = useFerventActiveImportJob(effectiveOrgId || null);
   const hadActiveImportJob = useRef(false);
   const { canAccessFeature, loading: featureLoading } = useFeatureAccess();
   const notify = useNotification();
   const queryClient = useQueryClient();
   useEffect(() => {
-    if (activeImportJob) {
+    if (isImportRunning) {
       hadActiveImportJob.current = true;
     } else if (hadActiveImportJob.current) {
-      // The active job just finished (polling no longer finds a pending/
-      // processing row) — refresh the table and import history to show it.
+      // The active job just finished (status moved off pending/processing)
+      // — refresh the table and import history to show it.
       hadActiveImportJob.current = false;
       queryClient.invalidateQueries({ queryKey: ["fervent-repository"] });
       queryClient.invalidateQueries({ queryKey: ["fervent-import-history"] });
     }
-  }, [activeImportJob, queryClient]);
+  }, [isImportRunning, queryClient]);
 
   const [filters, setFilters] = useState<RepositoryFilters>(emptyFilters);
   const [appliedFilters, setAppliedFilters] = useState<RepositoryFilters>(emptyFilters);
@@ -515,9 +515,9 @@ export default function FerventRepository() {
               <Download className="h-4 w-4 mr-2" />
               {exporting ? "Exporting..." : selectedIds.length > 0 ? `Export Selected (${selectedIds.length})` : "Export"}
             </Button>
-            <Button size="sm" onClick={() => setShowUpload(true)} disabled={!!activeImportJob}>
+            <Button size="sm" onClick={() => setShowUpload(true)} disabled={isImportRunning}>
               <Upload className="h-4 w-4 mr-2" />
-              {activeImportJob ? "Import in progress…" : "Import CSV"}
+              {isImportRunning ? "Import in progress…" : "Import CSV"}
             </Button>
           </div>
         </div>

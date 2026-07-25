@@ -31,13 +31,12 @@ interface StageDetails {
 }
 
 export function FerventActiveUploadProgress({ orgId }: FerventActiveUploadProgressProps) {
-  const { data: activeJob } = useFerventActiveImportJob(orgId);
+  const { data: activeJob, isRunning } = useFerventActiveImportJob(orgId);
   const [dismissedId, setDismissedId] = useState<string | null>(null);
 
   if (!activeJob) return null;
 
   const status = activeJob.status as string;
-  const isRunning = status === "pending" || status === "processing";
   const details = (activeJob.stage_details || {}) as StageDetails;
 
   // Running job -> live progress bar.

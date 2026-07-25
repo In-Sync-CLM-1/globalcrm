@@ -1,12 +1,17 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 
-// Returns the most recent Fervent import job of any status. In-progress jobs
-// drive the live progress bar; a just-finished job (completed or rejected)
-// lets the UI show the outcome — including a rejection reason or a
-// "some rows were emailed back to you" note — until the user dismisses it.
+// Returns the most recent Fervent import job of any status — including old,
+// already-finished ones. In-progress jobs drive the live progress bar; a
+// just-finished job (completed or rejected) lets the UI show the outcome
+// until the user dismisses it.
+//
+// `data` is truthy as soon as an org has EVER run one import, forever after —
+// it is NOT "there is an active import". Always gate on the `isRunning` field
+// returned alongside it (never on `!!data`) when deciding whether to disable
+// an upload button or treat an import as in-flight.
 export function useFerventActiveImportJob(orgId: string | null) {
-  return useQuery({
+  const query = useQuery({
     queryKey: ["fervent-active-import-job", orgId],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -27,4 +32,9 @@ export function useFerventActiveImportJob(orgId: string | null) {
       return status === "pending" || status === "processing" ? 2000 : false;
     },
   });
+
+  const status = (query.data as { status?: string } | undefined)?.status;
+  const isRunning = status === "pending" || status === "processing";
+
+  return { ...query, isRunning };
 }
