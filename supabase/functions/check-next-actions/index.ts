@@ -125,7 +125,8 @@ async function sendReminderWhatsApp(
       status: ok ? 'sent' : 'failed',
       error_message: ok ? null : (msg?.error_data?.message || result?.message || `HTTP ${r.status}`),
       exotel_status_code: String(msg?.code ?? r.status),
-      direction: 'outgoing',
+      // whatsapp_messages_direction_check allows only 'inbound' | 'outbound'.
+      direction: 'outbound',
     });
     if (logError) {
       console.error('[NextActions/WA] failed to log reminder message:', logError);
