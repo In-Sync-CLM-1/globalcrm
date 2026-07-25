@@ -13,7 +13,13 @@ interface ImportJobRow {
   error_count: number | null;
   duplicate_count: number | null;
   updated_count: number | null;
-  stage_details: { duplicate_samples?: Array<{ matched_on: string; value: string }> } | null;
+  stage_details: {
+    duplicate_samples?: Array<{ matched_on: string; value: string }>;
+    rejection_reason?: string;
+    error?: string;
+    skipped_count?: number;
+    skipped_email_sent?: boolean;
+  } | null;
 }
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive"> = {
@@ -72,11 +78,23 @@ export function FerventImportHistory({ open, onOpenChange, orgId }: FerventImpor
             <TableBody>
               {jobs.map((job) => {
                 const samples = job.stage_details?.duplicate_samples || [];
+                const reason = job.status === "failed"
+                  ? (job.stage_details?.rejection_reason || job.stage_details?.error)
+                  : undefined;
+                const skipped = job.stage_details?.skipped_count || 0;
                 return (
                   <TableRow key={job.id}>
-                    <TableCell className="max-w-[180px] truncate" title={job.file_name}>{job.file_name}</TableCell>
+                    <TableCell className="max-w-[180px]">
+                      <div className="truncate" title={job.file_name}>{job.file_name}</div>
+                      {reason && <div className="text-xs text-destructive mt-0.5 whitespace-normal">{reason}</div>}
+                      {job.status !== "failed" && skipped > 0 && (
+                        <div className="text-xs text-muted-foreground mt-0.5 whitespace-normal">
+                          {skipped.toLocaleString()} skipped{job.stage_details?.skipped_email_sent ? " · emailed back" : ""}
+                        </div>
+                      )}
+                    </TableCell>
                     <TableCell>
-                      <Badge variant={STATUS_VARIANT[job.status] || "secondary"}>{job.status}</Badge>
+                      <Badge variant={STATUS_VARIANT[job.status] || "secondary"} title={reason}>{job.status}</Badge>
                     </TableCell>
                     <TableCell>{job.success_count ?? 0}</TableCell>
                     <TableCell>{job.updated_count ?? 0}</TableCell>
