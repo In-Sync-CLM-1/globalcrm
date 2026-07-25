@@ -14,7 +14,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { format, startOfMonth, subMonths } from "date-fns";
+import { addMonths, differenceInCalendarMonths, format, startOfMonth, subMonths } from "date-fns";
 import { Database, Building2, Mail, Phone, TrendingUp, ArrowRight, SlidersHorizontal, Download, X, UserX, Users } from "lucide-react";
 import * as echarts from "echarts";
 import { useIsFervent, FERVENT_ORG_ID } from "@/hooks/useIsFervent";
@@ -228,10 +228,28 @@ export default function FerventDashboard() {
     ].filter((b) => b.rows.length > 0);
   }, [filteredRows]);
 
+  // The month this org's data actually begins. Charts start here rather than a
+  // fixed number of months back, so the period before they came onto the
+  // platform doesn't render as a run of empty columns. Derived from the
+  // unfiltered rows so the axis doesn't shift around as filters are applied.
+  const dataStartMonth = useMemo(() => {
+    let earliest: number | null = null;
+    for (const r of rows) {
+      const t = new Date(r.created_at).getTime();
+      if (!Number.isNaN(t) && (earliest === null || t < earliest)) earliest = t;
+    }
+    return startOfMonth(earliest === null ? new Date() : new Date(earliest));
+  }, [rows]);
+
   const monthlyTrend = useMemo(() => {
     const months: { key: string; label: string; count: number }[] = [];
-    for (let i = 5; i >= 0; i--) {
-      const d = startOfMonth(subMonths(new Date(), i));
+    const currentMonth = startOfMonth(new Date());
+    // Still a rolling six-month window once there's enough history for one.
+    const windowStart = startOfMonth(subMonths(currentMonth, 5));
+    const start = dataStartMonth > windowStart ? dataStartMonth : windowStart;
+    const span = differenceInCalendarMonths(currentMonth, start);
+    for (let i = 0; i <= span; i++) {
+      const d = addMonths(start, i);
       months.push({ key: format(d, "yyyy-MM"), label: format(d, "MMM"), count: 0 });
     }
     const map = new Map(months.map((m) => [m.key, m]));
@@ -241,7 +259,7 @@ export default function FerventDashboard() {
       if (bucket) bucket.count++;
     });
     return months;
-  }, [filteredRows]);
+  }, [filteredRows, dataStartMonth]);
 
   const monthKeyMap = useMemo(() => {
     const m: Record<string, string> = {};
@@ -250,11 +268,13 @@ export default function FerventDashboard() {
   }, [monthlyTrend]);
 
   // Daily activity heatmap — last 3 full months, so the calendar grid stays a
-  // compact 3-row block rather than sprawling across a year.
+  // compact 3-row block rather than sprawling across a year, and never starting
+  // before this org's first record.
   const activityRange = useMemo((): [string, string] => {
-    const start = startOfMonth(subMonths(new Date(), 2));
+    const windowStart = startOfMonth(subMonths(new Date(), 2));
+    const start = dataStartMonth > windowStart ? dataStartMonth : windowStart;
     return [format(start, "yyyy-MM-dd"), format(new Date(), "yyyy-MM-dd")];
-  }, []);
+  }, [dataStartMonth]);
 
   const dailyActivity = useMemo(() => {
     const m = new Map<string, number>();
