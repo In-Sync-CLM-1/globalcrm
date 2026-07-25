@@ -91,9 +91,6 @@ verify_jwt = false
 [functions.automation-trigger-handler]
 verify_jwt = false
 
-[functions.automation-email-sender]
-verify_jwt = false
-
 [functions.email-tracking]
 verify_jwt = false
 
@@ -101,9 +98,6 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.blog-webhook]
-verify_jwt = false
-
-[functions.daily-lead-scoring]
 verify_jwt = false
 
 [functions.analyze-campaign-performance]
