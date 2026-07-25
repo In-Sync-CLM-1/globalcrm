@@ -13,7 +13,8 @@ async function sendReminderWhatsApp(
   userId: string,
   orgId: string,
   itemTitle: string,
-  formattedDate: string
+  formattedDate: string,
+  contactId: string | null = null
 ): Promise<void> {
   try {
     const { data: profile } = await supabase
@@ -45,7 +46,7 @@ async function sendReminderWhatsApp(
 
     const { data: tpl } = await supabase
       .from('communication_templates')
-      .select('template_id, status, language')
+      .select('id, template_id, status, language')
       .eq('org_id', orgId)
       .eq('template_name', REMINDER_TEMPLATE_NAME)
       .eq('template_type', 'whatsapp')
@@ -87,7 +88,9 @@ async function sendReminderWhatsApp(
             type: 'template',
             template: {
               name: REMINDER_TEMPLATE_NAME,
-              language: tpl.language || 'en',
+              // Exotel requires an object here. A bare string is accepted with
+              // HTTP 200 and an empty body, and the message is never delivered.
+              language: { code: tpl.language || 'en' },
               components: [{
                 type: 'body',
                 parameters: params.map((p) => ({ type: 'text', text: String(p) })),
@@ -106,12 +109,15 @@ async function sendReminderWhatsApp(
     const text = await r.text();
     let result: any; try { result = JSON.parse(text); } catch { result = { raw: text }; }
     const msg = result?.response?.whatsapp?.messages?.[0];
-    const ok = r.ok && msg?.code === 200;
+    // Exotel WA v2 accepts with 200 or 202 (202 = queued for delivery).
+    const ok = r.ok && (msg?.code === 200 || msg?.code === 202 || msg?.status === 'success');
 
-    await supabase.from('whatsapp_messages').insert({
+    const { error: logError } = await supabase.from('whatsapp_messages').insert({
       org_id: orgId,
-      contact_id: null,
-      template_id: tpl.template_id,
+      contact_id: contactId,
+      // whatsapp_messages.template_id is a FK to communication_templates.id,
+      // not the Meta template id held in communication_templates.template_id.
+      template_id: tpl.id,
       sent_by: userId,
       phone_number: phone,
       message_content: `Reminder: ${itemTitle} due ${formattedDate}`,
@@ -121,8 +127,18 @@ async function sendReminderWhatsApp(
       exotel_status_code: String(msg?.code ?? r.status),
       direction: 'outgoing',
     });
+    if (logError) {
+      console.error('[NextActions/WA] failed to log reminder message:', logError);
+    }
 
-    console.log(`[NextActions/WA] sent reminder to user ${userId} (${phone}): ok=${ok}`);
+    if (ok) {
+      console.log(`[NextActions/WA] sent reminder to user ${userId} (${phone})`);
+    } else {
+      console.error(
+        `[NextActions/WA] send FAILED for user ${userId} (${phone}): http=${r.status} ` +
+        `code=${msg?.code} body=${text.slice(0, 300)}`
+      );
+    }
   } catch (err) {
     console.error('[NextActions/WA] sendReminderWhatsApp failed:', err);
   }
@@ -667,7 +683,8 @@ async function createActivityNotificationWithEmail(
     activity.created_by,
     activity.org_id,
     `${contactName} — ${activity.activity_type}${activity.subject ? `: ${activity.subject}` : ''}`,
-    formattedDate
+    formattedDate,
+    activity.contact_id ?? null
   );
 
   // Mark as reminded - use reminder_sent for both urgent and overdue to prevent duplicates

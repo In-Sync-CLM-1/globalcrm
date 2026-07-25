@@ -18,6 +18,7 @@ import { ConvertToClientButton } from "@/components/Clients/ConvertToClientButto
 import { useOrgContext } from "@/hooks/useOrgContext";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { PipelineFilters, PipelineFiltersState, emptyFilters } from "@/components/Pipeline/PipelineFilters";
+import { EnquiriesStrip } from "@/components/Pipeline/EnquiriesStrip";
 import { SendEmailDialog } from "@/components/Contact/SendEmailDialog";
 import { SendWhatsAppDialog } from "@/components/Contact/SendWhatsAppDialog";
 import { EditContactDialog } from "@/components/Contact/EditContactDialog";
@@ -958,6 +959,7 @@ export default function PipelineBoard() {
           </TabsList>
 
           <TabsContent value="board" className="mt-6">
+            <EnquiriesStrip orgId={effectiveOrgId} />
             <div className="flex gap-4 overflow-x-auto pb-4">
           {stages.map(stage => {
             const stageContacts = getContactsInStage(stage.id);
