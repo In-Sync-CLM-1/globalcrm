@@ -829,7 +829,7 @@ export default function FerventRepository() {
           </DialogHeader>
           <div className="space-y-2">
             <p className="text-sm text-muted-foreground">
-              Choose which fields to include in the CSV. All fields are selected by default.
+              Choose which fields to include in the export. All fields are selected by default.
             </p>
             <MultiSelectFilter
               options={EXPORT_COLUMNS.map((c) => c.label)}
@@ -849,7 +849,7 @@ export default function FerventRepository() {
             </Button>
             <Button onClick={handleExport} disabled={exporting || exportFields.length === 0}>
               <Download className="h-4 w-4 mr-2" />
-              {exporting ? "Exporting..." : "Export CSV"}
+              {exporting ? "Exporting..." : "Export Data"}
             </Button>
           </div>
         </DialogContent>

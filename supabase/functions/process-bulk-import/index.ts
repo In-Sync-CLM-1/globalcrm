@@ -1140,12 +1140,12 @@ async function emailSkippedRows(
     const subject = `${stats.imported.toLocaleString()} of ${stats.total.toLocaleString()} rows imported — ${skippedN} need attention`;
     const html = `<div style="font-family:Arial,sans-serif;font-size:14px;color:#111;line-height:1.5;">
       <p>Hi,</p>
-      <p>Your upload <strong>${escapeHtml(importJob.file_name)}</strong> has finished processing.</p>
+      <p>Your import <strong>${escapeHtml(importJob.file_name)}</strong> has finished processing.</p>
       <ul>
         <li><strong>${stats.imported.toLocaleString()}</strong> of ${stats.total.toLocaleString()} rows were imported into the Fervent database.</li>
         <li><strong>${skippedN}</strong> rows couldn't be identified (no name, email, or phone number) and were <strong>not</strong> imported.</li>
       </ul>
-      <p>The ${skippedN} unimported rows are attached as a CSV, with a <strong>&ldquo;Reason skipped&rdquo;</strong> column explaining each one. Please correct them and upload just that file again.</p>
+      <p>The ${skippedN} unimported rows are attached as a CSV, with a <strong>&ldquo;Reason skipped&rdquo;</strong> column explaining each one. Please correct them and import just that file again.</p>
       <p style="color:#666;font-size:12px;">This is an automated message from the In-Sync CRM data importer.</p>
     </div>`;
 
