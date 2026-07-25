@@ -517,7 +517,7 @@ export default function FerventRepository() {
             </Button>
             <Button size="sm" onClick={() => setShowUpload(true)} disabled={isImportRunning}>
               <Upload className="h-4 w-4 mr-2" />
-              {isImportRunning ? "Import in progress…" : "Import CSV"}
+              {isImportRunning ? "Import in progress…" : "Import Data"}
             </Button>
           </div>
         </div>
@@ -633,7 +633,7 @@ export default function FerventRepository() {
               <LoadingState message="Loading records..." />
             ) : records.length === 0 ? (
               <div className="py-12 text-center text-muted-foreground">
-                No records found. Import a CSV to get started.
+                No records found. Import a CSV or Excel file to get started.
               </div>
             ) : (
               <div className="overflow-x-auto">
