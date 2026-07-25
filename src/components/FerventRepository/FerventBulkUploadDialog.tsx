@@ -93,7 +93,7 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
     const isCsv = f.type.includes("csv") || f.name.toLowerCase().endsWith(".csv");
     if (!isCsv && !isExcelFile(f)) {
       if (isLegacyExcelFile(f)) {
-        return "This is an old Excel format (.xls). Please open it in Excel and save it as .xlsx, then upload again.";
+        return "This is an old Excel format (.xls). Please open it in Excel and save it as .xlsx, then import again.";
       }
       return "Please select a CSV or Excel (.xlsx) file";
     }
@@ -224,7 +224,7 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
       if (jobError) {
         await supabase.storage.from("import-files").remove([filePath]);
         if (jobError.code === "23505") {
-          throw new Error("An import is already in progress for this database. Please wait for it to finish before uploading again.");
+          throw new Error("An import is already in progress for this database. Please wait for it to finish before importing again.");
         }
         throw new Error(`Failed to create import job: ${jobError.message}`);
       }
@@ -237,12 +237,12 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
       const countMessage = preview
         ? `${preview.total} records will be processed${preview.missingUniqueId > 0 ? ` (${preview.missingUniqueId} without a Unique ID will be matched automatically)` : ""}.`
         : "Your file is being processed in the background.";
-      notification.success("Upload started", countMessage);
+      notification.success("Import started", countMessage);
       onUploadStarted();
       onOpenChange(false);
       resetSelection();
     } catch (error) {
-      notification.error("Upload failed", error instanceof Error ? error.message : "Something went wrong");
+      notification.error("Import failed", error instanceof Error ? error.message : "Something went wrong");
     } finally {
       setIsUploading(false);
     }
@@ -260,9 +260,9 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>
-          <DialogTitle>Bulk Upload Fervent Database</DialogTitle>
+          <DialogTitle>Import Data into Fervent Database</DialogTitle>
           <DialogDescription>
-            Upload your data in whatever column layout you have — we'll recognise the fields,
+            Import your data in whatever column layout you have — we'll recognise the fields,
             fill in what can be inferred (like a name from an email), and format it for the database.
             Any rows we can't use are emailed back to you to fix. Max 10,000 records, 10MB.
           </DialogDescription>
@@ -271,7 +271,7 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
         <div className="mb-4">
           <Button type="button" variant="outline" size="sm" onClick={downloadTemplate} className="w-full">
             <Download className="w-4 h-4 mr-2" />
-            Download CSV Template (optional)
+            Download Template (optional)
           </Button>
           <p className="mt-1 text-xs text-muted-foreground text-center">
             The template is just a convenience — your file doesn't need to match it.
@@ -348,7 +348,7 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
               Cancel
             </Button>
             <Button type="button" onClick={handleUpload} disabled={!uploadFile || isUploading || isReading}>
-              {isUploading ? "Uploading..." : isReading ? "Reading..." : "Upload"}
+              {isUploading ? "Importing..." : isReading ? "Reading..." : "Import"}
             </Button>
           </div>
         </div>

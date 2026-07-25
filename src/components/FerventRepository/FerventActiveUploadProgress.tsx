@@ -10,7 +10,7 @@ interface FerventActiveUploadProgressProps {
 }
 
 const STAGE_LABELS: Record<string, string> = {
-  uploaded: "Uploaded",
+  uploaded: "File received",
   downloading: "Downloading file",
   validating: "Understanding your file",
   parsing: "Formatting rows",
@@ -50,7 +50,7 @@ export function FerventActiveUploadProgress({ orgId }: FerventActiveUploadProgre
         <CardHeader className="pb-3">
           <div className="flex items-center gap-2">
             <Loader2 className="h-4 w-4 animate-spin text-primary" />
-            <CardTitle className="text-base">Upload in progress</CardTitle>
+            <CardTitle className="text-base">Import in progress</CardTitle>
           </div>
           <CardDescription className="truncate">{activeJob.file_name}</CardDescription>
         </CardHeader>
@@ -127,7 +127,7 @@ export function FerventActiveUploadProgress({ orgId }: FerventActiveUploadProgre
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <CheckCircle2 className="h-4 w-4 text-green-600" />
-            <CardTitle className="text-base">Upload complete</CardTitle>
+            <CardTitle className="text-base">Import complete</CardTitle>
           </div>
           <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setDismissedId(activeJob.id)}>
             <X className="h-4 w-4" />
@@ -159,7 +159,7 @@ export function FerventActiveUploadProgress({ orgId }: FerventActiveUploadProgre
             <Mail className="h-3.5 w-3.5 mt-0.5 shrink-0" />
             <span>
               {skipped.toLocaleString()} row{skipped === 1 ? "" : "s"} couldn't be identified and {details.skipped_email_sent
-                ? <>were emailed{details.skipped_email_to ? <> to <strong>{details.skipped_email_to}</strong></> : ""} to fix and re-upload.</>
+                ? <>were emailed{details.skipped_email_to ? <> to <strong>{details.skipped_email_to}</strong></> : ""} to fix and import again.</>
                 : <>could not be imported.</>}
             </span>
           </div>
