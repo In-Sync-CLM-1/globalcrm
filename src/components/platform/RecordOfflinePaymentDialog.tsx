@@ -110,12 +110,22 @@ export function RecordOfflinePaymentDialog({ open, onOpenChange, org, onRecorded
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
 
-      notify.success(
-        "Payment recorded",
-        paymentFor === "wallet"
-          ? `${inr(base)} (excl. GST) added to ${org.name}'s wallet.`
-          : `${org.name}'s subscription marked paid and reactivated.`
-      );
+      // The payment is always recorded; the account only reopens if it cleared
+      // everything outstanding. Say which one happened rather than always
+      // claiming "reactivated".
+      if (data?.still_locked) {
+        notify.error(
+          "Payment recorded — account still locked",
+          `${inr(amount)} is on ${org.name}'s account, but it doesn't clear the full outstanding amount. Check their pending invoices.`
+        );
+      } else {
+        notify.success(
+          "Payment recorded",
+          paymentFor === "wallet"
+            ? `${inr(base)} (excl. GST) added to ${org.name}'s wallet.`
+            : `${org.name}'s subscription marked paid and reactivated.`
+        );
+      }
       onRecorded?.();
       onOpenChange(false);
     } catch (e: any) {

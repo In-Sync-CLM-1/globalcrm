@@ -156,35 +156,82 @@ Deno.serve(async (req) => {
           })
           .eq('id', invoice_id);
       } else {
-        // Create an actual invoice when payment is recorded (payment received)
-        const invoiceNumber = `INV-${nowIso.split('T')[0].replace(/-/g, '')}-${org_id.substring(0, 8).toUpperCase()}`;
-        const invoiceDate = nowIso.split('T')[0];
-        const dueDate = new Date(nowIso);
-        dueDate.setDate(dueDate.getDate() + 30); // 30 days payment terms
-
-        const { error: createInvoiceError } = await db
+        // No invoice named: settle what the org actually OWES before booking any
+        // surplus as a fresh invoice. Skipping this was how an org could pay in
+        // full, be reactivated here, and then be re-locked overnight —
+        // check_and_update_subscription_status() locks on "any unpaid invoice
+        // past its due date" and never looks at last_payment_date, so an
+        // untouched older invoice silently undid the payment.
+        const { data: outstanding } = await db
           .from('subscription_invoices')
-          .insert({
-            org_id,
-            invoice_number: invoiceNumber,
-            invoice_date: invoiceDate,
-            due_date: dueDate.toISOString().split('T')[0],
-            billing_period_start: invoiceDate,
-            billing_period_end: invoiceDate,
-            base_subscription_amount: baseAmount,
-            user_count: 1,
-            subtotal: baseAmount,
-            gst_amount: gstAmount,
-            total_amount: amount,
-            paid_amount: amount,
-            payment_status: 'paid',
-            paid_at: nowIso,
-            invoice_type: 'invoice',
-            billing_period: billing_period || 'monthly',
-          });
+          .select('id, total_amount, paid_amount')
+          .eq('org_id', org_id)
+          .in('payment_status', ['pending', 'overdue'])
+          .order('due_date', { ascending: true });
 
-        if (createInvoiceError) {
-          console.error(`Error creating invoice for payment:`, createInvoiceError);
+        // Oldest first, so the invoice that's driving the lockout clears first.
+        let remaining = amount;
+        for (const inv of outstanding ?? []) {
+          if (remaining <= 0) break;
+          const alreadyPaid = Number(inv.paid_amount || 0);
+          const due = Math.round((Number(inv.total_amount || 0) - alreadyPaid) * 100) / 100;
+          if (due <= 0) continue;
+
+          const applied = Math.min(remaining, due);
+          const fullySettled = applied >= due;
+
+          const { error: settleError } = await db
+            .from('subscription_invoices')
+            .update({
+              paid_amount: Math.round((alreadyPaid + applied) * 100) / 100,
+              // A part-payment leaves the invoice open (and the org still locked)
+              // rather than pretending the debt is cleared.
+              ...(fullySettled ? { payment_status: 'paid', paid_at: nowIso } : {}),
+              updated_at: nowIso,
+            })
+            .eq('id', inv.id);
+
+          if (settleError) {
+            console.error(`Error settling invoice ${inv.id}:`, settleError);
+            continue;
+          }
+          remaining = Math.round((remaining - applied) * 100) / 100;
+        }
+
+        // Anything left over is payment for the period ahead — book it as a
+        // paid invoice of record, as before.
+        if (remaining > 0) {
+          const surplusBase = Math.round((remaining / (1 + gstPct / 100)) * 100) / 100;
+          const surplusGst = Math.round((remaining - surplusBase) * 100) / 100;
+          const invoiceNumber = `INV-${nowIso.split('T')[0].replace(/-/g, '')}-${org_id.substring(0, 8).toUpperCase()}`;
+          const invoiceDate = nowIso.split('T')[0];
+          const dueDate = new Date(nowIso);
+          dueDate.setDate(dueDate.getDate() + 30); // 30 days payment terms
+
+          const { error: createInvoiceError } = await db
+            .from('subscription_invoices')
+            .insert({
+              org_id,
+              invoice_number: invoiceNumber,
+              invoice_date: invoiceDate,
+              due_date: dueDate.toISOString().split('T')[0],
+              billing_period_start: invoiceDate,
+              billing_period_end: invoiceDate,
+              base_subscription_amount: surplusBase,
+              user_count: 1,
+              subtotal: surplusBase,
+              gst_amount: surplusGst,
+              total_amount: remaining,
+              paid_amount: remaining,
+              payment_status: 'paid',
+              paid_at: nowIso,
+              invoice_type: 'invoice',
+              billing_period: billing_period || 'monthly',
+            });
+
+          if (createInvoiceError) {
+            console.error(`Error creating invoice for payment:`, createInvoiceError);
+          }
         }
       }
 
@@ -245,6 +292,23 @@ Deno.serve(async (req) => {
     await db.from('organization_subscriptions').update(unlock).eq('org_id', org_id);
     await db.from('organizations').update({ services_enabled: true }).eq('id', org_id);
 
+    // 5c. Reconcile against the same rule the nightly job uses, so the status we
+    //     leave behind is the one that will survive the night. If something is
+    //     still outstanding (e.g. the amount received didn't cover the arrears),
+    //     the admin finds out now instead of the client being locked out again
+    //     the next morning.
+    let stillLocked = false;
+    try {
+      await db.rpc('check_and_update_subscription_status', { _org_id: org_id });
+      const { data: lockedNow } = await db.rpc('is_org_locked', { _org_id: org_id });
+      stillLocked = lockedNow === true;
+      if (stillLocked) {
+        console.warn(`Org ${org_id} remains locked after recording ₹${amount} — arrears not fully cleared.`);
+      }
+    } catch (e) {
+      console.error('Post-payment status reconcile failed:', e);
+    }
+
     // 6. Best-effort receipt email to the org (never blocks the record).
     try {
       await db.functions.invoke('send-subscription-email', {
@@ -259,7 +323,7 @@ Deno.serve(async (req) => {
     console.log(`Offline ${payment_for} payment of ₹${amount} recorded for org ${org_id} by ${recordedBy}`);
 
     return new Response(
-      JSON.stringify({ success: true, payment_transaction_id: paymentTxn.id }),
+      JSON.stringify({ success: true, payment_transaction_id: paymentTxn.id, still_locked: stillLocked }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   } catch (error) {
