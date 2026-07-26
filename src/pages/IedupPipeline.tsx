@@ -37,6 +37,7 @@ import {
   Clock,
   Loader2,
   UserPlus,
+  AlertTriangle,
 } from "lucide-react";
 import { IEDUP_ORG_ID } from "@/hooks/useIsIedup";
 import { useNotification } from "@/hooks/useNotification";
@@ -92,6 +93,20 @@ const IEDUP_ACTIONS = [
 ];
 
 const CSV_TEMPLATE = `name,number,action\nVibhu Dixit,+917607359820,Call\n`;
+
+// A beneficiary name should only ever be English letters, Devanagari, or the
+// punctuation that shows up in real names. Anything else means the file lost
+// its characters on the way here — the usual cause is Excel saving as plain
+// "CSV" instead of "CSV UTF-8", which turns Hindi into "?" or mojibake like
+// "à¤¹à¤°à¤¿". Those names are unusable: they'd go out in a real WhatsApp
+// message or be read aloud by the AI caller.
+// ‌/‍ are the invisible joiners Hindi legitimately uses to shape
+// conjuncts — allowed so correct Devanagari is never flagged.
+const READABLE_NAME = /^[A-Za-z0-9ऀ-ॿ‌‍\s.,'’\-/&()]+$/;
+
+function isUnreadableName(name: string): boolean {
+  return !READABLE_NAME.test(name);
+}
 
 const PAGE_SIZE = 50;
 
@@ -193,6 +208,12 @@ export default function IedupPipeline() {
   const [transliterating, setTransliterating] = useState(false);
   const [importing, setImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Import stays blocked while any name is still unreadable, so a mangled name
+  // can never reach a beneficiary's WhatsApp message or the AI caller's script.
+  const unreadableRows = useMemo(
+    () => uploadRows.filter((r) => isUnreadableName(r.name_en)).length,
+    [uploadRows],
+  );
 
   // Manual-add state
   const [manualOpen, setManualOpen] = useState(false);
@@ -219,7 +240,10 @@ export default function IedupPipeline() {
   const dialingActive = settings?.dialing_active ?? false;
 
   function handleDownloadTemplate() {
-    const blob = new Blob([CSV_TEMPLATE], { type: "text/csv;charset=utf-8" });
+    // The leading BOM is what makes Excel on Windows open this as UTF-8 and,
+    // crucially, save it back as UTF-8. Without it Excel re-saves as ANSI and
+    // silently destroys any Hindi the client typed in.
+    const blob = new Blob(["﻿" + CSV_TEMPLATE], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = "iedup_beneficiaries_template.csv";
@@ -242,10 +266,22 @@ export default function IedupPipeline() {
             action: String(r.action || "").trim(),
           }))
           .filter((r) => r.name_en && r.number);
+
         if (rows.length === 0) {
           notify.error("Empty file", "No valid rows found. Make sure the file has 'name' and 'number' columns.");
           if (fileInputRef.current) fileInputRef.current.value = "";
           return;
+        }
+
+        // Rows whose name arrived unreadable are NOT dropped — they're carried
+        // into the preview and flagged there, so the uploader can see exactly
+        // who is affected and either retype the name or drop that one row.
+        const unreadable = rows.filter((r) => isUnreadableName(r.name_en)).length;
+        if (unreadable > 0) {
+          notify.info(
+            `${unreadable} name${unreadable === 1 ? "" : "s"} need${unreadable === 1 ? "s" : ""} attention`,
+            "Some names didn't survive the file's encoding. They're marked in red in the preview — retype them or remove those rows, then import.",
+          );
         }
         // Devanagari conversion happens AFTER import (background job), so the
         // upload is instant and isn't capped by the converter's 500-name limit.
@@ -268,6 +304,16 @@ export default function IedupPipeline() {
       const { data: userData } = await supabase.auth.getUser();
       const userId = userData?.user?.id;
       if (!userId) throw new Error("You must be signed in to import.");
+
+      // Backstop for the disabled Import button, so an unreadable name can't
+      // slip through and end up addressed to a real beneficiary.
+      const stillUnreadable = uploadRows.filter((r) => isUnreadableName(r.name_en));
+      if (stillUnreadable.length > 0) {
+        throw new Error(
+          `${stillUnreadable.length} name(s) still can't be read (e.g. "${stillUnreadable[0].name_en}"). ` +
+            "Retype them or remove those rows. Nothing was imported.",
+        );
+      }
 
       // Resolve the chosen Action to its pipeline stage so the import sets the
       // stage (which fires that stage's automation via the enqueue trigger).
@@ -938,6 +984,21 @@ export default function IedupPipeline() {
                 )}
               </DialogDescription>
             </DialogHeader>
+            {unreadableRows > 0 && (
+              <div className="flex items-start gap-2 rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+                <div>
+                  <p className="font-medium text-destructive">
+                    {unreadableRows} name{unreadableRows === 1 ? "" : "s"} can't be read
+                  </p>
+                  <p className="text-muted-foreground">
+                    The highlighted rows lost their characters when the file was saved — this happens when
+                    a file with Hindi names is saved as plain CSV instead of "CSV UTF-8". Retype those names,
+                    or remove the rows. Everything else will import normally.
+                  </p>
+                </div>
+              </div>
+            )}
             <div className="max-h-[50vh] overflow-y-auto">
               <Table>
                 <TableHeader>
@@ -946,12 +1007,39 @@ export default function IedupPipeline() {
                     <TableHead>Name (HI) — editable</TableHead>
                     <TableHead>Number</TableHead>
                     <TableHead>Action</TableHead>
+                    <TableHead className="w-10" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {uploadRows.map((r, i) => (
-                    <TableRow key={i}>
-                      <TableCell>{r.name_en}</TableCell>
+                  {uploadRows.map((r, i) => {
+                    const nameUnreadable = isUnreadableName(r.name_en);
+                    return (
+                    <TableRow key={i} className={nameUnreadable ? "bg-destructive/5" : undefined}>
+                      <TableCell>
+                        <Input
+                          value={r.name_en}
+                          onChange={(e) =>
+                            setUploadRows((prev) =>
+                              prev.map((x, idx) => {
+                                if (idx !== i) return x;
+                                // Keep the Hindi cell in step while it's still the
+                                // untouched placeholder copied from the English name.
+                                const hiUntouched = x.name_hi === x.name_en;
+                                return {
+                                  ...x,
+                                  name_en: e.target.value,
+                                  name_hi: hiUntouched ? e.target.value : x.name_hi,
+                                };
+                              }),
+                            )
+                          }
+                          className={
+                            nameUnreadable
+                              ? "h-8 border-destructive text-destructive focus-visible:ring-destructive"
+                              : "h-8"
+                          }
+                        />
+                      </TableCell>
                       <TableCell>
                         <Input
                           value={r.name_hi}
@@ -980,8 +1068,20 @@ export default function IedupPipeline() {
                           ))}
                         </select>
                       </TableCell>
+                      <TableCell>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                          title="Remove this row"
+                          onClick={() => setUploadRows((prev) => prev.filter((_, idx) => idx !== i))}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
                     </TableRow>
-                  ))}
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>
@@ -989,11 +1089,16 @@ export default function IedupPipeline() {
               <Button variant="outline" onClick={() => setUploadOpen(false)} disabled={importing}>
                 Cancel
               </Button>
-              <Button onClick={handleImport} disabled={importing || transliterating}>
+              <Button
+                onClick={handleImport}
+                disabled={importing || transliterating || unreadableRows > 0 || uploadRows.length === 0}
+              >
                 {importing ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Importing…
                   </>
+                ) : unreadableRows > 0 ? (
+                  <>Fix {unreadableRows} name{unreadableRows === 1 ? "" : "s"} to import</>
                 ) : (
                   <>Import {uploadRows.length} row{uploadRows.length === 1 ? "" : "s"}</>
                 )}
