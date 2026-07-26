@@ -673,8 +673,18 @@ function normEmail(v: any): string | null {
   return s === '' ? null : s;
 }
 
+// A phone is a phone whichever of the four columns it arrived in. Matching only
+// the two mobile_* ones left 68% of this repository — every row whose number
+// landed in phone_number/direct_number — invisible to duplicate detection.
+// Must stay in step with find_fervent_duplicate_candidates, which builds the
+// same set on the SQL side.
 function phonesOf(r: any): string[] {
-  return [normPhone(r.mobile_number_1), normPhone(r.mobile_number_2)].filter((v): v is string => !!v);
+  return [
+    normPhone(r.mobile_number_1),
+    normPhone(r.mobile_number_2),
+    normPhone(r.direct_number),
+    normPhone(r.phone_number),
+  ].filter((v): v is string => !!v);
 }
 
 function emailsOf(r: any): string[] {
@@ -851,6 +861,8 @@ async function processFerventBatch(
       last_name: r.last_name,
       mobile_number_1: r.mobile_number_1,
       mobile_number_2: r.mobile_number_2,
+      direct_number: r.direct_number,
+      phone_number: r.phone_number,
       official_email: r.official_email,
       personal_email_1: r.personal_email_1,
       personal_email_2: r.personal_email_2,
@@ -873,7 +885,13 @@ async function processFerventBatch(
 
     withoutUid.forEach((record, idx) => {
       const cands = byIdx.get(idx) || [];
-      const strong = cands.find((c: any) => (c.match_type === 'phone' || c.match_type === 'email') && !claimedTargets.has(c.existing_record.id));
+      // A shared phone or email IS the same person, so several rows in one file
+      // may legitimately fold into the same existing record — the accumulate
+      // below is written for exactly that. Skipping already-claimed targets
+      // here meant only the first row merged and every later one was inserted
+      // as a fresh duplicate. The name tier below still respects the claim,
+      // since a shared name is much weaker evidence.
+      const strong = cands.find((c: any) => c.match_type === 'phone' || c.match_type === 'email');
       if (strong) {
         claimedTargets.add(strong.existing_record.id);
         const existingEntry = mergesByTarget.get(strong.existing_record.id);
