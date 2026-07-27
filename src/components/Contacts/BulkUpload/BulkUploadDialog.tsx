@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Upload, FileText, AlertCircle, Download } from "lucide-react";
@@ -23,7 +23,18 @@ export function BulkUploadDialog({ open, onOpenChange, orgId, onUploadStarted }:
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [validationError, setValidationError] = useState<string>("");
+  const [smartImportEnabled, setSmartImportEnabled] = useState(false);
   const notification = useNotification();
+
+  useEffect(() => {
+    if (!open || !orgId) return;
+    supabase
+      .from('organizations')
+      .select('smart_import_enabled')
+      .eq('id', orgId)
+      .single()
+      .then(({ data }) => setSmartImportEnabled(!!data?.smart_import_enabled));
+  }, [open, orgId]);
 
   // Error logging helper
   const logUploadError = async (step: string, error: any, details?: any) => {
@@ -162,17 +173,20 @@ export function BulkUploadDialog({ open, onOpenChange, orgId, onUploadStarted }:
         return;
       }
 
-      // Check for required columns
-      const headers = lines[0].toLowerCase();
-      if (!headers.includes('first_name')) {
-        setValidationError("CSV must contain a 'first_name' column");
-        setIsUploading(false);
-        return;
-      }
-      if (!headers.includes('email')) {
-        setValidationError("CSV must contain an 'email' column");
-        setIsUploading(false);
-        return;
+      // Orgs with AI-assisted column mapping figure out the layout server-side,
+      // so skip the exact-header requirement for them.
+      if (!smartImportEnabled) {
+        const headers = lines[0].toLowerCase();
+        if (!headers.includes('first_name')) {
+          setValidationError("CSV must contain a 'first_name' column");
+          setIsUploading(false);
+          return;
+        }
+        if (!headers.includes('email')) {
+          setValidationError("CSV must contain an 'email' column");
+          setIsUploading(false);
+          return;
+        }
       }
 
       // Get current user
@@ -285,7 +299,9 @@ export function BulkUploadDialog({ open, onOpenChange, orgId, onUploadStarted }:
         <DialogHeader>
           <DialogTitle>Bulk Upload Contacts</DialogTitle>
           <DialogDescription>
-            Upload a CSV file with contact information. Maximum 5,000 records and 10MB file size.
+            {smartImportEnabled
+              ? "Upload a CSV file with contact information. AI will read your file's columns automatically — no fixed template needed. Maximum 5,000 records and 10MB file size."
+              : "Upload a CSV file with contact information. Maximum 5,000 records and 10MB file size."}
           </DialogDescription>
         </DialogHeader>
 
@@ -363,7 +379,11 @@ export function BulkUploadDialog({ open, onOpenChange, orgId, onUploadStarted }:
             <p className="font-medium">Requirements:</p>
             <ul className="list-disc list-inside space-y-1 text-muted-foreground">
               <li>UTF-8 encoded CSV file</li>
-              <li>Required columns: <code className="bg-background px-1 rounded">first_name</code>, <code className="bg-background px-1 rounded">email</code></li>
+              {smartImportEnabled ? (
+                <li>Any column layout works — must include at least a name, email, or phone number to identify each record</li>
+              ) : (
+                <li>Required columns: <code className="bg-background px-1 rounded">first_name</code>, <code className="bg-background px-1 rounded">email</code></li>
+              )}
               <li>Optional <code className="bg-background px-1 rounded">Action</code> (or <code className="bg-background px-1 rounded">pipeline_stage</code>): must match a stage/action name; sets the contact's stage and triggers its automation on import</li>
               <li>Maximum 5,000 records per upload</li>
               <li>Maximum file size: 10MB</li>
