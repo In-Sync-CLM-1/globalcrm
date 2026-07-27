@@ -127,9 +127,9 @@ export interface FerventMappingResult {
 // Build a deterministic field->index map from the header synonyms. First
 // occurrence wins; a canonical field is only assigned once (a second column
 // that maps to an already-filled field is left for the AI pass to place).
-function deterministicMap(normHeaders: string[]): Record<string, number> {
+function deterministicMap(synonyms: Record<string, string[]>, normHeaders: string[]): Record<string, number> {
   const lookup = new Map<string, string>();
-  for (const [field, variants] of Object.entries(SYNONYMS)) {
+  for (const [field, variants] of Object.entries(synonyms)) {
     for (const v of variants) if (!lookup.has(v)) lookup.set(v, field);
   }
   const fieldToIndex: Record<string, number> = {};
@@ -182,7 +182,7 @@ function parseAiMapping(text: string): AiMapping | null {
   }
 }
 
-function buildAiUserContent(rawHeaders: string[], sampleRows: string[][]): string {
+function buildAiUserContent(canonicalFields: { key: string; desc: string }[], rawHeaders: string[], sampleRows: string[][]): string {
   const samples = sampleRows.slice(0, 5).map((r) =>
     rawHeaders.reduce((acc, h, i) => {
       const v = (r[i] || '').trim();
@@ -191,13 +191,13 @@ function buildAiUserContent(rawHeaders: string[], sampleRows: string[][]): strin
     }, {} as Record<string, string>),
   );
   return JSON.stringify({
-    canonical_fields: CANONICAL_FIELDS,
+    canonical_fields: canonicalFields,
     uploaded_headers: rawHeaders,
     sample_rows: samples,
   });
 }
 
-async function callGroqMapping(userContent: string): Promise<AiMapping | null> {
+async function callGroqMapping(systemPrompt: string, userContent: string): Promise<AiMapping | null> {
   const key = Deno.env.get('GROQ_API_KEY');
   if (!key) return null;
   try {
@@ -209,7 +209,7 @@ async function callGroqMapping(userContent: string): Promise<AiMapping | null> {
         temperature: 0,
         response_format: { type: 'json_object' },
         messages: [
-          { role: 'system', content: MAPPING_SYSTEM_PROMPT },
+          { role: 'system', content: systemPrompt },
           { role: 'user', content: userContent },
         ],
       }),
@@ -226,7 +226,7 @@ async function callGroqMapping(userContent: string): Promise<AiMapping | null> {
   }
 }
 
-async function callHaikuMapping(userContent: string): Promise<AiMapping | null> {
+async function callHaikuMapping(systemPrompt: string, userContent: string): Promise<AiMapping | null> {
   const key = Deno.env.get('ANTHROPIC_API_KEY');
   if (!key) return null;
   try {
@@ -236,7 +236,7 @@ async function callHaikuMapping(userContent: string): Promise<AiMapping | null> 
       body: JSON.stringify({
         model: HAIKU_MODEL,
         max_tokens: 1024,
-        system: MAPPING_SYSTEM_PROMPT,
+        system: systemPrompt,
         messages: [{ role: 'user', content: userContent }],
       }),
     });
@@ -264,12 +264,24 @@ function headerIndex(rawHeaders: string[], normHeaders: string[], wanted: string
 // Build the full mapping for a file: deterministic synonyms first, AI to
 // refine leftovers and settle ambiguity, then the structural accept/reject
 // decision. Fails open to the deterministic map if AI is unavailable.
-export async function buildFerventMapping(rawHeaders: string[], sampleRows: string[][]): Promise<FerventMappingResult> {
+// Generic engine behind buildFerventMapping/buildContactsMapping — parameterised
+// on the canonical field list + synonyms + identity fields so other import
+// types can reuse the same AI-assisted column-mapping without duplicating the
+// Groq/Haiku plumbing.
+async function buildSmartMapping(
+  canonicalFields: { key: string; desc: string }[],
+  synonyms: Record<string, string[]>,
+  identityFields: string[],
+  rawHeaders: string[],
+  sampleRows: string[][],
+  systemPrompt: string,
+  noIdentityMessage: string,
+): Promise<FerventMappingResult> {
   const normHeaders = rawHeaders.map(normalizeHeader);
-  const fieldToIndex = deterministicMap(normHeaders);
+  const fieldToIndex = deterministicMap(synonyms, normHeaders);
 
-  const ai = await callGroqMapping(buildAiUserContent(rawHeaders, sampleRows))
-    ?? await callHaikuMapping(buildAiUserContent(rawHeaders, sampleRows));
+  const userContent = buildAiUserContent(canonicalFields, rawHeaders, sampleRows);
+  const ai = await callGroqMapping(systemPrompt, userContent) ?? await callHaikuMapping(systemPrompt, userContent);
   const usedAi = ai !== null;
 
   let fullNameIndex: number | null = null;
@@ -289,7 +301,7 @@ export async function buildFerventMapping(rawHeaders: string[], sampleRows: stri
         if (fullNameIndex === null) { fullNameIndex = idx; usedIndices.add(idx); }
         continue;
       }
-      if (!(field in aiFieldToIndex) && CANONICAL_FIELDS.some((f) => f.key === field)) {
+      if (!(field in aiFieldToIndex) && canonicalFields.some((f) => f.key === field)) {
         aiFieldToIndex[field] = idx;
         usedIndices.add(idx);
       }
@@ -308,15 +320,9 @@ export async function buildFerventMapping(rawHeaders: string[], sampleRows: stri
 
   if (fullNameIndex === null) fullNameIndex = detectFullNameIndex(normHeaders, fieldToIndex);
 
-  const hasIdentity = IDENTITY_FIELDS.some((f) => f in fieldToIndex) || fullNameIndex !== null;
+  const hasIdentity = identityFields.some((f) => f in fieldToIndex) || fullNameIndex !== null;
   if (!hasIdentity) {
-    return {
-      reject: true,
-      rejectReason:
-        'The file has no name, email, or phone column we could recognise, so its records can\'t be identified. ' +
-        'Please make sure it includes at least a name, an email, or a phone number and upload again.',
-      usedAi,
-    };
+    return { reject: true, rejectReason: noIdentityMessage, usedAi };
   }
 
   const resolved: Record<string, string> = {};
@@ -324,6 +330,127 @@ export async function buildFerventMapping(rawHeaders: string[], sampleRows: stri
   if (fullNameIndex !== null) resolved['full_name'] = rawHeaders[fullNameIndex] ?? '';
 
   return { mapping: { fieldToIndex, fullNameIndex, rawHeaders }, reject: false, resolved, usedAi };
+}
+
+const NO_IDENTITY_MESSAGE =
+  'The file has no name, email, or phone column we could recognise, so its records can\'t be identified. ' +
+  'Please make sure it includes at least a name, an email, or a phone number and upload again.';
+
+export async function buildFerventMapping(rawHeaders: string[], sampleRows: string[][]): Promise<FerventMappingResult> {
+  return buildSmartMapping(CANONICAL_FIELDS, SYNONYMS, IDENTITY_FIELDS, rawHeaders, sampleRows, MAPPING_SYSTEM_PROMPT, NO_IDENTITY_MESSAGE);
+}
+
+// --- Contacts import (RMPL, In-Sync Demo, and any other org with
+// organizations.smart_import_enabled = true) ---------------------------------
+// Same AI-assisted column mapping as Fervent's repository upload, retargeted
+// at the standard `contacts` table shape so these orgs aren't locked into an
+// exact CSV template.
+export const CONTACTS_CANONICAL_FIELDS: { key: string; desc: string }[] = [
+  { key: 'first_name', desc: 'Person first / given name' },
+  { key: 'last_name', desc: 'Person last name / surname / family name' },
+  { key: 'email', desc: 'Email address' },
+  { key: 'phone', desc: 'Phone / mobile number' },
+  { key: 'company', desc: 'Company / employer name' },
+  { key: 'job_title', desc: 'Job title / designation / role' },
+  { key: 'organization_name', desc: 'Organisation / account name (if different from company)' },
+  { key: 'organization_industry', desc: 'Company industry / sector' },
+  { key: 'industry_type', desc: 'Industry type / category' },
+  { key: 'nature_of_business', desc: 'Nature of business' },
+  { key: 'pipeline_stage', desc: 'Pipeline stage / sales stage / action for this contact' },
+  { key: 'address', desc: 'Street address' },
+  { key: 'city', desc: 'City / town' },
+  { key: 'state', desc: 'State / province / region' },
+  { key: 'country', desc: 'Country' },
+  { key: 'postal_code', desc: 'Postal / ZIP code' },
+  { key: 'headline', desc: "Person's professional headline/summary" },
+  { key: 'seniority', desc: 'Seniority level' },
+  { key: 'referred_by', desc: 'Referred by' },
+  { key: 'website', desc: 'Company website URL' },
+  { key: 'linkedin_url', desc: "Person's LinkedIn profile URL" },
+  { key: 'twitter_url', desc: 'Twitter/X profile URL' },
+  { key: 'notes', desc: 'Free-text notes about this contact' },
+];
+
+const CONTACTS_IDENTITY_FIELDS = ['first_name', 'last_name', 'email', 'phone'];
+
+const CONTACTS_SYNONYMS: Record<string, string[]> = {
+  first_name: ['first_name', 'firstname', 'fname', 'given_name', 'first'],
+  last_name: ['last_name', 'lastname', 'lname', 'surname', 'family_name', 'last'],
+  email: ['email', 'email_id', 'email_address', 'emailid', 'work_email', 'official_email'],
+  phone: ['phone', 'phone_number', 'mobile', 'mobile_number', 'mobile_no', 'cell', 'cell_phone', 'contact_no', 'contact_number', 'telephone', 'tel'],
+  company: ['company', 'company_name', 'employer', 'organisation', 'organization'],
+  job_title: ['job_title', 'title', 'designation', 'role', 'position'],
+  organization_name: ['organization_name', 'organisation_name', 'account_name', 'account'],
+  organization_industry: ['organization_industry', 'industry', 'sector', 'vertical'],
+  industry_type: ['industry_type'],
+  nature_of_business: ['nature_of_business', 'business_nature'],
+  pipeline_stage: ['pipeline_stage', 'stage', 'action'],
+  address: ['address', 'street_address', 'address_line_1'],
+  city: ['city', 'town', 'location_city'],
+  state: ['state', 'province', 'region', 'location_state'],
+  country: ['country', 'nation', 'location_country'],
+  postal_code: ['postal_code', 'zip', 'zip_code', 'pincode', 'pin_code', 'location_zip'],
+  headline: ['headline', 'summary'],
+  seniority: ['seniority', 'seniority_level'],
+  referred_by: ['referred_by', 'referral'],
+  website: ['website', 'web', 'url', 'company_website'],
+  linkedin_url: ['linkedin_url', 'linkedin', 'linkedin_profile'],
+  twitter_url: ['twitter_url', 'twitter', 'x_url'],
+  notes: ['notes', 'note', 'comments', 'remarks'],
+};
+
+const CONTACTS_MAPPING_SYSTEM_PROMPT =
+  'You map the columns of an uploaded B2B contact spreadsheet onto a fixed set of canonical CRM contact fields. ' +
+  'You are given the list of canonical fields (with descriptions), the uploaded file\'s column headers, and a few sample rows. ' +
+  'For each canonical field you are CONFIDENT about, return which uploaded header supplies it. Only map a field when the header name and/or the sample values clearly support it; leave uncertain fields out rather than guessing. ' +
+  'Use the special field name "full_name" if a single column holds a person\'s complete name (first and last together). ' +
+  'Ignore columns that do not correspond to any canonical field. ' +
+  'Set "reject" to true ONLY if the file is fundamentally unusable — e.g. it is clearly not a contact list, the columns are unintelligible, or two different columns both appear to be the same critical field in a way you cannot resolve. ' +
+  'Respond with ONLY JSON of the exact shape {"mapping": {"<canonical_field_or_full_name>": "<exact uploaded header text>", ...}, "reject": <true|false>, "reject_reason": "<short reason or empty>"} and no prose.';
+
+const CONTACTS_NO_IDENTITY_MESSAGE =
+  'The file has no name, email, or phone column we could recognise, so its records can\'t be identified. ' +
+  'Please make sure it includes at least a name, an email, or a phone number and upload again.';
+
+export async function buildContactsMapping(rawHeaders: string[], sampleRows: string[][]): Promise<FerventMappingResult> {
+  return buildSmartMapping(CONTACTS_CANONICAL_FIELDS, CONTACTS_SYNONYMS, CONTACTS_IDENTITY_FIELDS, rawHeaders, sampleRows, CONTACTS_MAPPING_SYSTEM_PROMPT, CONTACTS_NO_IDENTITY_MESSAGE);
+}
+
+// Contacts equivalent of applyFerventMapping: same full-name-split and
+// name-from-email derivation, targeted at the contacts row shape.
+export function applyContactsMapping(values: string[], mapping: FerventMapping): Record<string, string> {
+  const row: Record<string, string> = {};
+  for (const [field, idx] of Object.entries(mapping.fieldToIndex)) {
+    row[field] = (values[idx] ?? '').trim();
+  }
+
+  if (mapping.fullNameIndex !== null && !row.first_name && !row.last_name) {
+    const full = (values[mapping.fullNameIndex] ?? '').trim();
+    if (full) {
+      const { first, last } = splitFullName(full);
+      row.first_name = first;
+      row.last_name = last;
+    }
+  }
+
+  if (!row.first_name && !row.last_name && row.email) {
+    const derived = nameFromEmail(row.email);
+    if (derived) {
+      row.first_name = derived.first;
+      row.last_name = derived.last;
+    }
+  }
+
+  return row;
+}
+
+// A contacts row is unsalvageable only when there's no name, email, or phone.
+export function isContactsSalvageable(row: Record<string, string>): { ok: boolean; reason: string } {
+  const hasName = !!(row.first_name || row.last_name);
+  const hasEmail = !!row.email;
+  const hasPhone = !!row.phone;
+  if (hasName || hasEmail || hasPhone) return { ok: true, reason: '' };
+  return { ok: false, reason: 'No name, email, or phone number to identify this record' };
 }
 
 // --- Per-row application + derivation --------------------------------------
