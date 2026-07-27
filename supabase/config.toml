@@ -130,6 +130,12 @@ verify_jwt = false
 [functions.verify-otp]
 verify_jwt = false
 
+[functions.request-password-otp]
+verify_jwt = false
+
+[functions.reset-password-with-otp]
+verify_jwt = false
+
 [functions.ai-bolna-webhook]
 verify_jwt = false
 
