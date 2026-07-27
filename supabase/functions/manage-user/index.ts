@@ -79,13 +79,14 @@ serve(async (req) => {
     // Handle Create new user (POST without action='update', or action='create')
     if (action !== 'update') {
       const { 
-        email, 
-        password, 
-        first_name, 
-        last_name, 
-        role, 
-        phone, 
+        email,
+        password,
+        first_name,
+        last_name,
+        role,
+        phone,
         designation_id,
+        reports_to_user_id,
         calling_enabled,
         whatsapp_enabled,
         email_enabled,
@@ -109,7 +110,21 @@ serve(async (req) => {
         });
       }
 
-      console.log('Creating user with data:', { email, first_name, last_name, role, phone, designation_id });
+      if (reports_to_user_id) {
+        const { data: managerProfile } = await supabaseAdmin
+          .from('profiles')
+          .select('org_id')
+          .eq('id', reports_to_user_id)
+          .single();
+        if (!managerProfile || managerProfile.org_id !== requestingUserOrgId) {
+          return new Response(JSON.stringify({ error: 'Reports-to user must belong to the same organization' }), {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+      }
+
+      console.log('Creating user with data:', { email, first_name, last_name, role, phone, designation_id, reports_to_user_id });
 
       // Create auth user
       const { data: newUser, error: createError } = await supabaseAdmin.auth.admin.createUser({
@@ -140,6 +155,7 @@ serve(async (req) => {
           org_id: requestingUserOrgId,
           phone: phone || null,
           designation_id: designation_id || null,
+          reports_to_user_id: reports_to_user_id || null,
           calling_enabled: calling_enabled || false,
           whatsapp_enabled: whatsapp_enabled || false,
           email_enabled: email_enabled || false,
@@ -186,13 +202,14 @@ serve(async (req) => {
 
     // Handle Update existing user
     if (action === 'update') {
-      const { 
-        userId, 
-        first_name, 
-        last_name, 
-        role, 
-        phone, 
+      const {
+        userId,
+        first_name,
+        last_name,
+        role,
+        phone,
         designation_id,
+        reports_to_user_id,
         calling_enabled,
         whatsapp_enabled,
         email_enabled,
@@ -208,7 +225,14 @@ serve(async (req) => {
         });
       }
 
-      console.log('Updating user:', userId, 'with data:', { first_name, last_name, role, phone, designation_id });
+      if (reports_to_user_id === userId) {
+        return new Response(JSON.stringify({ error: 'A user cannot report to themselves' }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      console.log('Updating user:', userId, 'with data:', { first_name, last_name, role, phone, designation_id, reports_to_user_id });
 
       // Verify target user belongs to same org
       const { data: targetProfile, error: targetProfileError } = await supabaseAdmin
@@ -225,6 +249,20 @@ serve(async (req) => {
         });
       }
 
+      if (reports_to_user_id) {
+        const { data: managerProfile } = await supabaseAdmin
+          .from('profiles')
+          .select('org_id')
+          .eq('id', reports_to_user_id)
+          .single();
+        if (!managerProfile || managerProfile.org_id !== requestingUserOrgId) {
+          return new Response(JSON.stringify({ error: 'Reports-to user must belong to the same organization' }), {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+      }
+
       // Update profile
       const { error: profileUpdateError } = await supabaseAdmin
         .from('profiles')
@@ -233,6 +271,7 @@ serve(async (req) => {
           last_name,
           phone: phone || null,
           designation_id: designation_id || null,
+          reports_to_user_id: reports_to_user_id || null,
           calling_enabled: calling_enabled ?? false,
           whatsapp_enabled: whatsapp_enabled ?? false,
           email_enabled: email_enabled ?? false,
