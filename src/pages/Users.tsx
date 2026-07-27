@@ -32,6 +32,7 @@ interface Profile {
   email_enabled: boolean;
   sms_enabled: boolean;
   designation_id: string | null;
+  reports_to_user_id: string | null;
 }
 
 interface UserRole {
@@ -64,6 +65,7 @@ type UserFormData = {
   email_enabled: boolean;
   sms_enabled: boolean;
   designation_id: string | null;
+  reports_to_user_id: string | null;
 };
 
 const initialFormData: UserFormData = {
@@ -78,6 +80,7 @@ const initialFormData: UserFormData = {
   email_enabled: false,
   sms_enabled: false,
   designation_id: null,
+  reports_to_user_id: null,
 };
 
 async function ensureBillingOkForUserAdd(
@@ -182,6 +185,7 @@ export default function Users() {
           email_enabled, 
           sms_enabled,
           designation_id,
+          reports_to_user_id,
           designations(id, name)
         `)
         .in("id", userIds);
@@ -200,6 +204,7 @@ export default function Users() {
           email_enabled: false,
           sms_enabled: false,
           designation_id: null,
+          reports_to_user_id: null,
           designations: null
         }
       })) || [];
@@ -256,6 +261,7 @@ export default function Users() {
             role: dialog.formData.role,
             phone: dialog.formData.phone,
             designation_id: dialog.formData.designation_id,
+            reports_to_user_id: dialog.formData.reports_to_user_id,
             calling_enabled: dialog.formData.calling_enabled,
             whatsapp_enabled: dialog.formData.whatsapp_enabled,
             email_enabled: dialog.formData.email_enabled,
@@ -279,6 +285,7 @@ export default function Users() {
             role: dialog.formData.role,
             phone: dialog.formData.phone,
             designation_id: dialog.formData.designation_id,
+            reports_to_user_id: dialog.formData.reports_to_user_id,
             calling_enabled: dialog.formData.calling_enabled,
             whatsapp_enabled: dialog.formData.whatsapp_enabled,
             email_enabled: dialog.formData.email_enabled,
@@ -370,9 +377,10 @@ export default function Users() {
         phone, 
         calling_enabled, 
         whatsapp_enabled, 
-        email_enabled, 
+        email_enabled,
         sms_enabled,
-        designation_id
+        designation_id,
+        reports_to_user_id
       `)
       .eq("id", user.user_id)
       .single();
@@ -390,6 +398,7 @@ export default function Users() {
       email_enabled: freshProfile?.email_enabled ?? user.profiles.email_enabled ?? false,
       sms_enabled: freshProfile?.sms_enabled ?? user.profiles.sms_enabled ?? false,
       designation_id: freshProfile?.designation_id ?? user.profiles.designation_id ?? null,
+      reports_to_user_id: freshProfile?.reports_to_user_id ?? user.profiles.reports_to_user_id ?? null,
     });
   };
 
@@ -604,6 +613,27 @@ export default function Users() {
                     </div>
 
                     <div className="space-y-2">
+                      <Label htmlFor="reports_to">Reports To</Label>
+                      <Select
+                        value={dialog.formData.reports_to_user_id || undefined}
+                        onValueChange={(value) => dialog.updateFormData({ reports_to_user_id: value || null })}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select manager (optional)" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {users
+                            .filter((u) => u.user_id !== dialog.editingItem?.user_id)
+                            .map((u) => (
+                              <SelectItem key={u.user_id} value={u.user_id}>
+                                {u.profiles.first_name} {u.profiles.last_name}
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
                       <Label htmlFor="role">Role *</Label>
                       <Select 
                         value={dialog.formData.role} 
@@ -732,6 +762,7 @@ export default function Users() {
                   <TableRow>
                     <TableHead className="py-2 text-xs">Name</TableHead>
                     <TableHead className="py-2 text-xs">Designation</TableHead>
+                    <TableHead className="py-2 text-xs">Reports To</TableHead>
                     <TableHead className="py-2 text-xs">Contact</TableHead>
                     <TableHead className="py-2 text-xs">Communication</TableHead>
                     <TableHead className="py-2 text-xs">Role</TableHead>
@@ -746,6 +777,12 @@ export default function Users() {
                       </TableCell>
                       <TableCell className="py-1.5 text-xs">
                         {user.profiles.designations?.name || "-"}
+                      </TableCell>
+                      <TableCell className="py-1.5 text-xs">
+                        {(() => {
+                          const manager = users.find((u) => u.user_id === user.profiles.reports_to_user_id);
+                          return manager ? `${manager.profiles.first_name} ${manager.profiles.last_name}` : "-";
+                        })()}
                       </TableCell>
                       <TableCell className="py-1.5">
                         <div className="flex flex-col gap-1 text-xs">
