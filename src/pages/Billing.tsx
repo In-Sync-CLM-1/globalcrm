@@ -7,6 +7,7 @@ import { useNotification } from "@/hooks/useNotification";
 import { LoadingState } from "@/components/common/LoadingState";
 import { TopUpWalletDialog } from "@/components/Subscription/TopUpWalletDialog";
 import { ManualPaymentDetails } from "@/components/Subscription/ManualPaymentDetails";
+import { RazorpayPayNowButton } from "@/components/Subscription/RazorpayPayNowButton";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -186,9 +187,12 @@ export default function Billing() {
   return (
     <DashboardLayout>
       <div className="mx-auto max-w-5xl space-y-5">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Billing</h1>
-          <p className="text-sm text-muted-foreground">Your subscription, wallet, and usage in one place.</p>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">Billing</h1>
+            <p className="text-sm text-muted-foreground">Your subscription, wallet, and usage in one place.</p>
+          </div>
+          <RazorpayPayNowButton />
         </div>
 
         {/* Snapshot */}
