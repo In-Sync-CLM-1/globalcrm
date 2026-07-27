@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { getSupabaseClient } from '../_shared/supabaseClient.ts';
 import { logEdgeError, logStep, logBatchProgress, logValidationError } from '../_shared/errorLogger.ts';
 import { normalizeEmployeeSize, parseTurnoverUsdMillion, formatTurnoverUsdMillion } from '../_shared/ferventFieldNormalization.ts';
-import { buildFerventMapping, applyFerventMapping, isSalvageable } from '../_shared/ferventSmartMapping.ts';
+import { buildFerventMapping, applyFerventMapping, isSalvageable, buildContactsMapping, applyContactsMapping, isContactsSalvageable, type FerventMapping } from '../_shared/ferventSmartMapping.ts';
 
 const OPERATION_TIMEOUT = 20 * 60 * 1000; // 20 minutes
 const MAX_RETRIES = 3;
@@ -162,7 +162,8 @@ serve(async (req) => {
       file_size_kb: fileSizeKB
     });
 
-    const headers = parseCSVLine(lines[0]).map(h => normalizeHeader(h));
+    const rawHeadersOriginal = parseCSVLine(lines[0]);
+    const headers = rawHeadersOriginal.map(h => normalizeHeader(h));
     console.log('[PARSE] Headers detected:', headers);
 
     // Validate org for fervent_repository ONCE before processing
@@ -185,11 +186,39 @@ serve(async (req) => {
       return await runFerventSmartImport(supabase, importJob, lines, fileSizeKB, startTime);
     }
 
+    // Orgs opted into AI-assisted column mapping (organizations.smart_import_enabled)
+    // skip the exact-header requirement for contacts uploads: whatever layout the
+    // file arrived in gets mapped onto the contacts schema the same way Fervent's
+    // repository uploads are mapped.
+    let contactsMapping: FerventMapping | undefined;
+    if (importJob.import_type === 'contacts') {
+      const { data: org } = await supabase
+        .from('organizations')
+        .select('smart_import_enabled')
+        .eq('id', importJob.org_id)
+        .single();
+
+      if (org?.smart_import_enabled) {
+        const sampleRows: string[][] = [];
+        for (let i = 1; i < lines.length && sampleRows.length < 15; i++) {
+          const l = lines[i].trim();
+          if (l) sampleRows.push(parseCSVLine(l));
+        }
+        await updateJobStage(supabase, importJobId, 'validating', { message: 'Understanding your file…', file_size_kb: fileSizeKB });
+        const mapResult = await buildContactsMapping(rawHeadersOriginal, sampleRows);
+        if (mapResult.reject || !mapResult.mapping) {
+          throw new Error(mapResult.rejectReason || 'The file could not be understood as a contact list.');
+        }
+        console.log('[SMART-MAP] contacts resolved columns:', mapResult.resolved, 'ai:', mapResult.usedAi);
+        contactsMapping = mapResult.mapping;
+      }
+    }
+
     // Validate required columns based on import type
     let requiredColumns: string[];
     switch (importJob.import_type) {
       case 'contacts':
-        requiredColumns = ['first_name', 'email'];
+        requiredColumns = contactsMapping ? [] : ['first_name', 'email'];
         break;
       case 'fervent_repository':
         requiredColumns = ['first_name'];
@@ -270,10 +299,18 @@ serve(async (req) => {
 
       try {
         const values = parseCSVLine(line);
-        const row: any = {};
-        headers.forEach((header, idx) => {
-          row[header] = values[idx] || '';
-        });
+        const row: any = contactsMapping
+          ? applyContactsMapping(values, contactsMapping)
+          : {};
+        if (!contactsMapping) {
+          headers.forEach((header, idx) => {
+            row[header] = values[idx] || '';
+          });
+        } else if (!isContactsSalvageable(row).ok) {
+          errorCount++;
+          errors.push({ row: currentRowNumber, message: 'No name, email, or phone number to identify this record' });
+          continue;
+        }
 
         // Map to target table structure
         let record: any;
