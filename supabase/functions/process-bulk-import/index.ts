@@ -640,18 +640,30 @@ async function processBatch(
 
 // =============================================================================
 // FERVENT REPOSITORY: Unique ID match/update, plus AI-assisted duplicate
-// containment for rows that arrive with no Unique ID (uploads are distributed
-// across sources, so the same person routinely re-appears with a different or
-// missing Unique ID). See supabase/migrations/20260710120000_fervent_ai_dedupe.sql.
+// containment for every row whose Unique ID doesn't already exist here
+// (uploads are distributed across sources, so the same person routinely
+// re-appears with a different or missing Unique ID). See
+// supabase/migrations/20260710120000_fervent_ai_dedupe.sql.
 //
-//   1. Unique ID matches an existing record for this org -> UPDATE it.
-//   2. No Unique ID -> containment before insert:
-//      a. exact phone/email overlap with an existing record -> merge into it.
+//   1. Unique ID matches an EXISTING record for this org -> UPDATE it. An ID
+//      collision with a real record is definitive; no containment needed.
+//   2. Unique ID missing, OR present but not seen before for this org ->
+//      containment before insert. A row can carry a perfectly valid ID from
+//      its own source and still be a different-source re-appearance of
+//      someone already here under another ID, so a fresh ID alone doesn't
+//      clear it:
+//      a. exact phone/email overlap with an existing record -> merge into
+//         it. The record keeps its OWN existing Unique ID; whatever ID the
+//         incoming row carried is dropped.
 //      b. same normalised full name, no contact overlap -> Groq verifies
-//         "same person?" from company/designation/location context.
-//      c. no match at all, or AI says different person -> stays new.
-//   3. Rows still new after containment, plus duplicates of each other within
-//      the same file, get a system-assigned FERVENT-nnnnnn Unique ID.
+//         "same person?" from company/designation/location context. Every
+//         row AI confirms merges into its target, however many incoming
+//         rows in this batch land on the same one.
+//      c. no match at all, or AI says different person -> stays new,
+//         keeping whatever Unique ID it arrived with (system-assigned
+//         FERVENT-nnnnnn only if it had none).
+//   3. Rows still new after containment, plus duplicates of each other
+//      within the same file, get folded together before insert.
 //
 // Merge semantics: incoming non-empty values overwrite the existing ones;
 // empty cells never blank out data already on the record.
@@ -660,6 +672,12 @@ async function processBatch(
 const GROQ_MODEL = 'llama-3.3-70b-versatile';
 const HAIKU_MODEL = 'claude-haiku-4-5';
 
+// Sub-8-digit values (checked live 2026-07-27: 15 of 21,795 rows, mostly bare
+// extensions) are dropped rather than matched on: they aren't unique on their
+// own — std_code is populated on only 9 rows repo-wide, so there's no reliable
+// prefix to combine them with — and matching on a short shared suffix would
+// risk merging different people, the opposite failure from what this exists
+// to prevent. Those rows still import fine; they just rely on the name tier.
 function normPhone(v: any): string | null {
   if (!v) return null;
   const digits = String(v).replace(/\D/g, '');
@@ -835,10 +853,9 @@ async function processFerventBatch(
   const duplicateSamples: Array<{ matched_on: string; value: string }> = [];
   const dbErrorSamples: Array<{ row?: number; field?: string; message: string; sample?: string }> = [];
 
-  // Rows carrying a Unique ID go through the existing ON CONFLICT upsert. A
-  // single upsert can't touch the same conflict key twice, so if the same
+  // A single upsert can't touch the same conflict key twice, so if the same
   // Unique ID appears more than once in this batch, keep only the last
-  // occurrence (latest upload wins).
+  // occurrence (latest upload wins) before we even ask which IDs are real.
   const withUid: any[] = [];
   const withoutUid: any[] = [];
   for (const record of rawBatch) {
@@ -848,14 +865,41 @@ async function processFerventBatch(
   const lastIndexForId = new Map<string, number>();
   withUid.forEach((r, idx) => lastIndexForId.set(r.unique_id, idx));
   const dedupedWithUid = withUid.filter((r, idx) => lastIndexForId.get(r.unique_id) === idx);
-  let inBatchCollisions = withUid.length - dedupedWithUid.length;
+  const inBatchCollisions = withUid.length - dedupedWithUid.length;
 
-  // --- Duplicate containment for rows with no Unique ID ---
+  // A Unique ID only earns the fast "definitely an update" path if it
+  // already belongs to a record here. Anything else — no ID, or an ID we've
+  // never seen for this org — still has to prove it isn't the same person
+  // arriving under a different source's numbering, so it goes through
+  // containment below rather than being trusted blind.
+  let knownExisting: any[] = [];
+  let newIdCandidates: any[] = [];
+  if (dedupedWithUid.length > 0) {
+    const uidValues = dedupedWithUid.map(r => r.unique_id);
+    const { data: existingRows, error: existingErr } = await supabase
+      .from('fervent_data_repository')
+      .select('unique_id')
+      .eq('org_id', importJob.org_id)
+      .in('unique_id', uidValues);
+    if (existingErr) {
+      console.error('[AI-DEDUPE] existing unique_id lookup failed, treating all Unique IDs as new (safer: over-check than skip containment):', existingErr);
+      newIdCandidates = dedupedWithUid;
+    } else {
+      const existingSet = new Set((existingRows || []).map((r: any) => r.unique_id));
+      for (const r of dedupedWithUid) {
+        if (existingSet.has(r.unique_id)) knownExisting.push(r); else newIdCandidates.push(r);
+      }
+    }
+  }
+
+  // --- Duplicate containment: every row with no proven Unique ID, whether
+  // it arrived with none or with one this org has never seen before ---
   const mergesByTarget = new Map<string, { target_id: string; record: any }>();
   const newRows: any[] = [];
+  const toContain = [...withoutUid, ...newIdCandidates];
 
-  if (withoutUid.length > 0) {
-    const candidateInput = withoutUid.map((r, idx) => ({
+  if (toContain.length > 0) {
+    const candidateInput = toContain.map((r, idx) => ({
       idx,
       first_name: r.first_name,
       last_name: r.last_name,
@@ -880,20 +924,18 @@ async function processFerventBatch(
       byIdx.get(c.incoming_idx)!.push(c);
     }
 
-    const claimedTargets = new Set<string>();
     const nameOnlyChecks: Array<{ idx: number; incoming: any; candidate: any }> = [];
 
-    withoutUid.forEach((record, idx) => {
+    toContain.forEach((record, idx) => {
       const cands = byIdx.get(idx) || [];
-      // A shared phone or email IS the same person, so several rows in one file
-      // may legitimately fold into the same existing record — the accumulate
-      // below is written for exactly that. Skipping already-claimed targets
-      // here meant only the first row merged and every later one was inserted
-      // as a fresh duplicate. The name tier below still respects the claim,
-      // since a shared name is much weaker evidence.
+      // A shared phone or email IS the same person, so several rows in one
+      // file may legitimately fold into the same existing record — the
+      // accumulate below is written for exactly that (previously only the
+      // first such row merged and every later one was inserted as a fresh
+      // duplicate). Merging drops whatever Unique ID this row carried; the
+      // existing target's own ID is authoritative.
       const strong = cands.find((c: any) => c.match_type === 'phone' || c.match_type === 'email');
       if (strong) {
-        claimedTargets.add(strong.existing_record.id);
         const existingEntry = mergesByTarget.get(strong.existing_record.id);
         mergesByTarget.set(strong.existing_record.id, {
           target_id: strong.existing_record.id,
@@ -901,7 +943,11 @@ async function processFerventBatch(
         });
         return;
       }
-      const nameMatch = cands.find((c: any) => c.match_type === 'name' && !claimedTargets.has(c.existing_record.id));
+      // Every name-tier candidate gets a chance at AI verification — none are
+      // skipped for landing on a target another row already claimed. Which
+      // row happens to be processed first in this loop isn't evidence of
+      // anything, so it shouldn't be what decides who gets checked.
+      const nameMatch = cands.find((c: any) => c.match_type === 'name');
       if (nameMatch) {
         nameOnlyChecks.push({ idx, incoming: record, candidate: nameMatch.existing_record });
         return;
@@ -912,9 +958,12 @@ async function processFerventBatch(
     if (nameOnlyChecks.length > 0) {
       const confirmed = await verifySamePersonBatch(nameOnlyChecks);
       for (const check of nameOnlyChecks) {
-        const targetId = check.candidate.id;
-        if (confirmed.has(check.idx) && !claimedTargets.has(targetId)) {
-          claimedTargets.add(targetId);
+        if (confirmed.has(check.idx)) {
+          // AI confirming two different incoming rows are the same target is
+          // exactly as valid the second time as the first — accumulate both
+          // rather than letting whichever was checked first win the merge
+          // and demoting the other to a fresh duplicate.
+          const targetId = check.candidate.id;
           const existingEntry = mergesByTarget.get(targetId);
           mergesByTarget.set(targetId, {
             target_id: targetId,
@@ -929,12 +978,15 @@ async function processFerventBatch(
 
   // Same person appearing twice in one file, neither instance already in the
   // DB: fold the later row into the earliest one (phone/email exact only —
-  // no AI call for this tier, it's just intra-file hygiene).
+  // no AI call for this tier, it's just intra-file hygiene). If the earlier
+  // row had no Unique ID of its own but the one folding into it did, keep
+  // that ID rather than losing it to a system-generated one later.
   const foldedNew: any[] = [];
   let foldedCount = 0;
   for (const record of newRows) {
     const matchIdx = foldedNew.findIndex(existing => sameContact(existing, record));
     if (matchIdx >= 0) {
+      if (!foldedNew[matchIdx].unique_id && record.unique_id) foldedNew[matchIdx].unique_id = record.unique_id;
       foldedNew[matchIdx] = mergeNonEmpty(foldedNew[matchIdx], record);
       foldedCount++;
       if (duplicateSamples.length < 20) duplicateSamples.push({ matched_on: 'same file', value: displayName(record) });
@@ -959,47 +1011,29 @@ async function processFerventBatch(
     }
   }
 
-  // Genuinely new rows get a system-assigned Unique ID, then flow through the
-  // same ON CONFLICT upsert as rows that arrived with one.
-  if (foldedNew.length > 0) {
-    const { data: newIds, error: idErr } = await supabase.rpc('generate_fervent_unique_ids', {
-      p_org_id: importJob.org_id,
-      p_count: foldedNew.length,
-    });
-    if (idErr || !newIds || newIds.length !== foldedNew.length) {
-      console.error('[AI-DEDUPE] generate_fervent_unique_ids failed:', idErr);
-      foldedNew.forEach((rec: any) => {
-        dbErrorSamples.push({ field: 'unique_id', message: idErr?.message || 'id generation failed', sample: displayName(rec) });
-      });
-    } else {
-      foldedNew.forEach((record, i) => { record.unique_id = newIds[i]; });
-      dedupedWithUid.push(...foldedNew);
-    }
-  }
-
   let insertedCount = 0;
   let updatedCount = 0;
   let dbErrorCount = 0;
 
-  if (dedupedWithUid.length > 0) {
+  // Rows already known to be an update (Unique ID matched an existing record
+  // for this org) carry no duplicate-creation risk — two jobs updating the
+  // same row concurrently is an ordinary, safe UPDATE race, not a new-row
+  // race — so this path is unchanged: straight to the upsert.
+  if (knownExisting.length > 0) {
     const { data: upsertResult, error: upsertError } = await supabase.rpc('upsert_fervent_repository_batch', {
       p_org_id: importJob.org_id,
       p_created_by: importJob.user_id,
       p_import_job_id: importJob.id,
-      p_records: dedupedWithUid,
+      p_records: knownExisting,
     });
 
     if (!upsertError) {
       const row = Array.isArray(upsertResult) ? upsertResult[0] : upsertResult;
-      insertedCount = row?.inserted_count ?? 0;
-      updatedCount = row?.updated_count ?? 0;
+      insertedCount += row?.inserted_count ?? 0;
+      updatedCount += row?.updated_count ?? 0;
     } else {
-      // The whole-batch upsert failed — most likely one bad row in this
-      // batch (e.g. a value Postgres can't cast). Don't let that take the
-      // rest of the batch down with it: retry one row at a time and only
-      // exclude the row(s) that actually fail.
-      console.error(`[DB] Batch ${batchNumber} upsert failed as a whole, retrying row-by-row:`, upsertError);
-      for (const rec of dedupedWithUid) {
+      console.error(`[DB] Batch ${batchNumber} known-existing upsert failed as a whole, retrying row-by-row:`, upsertError);
+      for (const rec of knownExisting) {
         const { data: rowResult, error: rowError } = await supabase.rpc('upsert_fervent_repository_batch', {
           p_org_id: importJob.org_id,
           p_created_by: importJob.user_id,
@@ -1008,9 +1042,7 @@ async function processFerventBatch(
         });
         if (rowError) {
           dbErrorCount++;
-          if (dbErrorSamples.length < 20) {
-            dbErrorSamples.push({ field: 'unique_id', message: rowError.message, sample: String(rec.unique_id ?? '') });
-          }
+          if (dbErrorSamples.length < 20) dbErrorSamples.push({ field: 'unique_id', message: rowError.message, sample: String(rec.unique_id ?? '') });
           continue;
         }
         const rowRow = Array.isArray(rowResult) ? rowResult[0] : rowResult;
@@ -1020,10 +1052,49 @@ async function processFerventBatch(
     }
   }
 
-  updatedCount += mergedCount;
+  // Rows believed genuinely new are the ones a concurrent job could also be
+  // inserting right now for the same person — claim_fervent_new_rows holds
+  // an org-scoped lock and re-checks each one against the DB before it
+  // actually writes, so a duplicate can't land even if this read is stale.
+  // See supabase/migrations/20260727120000_fervent_containment_race_lock.sql.
+  let claimMergedCount = 0;
+  if (foldedNew.length > 0) {
+    const claimInput = foldedNew.map((r, idx) => ({ ...r, idx }));
+    const { data: claimResult, error: claimErr } = await supabase.rpc('claim_fervent_new_rows', {
+      p_org_id: importJob.org_id,
+      p_import_job_id: importJob.id,
+      p_created_by: importJob.user_id,
+      p_records: claimInput,
+    });
+
+    if (!claimErr) {
+      for (const r of claimResult || []) {
+        if (r.outcome === 'merged') claimMergedCount++; else if (r.outcome === 'inserted') insertedCount++;
+      }
+    } else {
+      console.error(`[DB] Batch ${batchNumber} claim_fervent_new_rows failed as a whole, retrying row-by-row:`, claimErr);
+      for (const rec of foldedNew) {
+        const { data: rowResult, error: rowError } = await supabase.rpc('claim_fervent_new_rows', {
+          p_org_id: importJob.org_id,
+          p_import_job_id: importJob.id,
+          p_created_by: importJob.user_id,
+          p_records: [{ ...rec, idx: 0 }],
+        });
+        if (rowError) {
+          dbErrorCount++;
+          if (dbErrorSamples.length < 20) dbErrorSamples.push({ field: 'unique_id', message: rowError.message, sample: String(rec.unique_id ?? displayName(rec)) });
+          continue;
+        }
+        const outcome = Array.isArray(rowResult) ? rowResult[0]?.outcome : undefined;
+        if (outcome === 'merged') claimMergedCount++; else if (outcome === 'inserted') insertedCount++;
+      }
+    }
+  }
+
+  updatedCount += mergedCount + claimMergedCount;
   const skippedCount = inBatchCollisions + foldedCount;
 
-  console.log(`[DB] Fervent batch ${batchNumber}: ${insertedCount} inserted, ${updatedCount} updated (${mergedCount} via AI containment merge), ${skippedCount} folded/collided in-file, ${dbErrorCount} row errors`);
+  console.log(`[DB] Fervent batch ${batchNumber}: ${insertedCount} inserted, ${updatedCount} updated (${mergedCount + claimMergedCount} via AI containment merge), ${skippedCount} folded/collided in-file, ${dbErrorCount} row errors`);
   return { inserted: insertedCount, updated: updatedCount, skipped: skippedCount, dbErrors: dbErrorCount, duplicateSamples, dbErrorSamples };
 }
 
