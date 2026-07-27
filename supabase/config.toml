@@ -166,6 +166,14 @@ verify_jwt = false
 [functions.send-post-call-message]
 verify_jwt = false
 
+# External payment webhook — Razorpay POSTs with no Supabase JWT, so the
+# gateway was 401ing every event before it reached the function's own
+# x-razorpay-signature check. Public like every other external webhook
+# (whatsapp-webhook, exotel-webhook, resend); the signature check is what
+# actually authenticates the caller.
+[functions.razorpay-webhook]
+verify_jwt = false
+
 
 # Suggests likely spellings for beneficiary names damaged by a bad CSV encoding.
 # Called from the authenticated IEDUP upload preview, so the gateway JWT check
