@@ -160,3 +160,9 @@ verify_jwt = false
 [functions.send-post-call-message]
 verify_jwt = false
 
+
+# Suggests likely spellings for beneficiary names damaged by a bad CSV encoding.
+# Called from the authenticated IEDUP upload preview, so the gateway JWT check
+# stays on — suggestions are only ever shown to a signed-in human for approval.
+[functions.suggest-name-fix]
+verify_jwt = true

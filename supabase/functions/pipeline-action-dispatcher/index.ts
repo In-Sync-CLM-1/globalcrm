@@ -34,10 +34,11 @@ const WA_SEND_CONCURRENCY = 12;
 const WHATSAPP_UTILITY_COST_PER_MSG = 0.20;
 const WHATSAPP_MARKETING_COST_PER_MSG = 1.00;
 // Templates Meta classifies as MARKETING (charged at the marketing rate).
-// Kept empty by policy: IEDUP now runs UTILITY-only templates (the old MARKETING
-// versions — registration_steps_v2, training_helpdesk_v2, training_link_v4 —
-// have been retired/deleted in favour of their utility v3/v5/v6 replacements).
-const MARKETING_TEMPLATES = new Set<string>([]);
+// Everything else is UTILITY-only by policy. iedup_ramp_round1_selection_v1 is
+// the one deliberate exception — a rich RAMP Round 1 selection broadcast Meta
+// approved as MARKETING (2026-07-26); its plain UTILITY twin is
+// iedup_round1_selected_v1, wired separately and billed at the utility rate.
+const MARKETING_TEMPLATES = new Set<string>(["iedup_ramp_round1_selection_v1"]);
 function waCostFor(templateName: string | null): number {
   return templateName && MARKETING_TEMPLATES.has(templateName)
     ? WHATSAPP_MARKETING_COST_PER_MSG
