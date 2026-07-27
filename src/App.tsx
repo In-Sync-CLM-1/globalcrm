@@ -25,7 +25,6 @@ function lazyRetry(fn: () => Promise<any>) {
 // Static imports - public/auth pages only
 import Login from "./pages/Login";
 import SignUp from "./pages/SignUp";
-import ResetPassword from "./pages/ResetPassword";
 import PublicForm from "./pages/PublicForm";
 import ProtectedRoute from "./components/Auth/ProtectedRoute";
 import LandingPage from "./pages/LandingPage";
@@ -113,7 +112,6 @@ const App = () => (
           <Route path="/" element={<LandingPage />} />
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<SignUp />} />
-          <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/install" element={<Install />} />
           <Route path="/demo" element={<Demo />} />
           <Route path="/landing-demo" element={<LandingDemo />} />
