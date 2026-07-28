@@ -96,6 +96,15 @@ const IEDUP_ACTIONS = [
 
 const CSV_TEMPLATE = `name,number,action\nVibhu Dixit,+917607359820,Call\n`;
 
+// Splits an action like "Send WhatsApp - Assessment Link" into its channel
+// ("WhatsApp") and detail ("Assessment Link") for the two-column display.
+function splitAction(action?: string | null): { channel: string; detail: string | null } {
+  if (!action) return { channel: "", detail: null };
+  const match = action.match(/^Send (\w+) - (.+)$/);
+  if (match) return { channel: match[1], detail: match[2] };
+  return { channel: action, detail: null };
+}
+
 // A beneficiary name should only ever be English letters, Devanagari, or the
 // punctuation that shows up in real names. Anything else means the file lost
 // its characters on the way here — the usual cause is Excel saving as plain
@@ -859,7 +868,8 @@ export default function IedupPipeline() {
                       <TableHead>Name (EN)</TableHead>
                       <TableHead>Name (HI)</TableHead>
                       <TableHead>Number</TableHead>
-                      <TableHead>Action</TableHead>
+                      <TableHead>Channel</TableHead>
+                      <TableHead>Detail</TableHead>
                       <TableHead>Uploaded</TableHead>
                       <TableHead>Disposition</TableHead>
                       <TableHead>Last call</TableHead>
@@ -886,10 +896,13 @@ export default function IedupPipeline() {
                           <TableCell className="font-mono text-sm">{b.phone}</TableCell>
                           <TableCell>
                             {b.action ? (
-                              <Badge variant="outline" className="whitespace-nowrap">{b.action}</Badge>
+                              <Badge variant="outline" className="whitespace-nowrap">{splitAction(b.action).channel}</Badge>
                             ) : (
                               <span className="text-xs text-muted-foreground">—</span>
                             )}
+                          </TableCell>
+                          <TableCell className="text-sm">
+                            {splitAction(b.action).detail ?? <span className="text-xs text-muted-foreground">—</span>}
                           </TableCell>
                           <TableCell className="text-xs text-muted-foreground">
                             {b.created_at ? new Date(b.created_at).toLocaleDateString() : "—"}
