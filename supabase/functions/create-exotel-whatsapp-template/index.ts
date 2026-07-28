@@ -6,6 +6,12 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Platform-run products that send on the ONE shared Exotel WABA instead of
+// bringing their own Exotel account. Mirrors WA_SENDER_BY_ORG elsewhere.
+const SHARED_PLATFORM_WABA_ORGS = new Set<string>([
+  '6dcf4229-6902-4cd4-9c7f-2d6ed4a6045d', // IEDUP
+]);
+
 interface TemplateButton {
   type: string;
   text: string;
@@ -97,7 +103,11 @@ Deno.serve(async (req) => {
       throw new Error('Template name and body content are required');
     }
 
-    // Get Exotel settings
+    // Get Exotel settings — most orgs bring their own Exotel account. A
+    // small allow-list of platform-run products (IEDUP today) instead share
+    // the ONE platform Exotel/WABA account, held only in function secrets —
+    // never written into exotel_settings, which orgs can read their own row
+    // of, so the shared platform credentials never become client-visible.
     const { data: exotelSettings } = await supabaseClient
       .from('exotel_settings')
       .select('*')
@@ -106,14 +116,34 @@ Deno.serve(async (req) => {
       .eq('whatsapp_enabled', true)
       .single();
 
-    if (!exotelSettings) {
+    let waApiKey: string | null | undefined;
+    let waApiToken: string | null | undefined;
+    let waSubdomain: string | null | undefined;
+    let waAccountSid: string | null | undefined;
+    let wabaId: string | null | undefined;
+
+    if (exotelSettings?.waba_id) {
+      // WhatsApp may live on a different Exotel account than voice; prefer
+      // WhatsApp-specific creds with fallback to the voice creds.
+      waApiKey = exotelSettings.whatsapp_api_key || exotelSettings.api_key;
+      waApiToken = exotelSettings.whatsapp_api_token || exotelSettings.api_token;
+      waSubdomain = exotelSettings.whatsapp_subdomain || exotelSettings.subdomain;
+      waAccountSid = exotelSettings.whatsapp_account_sid || exotelSettings.account_sid;
+      wabaId = exotelSettings.waba_id;
+    } else if (SHARED_PLATFORM_WABA_ORGS.has(orgId)) {
+      waApiKey = Deno.env.get('EXOTEL_API_KEY');
+      waApiToken = Deno.env.get('EXOTEL_API_TOKEN');
+      waSubdomain = Deno.env.get('EXOTEL_SUBDOMAIN') || 'api.exotel.com';
+      waAccountSid = Deno.env.get('EXOTEL_SID');
+      wabaId = Deno.env.get('EXOTEL_WABA_ID');
+    } else {
       return new Response(
         JSON.stringify({ error: 'Exotel WhatsApp not configured. Please configure it in Exotel Settings.' }),
         { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    if (!exotelSettings.waba_id) {
+    if (!waApiKey || !waApiToken || !waSubdomain || !waAccountSid || !wabaId) {
       return new Response(
         JSON.stringify({ error: 'WABA ID not configured in Exotel Settings.' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -230,15 +260,8 @@ Deno.serve(async (req) => {
 
     console.log('Exotel payload:', JSON.stringify(exotelPayload, null, 2));
 
-    // WhatsApp may live on a different Exotel account than voice; prefer
-    // WhatsApp-specific creds with fallback to the voice creds.
-    const waApiKey = exotelSettings.whatsapp_api_key || exotelSettings.api_key;
-    const waApiToken = exotelSettings.whatsapp_api_token || exotelSettings.api_token;
-    const waSubdomain = exotelSettings.whatsapp_subdomain || exotelSettings.subdomain;
-    const waAccountSid = exotelSettings.whatsapp_account_sid || exotelSettings.account_sid;
-
     // Call Exotel API to create template
-    const exotelUrl = `https://${waApiKey}:${waApiToken}@${waSubdomain}/v2/accounts/${waAccountSid}/templates?waba_id=${exotelSettings.waba_id}`;
+    const exotelUrl = `https://${waApiKey}:${waApiToken}@${waSubdomain}/v2/accounts/${waAccountSid}/templates?waba_id=${wabaId}`;
 
     console.log('Calling Exotel API...');
 

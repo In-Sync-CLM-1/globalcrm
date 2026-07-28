@@ -12,7 +12,6 @@ import { useNotification } from "@/hooks/useNotification";
 import { supabase } from "@/integrations/supabase/client";
 import { ArrowLeft, Plus, Trash2, Upload } from "lucide-react";
 import { useOrgContext } from "@/hooks/useOrgContext";
-import { IEDUP_ORG_ID } from "@/hooks/useIsIedup";
 
 // Contact fields users can map variables to. Each entry has a sample
 // value that gets sent to Meta for template approval.
@@ -311,27 +310,6 @@ export default function TemplateBuilder() {
       </div>
     );
   };
-
-  // IEDUP sends WhatsApp on the shared platform WABA (not a per-org Exotel
-  // account), so this self-service submit path — which reads org-owned Exotel
-  // credentials — doesn't apply here. New IEDUP WhatsApp templates are filed
-  // directly against the shared account instead.
-  if (effectiveOrgId === IEDUP_ORG_ID) {
-    return (
-      <DashboardLayout>
-        <div className="max-w-lg mx-auto mt-12 text-center space-y-3">
-          <h1 className="text-xl font-semibold">New WhatsApp template</h1>
-          <p className="text-muted-foreground">
-            IEDUP's WhatsApp templates run on a shared account managed by In-Sync. To add a new one, contact In-Sync support with the message wording — this page doesn't apply here.
-          </p>
-          <Button variant="outline" onClick={() => navigate('/templates')}>
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to Templates
-          </Button>
-        </div>
-      </DashboardLayout>
-    );
-  }
 
   return (
     <DashboardLayout>
