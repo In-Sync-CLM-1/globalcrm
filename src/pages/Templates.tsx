@@ -79,7 +79,7 @@ const Templates = () => {
         .from("communication_templates")
         .select("*")
         .eq("org_id", effectiveOrgId)
-        .order("template_name");
+        .order("created_at", { ascending: false });
 
       if (error) throw error;
       return (data || []) as unknown as WhatsAppTemplate[];
