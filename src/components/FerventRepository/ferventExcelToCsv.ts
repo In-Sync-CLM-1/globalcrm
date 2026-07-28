@@ -86,8 +86,26 @@ export function workbookToCsv(sheets: { sheet: string; data: Row[] }[]): ExcelCo
  * rest of the import pipeline (preview, upload, backend parsing) keeps working
  * on CSV exactly as before.
  */
+/**
+ * Loads the Excel reader chunk, self-healing once if the build moved on
+ * since this tab was opened (stale chunk hash after a deploy).
+ */
+async function loadExcelReader() {
+  try {
+    return await import("read-excel-file/browser");
+  } catch {
+    const key = "ferven_excel_chunk_reload";
+    if (!sessionStorage.getItem(key)) {
+      sessionStorage.setItem(key, "1");
+      window.location.reload();
+      return new Promise<typeof import("read-excel-file/browser")>(() => {});
+    }
+    throw new Error("This page is out of date. Please refresh the page and try again.");
+  }
+}
+
 export async function convertExcelToCsv(file: File): Promise<ExcelConversion> {
-  const { default: readXlsxFile } = await import("read-excel-file/browser");
+  const { default: readXlsxFile } = await loadExcelReader();
 
   let sheets: { sheet: string; data: Row[] }[];
   try {
