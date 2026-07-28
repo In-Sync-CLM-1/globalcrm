@@ -12,6 +12,7 @@ import {
   WindowSlot,
 } from "../_shared/aiCalling.ts";
 import { orgServiceGate } from "../_shared/billingGate.ts";
+import { replaceVariables } from "../_shared/templateVariables.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -24,12 +25,28 @@ const WA_SENDER_BY_ORG: Record<string, string> = {
   "6dcf4229-6902-4cd4-9c7f-2d6ed4a6045d": "+918178798930", // IEDUP
 };
 
+// Per-org email sender identity + which Resend account's key to send it through.
+// IEDUP sends through the echocommunicator Pro-tier Resend account (more sending
+// domains than the shared "fmamit" account), from training@iedup.in-sync.co.in.
+const EMAIL_SENDER_BY_ORG: Record<string, { localPart: string; resendKeyEnv: string; fromName: string }> = {
+  "6dcf4229-6902-4cd4-9c7f-2d6ed4a6045d": {
+    localPart: "training",
+    resendKeyEnv: "IEDUP_RESEND_API_KEY",
+    fromName: "IEDUP",
+  },
+};
+const DEFAULT_EMAIL_SENDER = { localPart: "notifications", resendKeyEnv: "RESEND_API_KEY", fromName: "" };
+
 // How many of each action to fire per org per tick.
 // WhatsApp sends run with bounded concurrency (WA_SEND_CONCURRENCY) so a tick can
 // push a large batch quickly without exceeding the function's wall-clock limit.
 // Spend is still hard-capped by the per-message floor-guarded reserve, never by this.
 const MAX_WA_PER_TICK = 150;
 const WA_SEND_CONCURRENCY = 12;
+const MAX_EMAIL_PER_TICK = 150;
+const EMAIL_SEND_CONCURRENCY = 8;
+// Resend cost per email (₹) — flat rate, no utility/marketing split like WhatsApp.
+const EMAIL_COST_PER_MSG = 0.08;
 // Exotel WhatsApp price per message (₹). Utility = ₹0.20, Marketing = ₹1.00.
 const WHATSAPP_UTILITY_COST_PER_MSG = 0.20;
 const WHATSAPP_MARKETING_COST_PER_MSG = 1.00;
@@ -69,9 +86,10 @@ interface QueueRow {
   org_id: string;
   contact_id: string;
   stage_id: string;
-  action_type: "call" | "whatsapp";
+  action_type: "call" | "whatsapp" | "email";
   template_name: string | null;
   language_code: string;
+  email_template_id: string | null;
 }
 
 serve(async (req) => {
@@ -149,11 +167,11 @@ async function processOrg(supabase: any, orgId: string): Promise<unknown> {
   const contactIds = [...new Set(queue.map((r) => r.contact_id))];
   const { data: contactRows } = await supabase
     .from("contacts")
-    .select("id, first_name, last_name, name_hi, company, job_title, phone, do_not_call, created_at, team_size, preferred_demo_date, preferred_demo_time")
+    .select("id, first_name, last_name, name_hi, company, job_title, phone, email, do_not_call, created_at, team_size, preferred_demo_date, preferred_demo_time")
     .in("id", contactIds);
   const contactById = new Map<string, any>((contactRows || []).map((c: any) => [c.id, c]));
 
-  let waSent = 0, waFailed = 0, callsTriggered = 0, skipped = 0;
+  let waSent = 0, waFailed = 0, callsTriggered = 0, skipped = 0, emailSent = 0, emailFailed = 0;
 
   // Today-only: when the org opts in (IEDUP), drop (and mark skipped) any queued
   // action whose contact was uploaded before today (IST), so automation only ever
@@ -177,9 +195,9 @@ async function processOrg(supabase: any, orgId: string): Promise<unknown> {
   // Calling window: outside the window, only stages flagged ignore_window (the
   // inbound demo-request qualify call) run now; everything else stays pending
   // for the next in-window tick. Inside the window, all rows run.
-  // WhatsApp is never gated by this — the window (incl. the Sunday no-call rule)
-  // exists to avoid ringing someone's phone off-hours; it doesn't apply to a
-  // WhatsApp message, so those rows always pass through untouched.
+  // WhatsApp and email are never gated by this — the window (incl. the Sunday
+  // no-call rule) exists to avoid ringing someone's phone off-hours; it doesn't
+  // apply to a message, so those rows always pass through untouched.
   if (!win.inside) {
     const { data: exempt } = await supabase
       .from("pipeline_stage_actions")
@@ -188,7 +206,7 @@ async function processOrg(supabase: any, orgId: string): Promise<unknown> {
       .eq("is_active", true)
       .eq("ignore_window", true);
     const exemptStages = new Set<string>((exempt || []).map((e: any) => e.stage_id));
-    activeQueue = activeQueue.filter((r) => r.action_type === "whatsapp" || exemptStages.has(r.stage_id));
+    activeQueue = activeQueue.filter((r) => r.action_type === "whatsapp" || r.action_type === "email" || exemptStages.has(r.stage_id));
     if (activeQueue.length === 0) {
       return { org_id: orgId, acted: false, reason: win.reason };
     }
@@ -244,6 +262,57 @@ async function processOrg(supabase: any, orgId: string): Promise<unknown> {
     waSent = outcomes.filter((o) => o === "sent").length;
     waFailed = outcomes.filter((o) => o === "failed").length;
     skipped += outcomes.filter((o) => o === "skipped").length;
+  }
+
+  // ---- Email ------------------------------------------------------------
+  // Same charge-before-send / claim-then-send shape as WhatsApp above, just
+  // through Resend instead of Exotel. No utility/marketing split — flat rate.
+  const emailRows = activeQueue.filter((r) => r.action_type === "email").slice(0, MAX_EMAIL_PER_TICK);
+  const canAffordEmail = floor === null || typeof gate.balance !== "number" ||
+    (gate.balance - floor) >= EMAIL_COST_PER_MSG;
+  if (emailRows.length > 0 && canAffordEmail) {
+    const { data: emailSettings } = await supabase
+      .from("email_settings")
+      .select("sending_domain, verification_status, is_active")
+      .eq("org_id", orgId)
+      .maybeSingle();
+    const sender = EMAIL_SENDER_BY_ORG[orgId] || DEFAULT_EMAIL_SENDER;
+    const resendKey = Deno.env.get(sender.resendKeyEnv);
+    if (!emailSettings || !emailSettings.is_active || emailSettings.verification_status !== "verified" || !resendKey) {
+      for (const r of emailRows) { await markQueue(supabase, r.id, "failed", "email sending not configured/verified for org"); }
+    } else {
+      const fromAddress = `${sender.localPart}@${emailSettings.sending_domain}`;
+      const outcomes = await mapPool(emailRows, EMAIL_SEND_CONCURRENCY, async (r) => {
+        const { data: claimed } = await supabase
+          .from("pipeline_action_queue")
+          .update({ status: "processing", processed_at: new Date().toISOString() })
+          .eq("id", r.id)
+          .eq("status", "pending")
+          .select("id")
+          .maybeSingle();
+        if (!claimed) return "raced";
+        const contact = contactById.get(r.contact_id);
+        const email = contact?.email as string | null | undefined;
+        if (!contact || !email || !r.email_template_id) {
+          await markQueue(supabase, r.id, "skipped", "missing email/template");
+          return "skipped";
+        }
+        const res = await sendEmailTemplate(supabase, {
+          orgId, fromAddress, fromName: sender.fromName, resendKey, contact, email,
+          emailTemplateId: r.email_template_id, floor,
+        });
+        if (res.ok) { await markQueue(supabase, r.id, "sent", null); return "sent"; }
+        if (res.insufficientFunds) {
+          await supabase.from("pipeline_action_queue").update({ status: "pending" }).eq("id", r.id);
+          return "nofunds";
+        }
+        await markQueue(supabase, r.id, "failed", res.error);
+        return "failed";
+      });
+      emailSent = outcomes.filter((o) => o === "sent").length;
+      emailFailed = outcomes.filter((o) => o === "failed").length;
+      skipped += outcomes.filter((o) => o === "skipped").length;
+    }
   }
 
   // ---- Calls (concurrency-capped) ------------------------------------------
@@ -360,7 +429,8 @@ async function processOrg(supabase: any, orgId: string): Promise<unknown> {
 
   return {
     org_id: orgId, acted: true, window: win.reason,
-    wa_sent: waSent, wa_failed: waFailed, calls_triggered: callsTriggered, skipped,
+    wa_sent: waSent, wa_failed: waFailed, email_sent: emailSent, email_failed: emailFailed,
+    calls_triggered: callsTriggered, skipped,
   };
 }
 
@@ -496,6 +566,104 @@ async function sendWhatsAppTemplate(
   return { ok: false, error: respText.slice(0, 300) };
 }
 
+// ---- Email send --------------------------------------------------------
+// Logs to pipeline_email_log (mirrors whatsapp_logs) and charges the wallet at
+// the flat Resend rate. Merge tags in the template are resolved via the same
+// replaceVariables() helper the CRM's other email flows use.
+async function sendEmailTemplate(
+  supabase: any,
+  args: {
+    orgId: string; fromAddress: string; fromName: string; resendKey: string;
+    contact: any; email: string; emailTemplateId: string; floor: number | null;
+  },
+): Promise<{ ok: boolean; error?: string; insufficientFunds?: boolean }> {
+  const { orgId, fromAddress, fromName, resendKey, contact, email, emailTemplateId, floor } = args;
+
+  const { data: template } = await supabase
+    .from("email_templates")
+    .select("subject, body_content, html_content")
+    .eq("id", emailTemplateId)
+    .maybeSingle();
+  if (!template) {
+    return { ok: false, error: "email template not found" };
+  }
+
+  const subject = await replaceVariables(template.subject || "", contact, {}, supabase);
+  const body = await replaceVariables(template.body_content || template.html_content || "", contact, {}, supabase);
+
+  const { data: logRow } = await supabase
+    .from("pipeline_email_log")
+    .insert({
+      org_id: orgId,
+      contact_id: contact.id,
+      email_template_id: emailTemplateId,
+      to_email: email,
+      subject,
+      status: "queued",
+    })
+    .select("id")
+    .single();
+  const logId = logRow?.id as string | undefined;
+
+  if (logId) {
+    const reserved = await reserveFunds(supabase, {
+      orgId, serviceType: "email", referenceId: logId, quantity: 1, cost: EMAIL_COST_PER_MSG, floor,
+      description: `Email → ${email}`,
+    });
+    if (!reserved.ok) {
+      await supabase.from("pipeline_email_log")
+        .update({ status: "failed", failed_at: new Date().toISOString(), error_text: "insufficient wallet balance (floor)" })
+        .eq("id", logId);
+      return { ok: false, error: "insufficient wallet balance", insufficientFunds: true };
+    }
+  }
+
+  let respJson: any = null;
+  let httpOk = false;
+  try {
+    const resp = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${resendKey}` },
+      body: JSON.stringify({
+        from: fromName ? `${fromName} <${fromAddress}>` : fromAddress,
+        to: [email],
+        subject,
+        html: body,
+      }),
+    });
+    httpOk = resp.ok;
+    respJson = await resp.json().catch(() => null);
+  } catch (e: any) {
+    if (logId) {
+      await refundFunds(supabase, { orgId, serviceType: "email", referenceId: logId, cost: EMAIL_COST_PER_MSG, description: `Refund — email send failed (${email})` });
+      await supabase.from("pipeline_email_log")
+        .update({ status: "failed", failed_at: new Date().toISOString(), error_text: `fetch failed: ${String(e?.message || e)}` })
+        .eq("id", logId);
+    }
+    return { ok: false, error: `fetch failed: ${e?.message || e}` };
+  }
+
+  if (httpOk && logId) {
+    await supabase.from("pipeline_email_log")
+      .update({
+        status: "sent",
+        sent_at: new Date().toISOString(),
+        resend_message_id: respJson?.id || null,
+        cost_charged: EMAIL_COST_PER_MSG,
+      })
+      .eq("id", logId);
+    return { ok: true };
+  }
+
+  if (logId) {
+    await refundFunds(supabase, { orgId, serviceType: "email", referenceId: logId, cost: EMAIL_COST_PER_MSG, description: `Refund — email send failed (${email})` });
+    await supabase.from("pipeline_email_log")
+      .update({ status: "failed", failed_at: new Date().toISOString(), error_text: JSON.stringify(respJson).slice(0, 500) })
+      .eq("id", logId);
+  }
+  return { ok: false, error: JSON.stringify(respJson).slice(0, 300) };
+}
+
 // Reserve (charge) funds BEFORE sending. Atomically debits the wallet via the
 // reserve_wallet_funds RPC, which only succeeds if balance − cost stays at/above
 // the org's floor (passing null floor = unlimited, for internal/demo orgs). On
@@ -577,7 +745,10 @@ async function refundFunds(
     const balanceBefore = balanceAfter - args.cost;
     await supabase.from("wallet_transactions").insert({
       org_id: args.orgId,
-      transaction_type: `refund_${args.serviceType}`,
+      // The CHECK constraint only allows the literal 'refund' — not
+      // 'refund_whatsapp'/'refund_email' — reference_type below already
+      // records which service this was for.
+      transaction_type: "refund",
       amount: args.cost,
       balance_before: balanceBefore,
       balance_after: balanceAfter,

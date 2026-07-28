@@ -262,6 +262,14 @@ function DashboardLayout({ children }: DashboardLayoutProps) {
                     <span>Pipeline</span>
                   </Link>
                   <Link
+                    to="/iedup/automations"
+                    className="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-primary transition-colors"
+                    onClick={() => setSidebarOpen(false)}
+                  >
+                    <Sliders size={16} className="shrink-0 text-sidebar-muted" />
+                    <span>Automations</span>
+                  </Link>
+                  <Link
                     to="/users"
                     className="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-primary transition-colors"
                     onClick={() => setSidebarOpen(false)}
