@@ -6751,7 +6751,6 @@ export type Database = {
           attempts: number
           contact_id: string
           created_at: string
-          email_template_id: string | null
           id: string
           language_code: string
           last_error: string | null
@@ -6766,7 +6765,6 @@ export type Database = {
           attempts?: number
           contact_id: string
           created_at?: string
-          email_template_id?: string | null
           id?: string
           language_code?: string
           last_error?: string | null
@@ -6781,7 +6779,6 @@ export type Database = {
           attempts?: number
           contact_id?: string
           created_at?: string
-          email_template_id?: string | null
           id?: string
           language_code?: string
           last_error?: string | null
@@ -6804,13 +6801,6 @@ export type Database = {
             columns: ["contact_id"]
             isOneToOne: false
             referencedRelation: "contacts_with_stages"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "pipeline_action_queue_email_template_id_fkey"
-            columns: ["email_template_id"]
-            isOneToOne: false
-            referencedRelation: "email_templates"
             referencedColumns: ["id"]
           },
           {
@@ -6879,83 +6869,6 @@ export type Database = {
             columns: ["stage_id"]
             isOneToOne: false
             referencedRelation: "pipeline_stages"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      pipeline_email_log: {
-        Row: {
-          contact_id: string | null
-          cost_charged: number | null
-          created_at: string
-          email_template_id: string | null
-          error_text: string | null
-          failed_at: string | null
-          id: string
-          org_id: string
-          resend_message_id: string | null
-          sent_at: string | null
-          status: string
-          subject: string | null
-          to_email: string
-        }
-        Insert: {
-          contact_id?: string | null
-          cost_charged?: number | null
-          created_at?: string
-          email_template_id?: string | null
-          error_text?: string | null
-          failed_at?: string | null
-          id?: string
-          org_id: string
-          resend_message_id?: string | null
-          sent_at?: string | null
-          status?: string
-          subject?: string | null
-          to_email: string
-        }
-        Update: {
-          contact_id?: string | null
-          cost_charged?: number | null
-          created_at?: string
-          email_template_id?: string | null
-          error_text?: string | null
-          failed_at?: string | null
-          id?: string
-          org_id?: string
-          resend_message_id?: string | null
-          sent_at?: string | null
-          status?: string
-          subject?: string | null
-          to_email?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "pipeline_email_log_contact_id_fkey"
-            columns: ["contact_id"]
-            isOneToOne: false
-            referencedRelation: "contacts"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "pipeline_email_log_contact_id_fkey"
-            columns: ["contact_id"]
-            isOneToOne: false
-            referencedRelation: "contacts_with_stages"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "pipeline_email_log_email_template_id_fkey"
-            columns: ["email_template_id"]
-            isOneToOne: false
-            referencedRelation: "email_templates"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "pipeline_email_log_org_id_fkey"
-            columns: ["org_id"]
-            isOneToOne: false
-            referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
         ]
@@ -7037,7 +6950,6 @@ export type Database = {
           action_type: string
           agent_id: string | null
           created_at: string
-          email_template_id: string | null
           from_number: string | null
           id: string
           ignore_window: boolean
@@ -7046,13 +6958,11 @@ export type Database = {
           org_id: string
           stage_id: string
           template_name: string | null
-          whatsapp_template_id: string | null
         }
         Insert: {
           action_type: string
           agent_id?: string | null
           created_at?: string
-          email_template_id?: string | null
           from_number?: string | null
           id?: string
           ignore_window?: boolean
@@ -7061,13 +6971,11 @@ export type Database = {
           org_id: string
           stage_id: string
           template_name?: string | null
-          whatsapp_template_id?: string | null
         }
         Update: {
           action_type?: string
           agent_id?: string | null
           created_at?: string
-          email_template_id?: string | null
           from_number?: string | null
           id?: string
           ignore_window?: boolean
@@ -7076,16 +6984,8 @@ export type Database = {
           org_id?: string
           stage_id?: string
           template_name?: string | null
-          whatsapp_template_id?: string | null
         }
         Relationships: [
-          {
-            foreignKeyName: "pipeline_stage_actions_email_template_id_fkey"
-            columns: ["email_template_id"]
-            isOneToOne: false
-            referencedRelation: "email_templates"
-            referencedColumns: ["id"]
-          },
           {
             foreignKeyName: "pipeline_stage_actions_org_id_fkey"
             columns: ["org_id"]
@@ -7098,13 +6998,6 @@ export type Database = {
             columns: ["stage_id"]
             isOneToOne: true
             referencedRelation: "pipeline_stages"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "pipeline_stage_actions_whatsapp_template_id_fkey"
-            columns: ["whatsapp_template_id"]
-            isOneToOne: false
-            referencedRelation: "communication_templates"
             referencedColumns: ["id"]
           },
         ]
@@ -7252,7 +7145,6 @@ export type Database = {
           onboarding_completed: boolean | null
           org_id: string | null
           phone: string | null
-          reports_to_user_id: string | null
           sms_enabled: boolean | null
           updated_at: string | null
           whatsapp_enabled: boolean | null
@@ -7272,7 +7164,6 @@ export type Database = {
           onboarding_completed?: boolean | null
           org_id?: string | null
           phone?: string | null
-          reports_to_user_id?: string | null
           sms_enabled?: boolean | null
           updated_at?: string | null
           whatsapp_enabled?: boolean | null
@@ -7292,7 +7183,6 @@ export type Database = {
           onboarding_completed?: boolean | null
           org_id?: string | null
           phone?: string | null
-          reports_to_user_id?: string | null
           sms_enabled?: boolean | null
           updated_at?: string | null
           whatsapp_enabled?: boolean | null
@@ -7310,13 +7200,6 @@ export type Database = {
             columns: ["org_id"]
             isOneToOne: false
             referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "profiles_reports_to_user_id_fkey"
-            columns: ["reports_to_user_id"]
-            isOneToOne: false
-            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -9127,7 +9010,7 @@ export type Database = {
       }
       whatsapp_messages: {
         Row: {
-          contact_id: string | null
+          contact_id: string
           conversation_id: string | null
           created_at: string | null
           delivered_at: string | null
@@ -9153,7 +9036,7 @@ export type Database = {
           template_variables: Json | null
         }
         Insert: {
-          contact_id?: string | null
+          contact_id: string
           conversation_id?: string | null
           created_at?: string | null
           delivered_at?: string | null
@@ -9179,7 +9062,7 @@ export type Database = {
           template_variables?: Json | null
         }
         Update: {
-          contact_id?: string | null
+          contact_id?: string
           conversation_id?: string | null
           created_at?: string | null
           delivered_at?: string | null
@@ -9391,19 +9274,6 @@ export type Database = {
         Returns: boolean
       }
       check_inactive_contacts: { Args: never; Returns: undefined }
-      claim_fervent_new_rows: {
-        Args: {
-          p_created_by: string
-          p_import_job_id: string
-          p_org_id: string
-          p_records: Json
-        }
-        Returns: {
-          incoming_idx: number
-          outcome: string
-          target_id: string
-        }[]
-      }
       cleanup_orphaned_profile: {
         Args: { user_id: string }
         Returns: undefined

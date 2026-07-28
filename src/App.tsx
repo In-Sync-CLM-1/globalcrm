@@ -45,7 +45,6 @@ const FerventRepository = lazyRetry(() => import("./pages/FerventRepository"));
 const ContactDetail = lazyRetry(() => import("./pages/ContactDetail"));
 const PipelineBoard = lazyRetry(() => import("./pages/PipelineBoard"));
 const PipelineAdvancedSearch = lazyRetry(() => import("./pages/PipelineAdvancedSearch"));
-const IedupAutomations = lazyRetry(() => import("./pages/IedupAutomations"));
 const ClientHub = lazyRetry(() => import("./pages/ClientHub"));
 const ClientDetail = lazyRetry(() => import("./pages/ClientDetail"));
 
@@ -166,12 +165,6 @@ const App = () => (
           <Route path="/pipeline" element={
             <ProtectedRoute>
               <PipelineBoard />
-            </ProtectedRoute>
-          } />
-
-          <Route path="/iedup/automations" element={
-            <ProtectedRoute>
-              <IedupAutomations />
             </ProtectedRoute>
           } />
 

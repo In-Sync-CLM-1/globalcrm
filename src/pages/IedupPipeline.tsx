@@ -53,7 +53,6 @@ interface BeneficiaryRow {
   last_name: string | null;
   name_hi: string | null;
   phone: string | null;
-  email: string | null;
   do_not_call: boolean | null;
   status: string | null;
   created_at: string | null;
@@ -75,18 +74,27 @@ function callCapExhausted(b: BeneficiaryRow): boolean {
 interface UploadRow {
   name_en: string;
   number: string;
-  email: string;
   name_hi: string;
   action: string;
   /** AI's best reading of a damaged name — shown for approval, never auto-applied. */
   suggestion?: { name: string; confidence: "high" | "medium" | "low" };
 }
 
-const CSV_TEMPLATE = `name,number,email,action\nVibhu Dixit,+917607359820,vibhu@example.com,Call\n`;
+// Selectable actions = the IEDUP pipeline stages. Setting one on import triggers
+// that stage's automation (call or the mapped WhatsApp template).
+const IEDUP_ACTIONS = [
+  "Call",
+  "Send WhatsApp - After certificate",
+  "Send WhatsApp - After registration & payment verification",
+  "Send WhatsApp - Payment failed",
+  "Send WhatsApp - Add help desk number",
+  "Send WhatsApp - Photo rejected",
+  "Send WhatsApp - Short Attendance",
+  "Send WhatsApp - Assessment Link",
+  "Attendance",
+];
 
-// Very loose check — just enough to catch an obviously-mistyped email before
-// it's saved and an automation later tries to send to it.
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const CSV_TEMPLATE = `name,number,action\nVibhu Dixit,+917607359820,Call\n`;
 
 // A beneficiary name should only ever be English letters, Devanagari, or the
 // punctuation that shows up in real names. Anything else means the file lost
@@ -138,22 +146,6 @@ export default function IedupPipeline() {
     },
   });
 
-  // Selectable actions = the IEDUP pipeline stages, fetched live so a newly
-  // added stage (e.g. from the Automations screen) shows up here immediately.
-  const { data: actionStages } = useQuery({
-    queryKey: ["iedup-action-stages"],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("pipeline_stages")
-        .select("name")
-        .eq("org_id", IEDUP_ORG_ID)
-        .eq("is_active", true)
-        .order("stage_order");
-      return (data || []).map((s: any) => s.name as string);
-    },
-  });
-  const IEDUP_ACTIONS = actionStages ?? [];
-
   // Filter + pagination state (declared before the query that reads them).
   const [filterFrom, setFilterFrom] = useState<string>("");
   const [filterTo, setFilterTo] = useState<string>("");
@@ -166,7 +158,7 @@ export default function IedupPipeline() {
     queryFn: async () => {
       let q = supabase
         .from("contacts")
-        .select("id, first_name, last_name, name_hi, phone, email, do_not_call, status, created_at, pipeline_stage_id", { count: "exact" })
+        .select("id, first_name, last_name, name_hi, phone, do_not_call, status, created_at, pipeline_stage_id", { count: "exact" })
         .eq("org_id", IEDUP_ORG_ID);
       if (filterFrom) q = q.gte("created_at", filterFrom);
       if (filterTo) q = q.lte("created_at", `${filterTo}T23:59:59.999`);
@@ -274,7 +266,6 @@ export default function IedupPipeline() {
   const [manualNameEn, setManualNameEn] = useState("");
   const [manualNameHi, setManualNameHi] = useState("");
   const [manualNumber, setManualNumber] = useState("");
-  const [manualEmail, setManualEmail] = useState("");
   const [manualTransliterating, setManualTransliterating] = useState(false);
   const [manualSaving, setManualSaving] = useState(false);
 
@@ -309,7 +300,7 @@ export default function IedupPipeline() {
   async function handleFilePicked(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     if (!f) return;
-    Papa.parse<{ name?: string; number?: string; email?: string; action?: string }>(f, {
+    Papa.parse<{ name?: string; number?: string; action?: string }>(f, {
       header: true,
       skipEmptyLines: true,
       complete: async (res) => {
@@ -324,7 +315,6 @@ export default function IedupPipeline() {
             return {
               name_en: fixed ?? raw,
               number: normalizePhone(String(r.number || "")),
-              email: String(r.email || "").trim(),
               name_hi: "",
               action: String(r.action || "").trim(),
             };
@@ -402,16 +392,6 @@ export default function IedupPipeline() {
         (stages || []).map((s: any) => [String(s.name).trim().toLowerCase(), s.id as string]),
       );
 
-      // A malformed email would silently fail whenever an email action tries
-      // to use it — catch it here rather than at send time.
-      const badEmails = uploadRows.filter((r) => r.email && !EMAIL_RE.test(r.email));
-      if (badEmails.length > 0) {
-        throw new Error(
-          `${badEmails.length} row(s) have an invalid email (e.g. "${badEmails[0].email}"). ` +
-            "Fix or clear the Email column and import again. Nothing was imported.",
-        );
-      }
-
       // An action that doesn't match a known Action would import the row with
       // nothing to send — refuse the whole file so it never fails silently.
       const unmatched = [
@@ -437,7 +417,6 @@ export default function IedupPipeline() {
           last_name: parts.slice(1).join(" ") || null,
           name_hi: r.name_hi || r.name_en,
           phone: r.number,
-          email: r.email || null,
           product: "CM YUVA",
           source: "iedup_csv_upload",
           pipeline_stage_id: r.action ? (stageMap.get(r.action.trim().toLowerCase()) || null) : null,
@@ -504,7 +483,6 @@ export default function IedupPipeline() {
     setManualNameEn("");
     setManualNameHi("");
     setManualNumber("");
-    setManualEmail("");
     setManualOpen(true);
   }
 
@@ -528,13 +506,8 @@ export default function IedupPipeline() {
   async function saveManualBeneficiary() {
     const name = manualNameEn.trim();
     const num = normalizePhone(manualNumber);
-    const email = manualEmail.trim();
     if (!name || !num) {
       notify.error("Missing details", "Both name and number are required.");
-      return;
-    }
-    if (email && !EMAIL_RE.test(email)) {
-      notify.error("Invalid email", "That doesn't look like a valid email address.");
       return;
     }
     setManualSaving(true);
@@ -550,7 +523,6 @@ export default function IedupPipeline() {
         last_name: parts.slice(1).join(" ") || null,
         name_hi: (manualNameHi || name).trim(),
         phone: num,
-        email: email || null,
         product: "CM YUVA",
         source: "iedup_manual_add",
       });
@@ -887,7 +859,6 @@ export default function IedupPipeline() {
                       <TableHead>Name (EN)</TableHead>
                       <TableHead>Name (HI)</TableHead>
                       <TableHead>Number</TableHead>
-                      <TableHead>Email</TableHead>
                       <TableHead>Action</TableHead>
                       <TableHead>Uploaded</TableHead>
                       <TableHead>Disposition</TableHead>
@@ -913,7 +884,6 @@ export default function IedupPipeline() {
                           <TableCell>{[b.first_name, b.last_name].filter(Boolean).join(" ")}</TableCell>
                           <TableCell className="font-medium">{b.name_hi || "—"}</TableCell>
                           <TableCell className="font-mono text-sm">{b.phone}</TableCell>
-                          <TableCell className="text-sm">{b.email || "—"}</TableCell>
                           <TableCell>
                             {b.action ? (
                               <Badge variant="outline" className="whitespace-nowrap">{b.action}</Badge>
@@ -1043,16 +1013,6 @@ export default function IedupPipeline() {
                   placeholder="+91 9876543210"
                 />
               </div>
-              <div>
-                <Label htmlFor="manual-email">Email (optional)</Label>
-                <Input
-                  id="manual-email"
-                  type="email"
-                  value={manualEmail}
-                  onChange={(e) => setManualEmail(e.target.value)}
-                  placeholder="name@example.com"
-                />
-              </div>
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setManualOpen(false)} disabled={manualSaving}>
@@ -1112,7 +1072,6 @@ export default function IedupPipeline() {
                     <TableHead>Name (EN)</TableHead>
                     <TableHead>Name (HI) — editable</TableHead>
                     <TableHead>Number</TableHead>
-                    <TableHead>Email</TableHead>
                     <TableHead>Action</TableHead>
                     <TableHead className="w-10" />
                   </TableRow>
@@ -1198,22 +1157,6 @@ export default function IedupPipeline() {
                         />
                       </TableCell>
                       <TableCell className="font-mono text-sm">{r.number}</TableCell>
-                      <TableCell>
-                        <Input
-                          value={r.email}
-                          onChange={(e) =>
-                            setUploadRows((prev) =>
-                              prev.map((x, idx) => (idx === i ? { ...x, email: e.target.value } : x)),
-                            )
-                          }
-                          className={
-                            r.email && !EMAIL_RE.test(r.email)
-                              ? "h-8 border-destructive text-destructive focus-visible:ring-destructive"
-                              : "h-8"
-                          }
-                          placeholder="—"
-                        />
-                      </TableCell>
                       <TableCell>
                         <select
                           value={IEDUP_ACTIONS.includes(r.action) ? r.action : ""}
