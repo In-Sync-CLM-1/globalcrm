@@ -157,7 +157,7 @@ export default function IedupPipeline() {
     queryFn: async () => {
       let q = supabase
         .from("contacts")
-        .select("id, first_name, last_name, name_hi, phone, do_not_call, status, created_at, action_channel, action_template", { count: "exact" })
+        .select("id, first_name, last_name, name_hi, phone, email, do_not_call, status, created_at, action_channel, action_template", { count: "exact" })
         .eq("org_id", IEDUP_ORG_ID);
       if (filterFrom) q = q.gte("created_at", filterFrom);
       if (filterTo) q = q.lte("created_at", `${filterTo}T23:59:59.999`);
@@ -958,6 +958,7 @@ export default function IedupPipeline() {
                       <TableHead>Name (EN)</TableHead>
                       <TableHead>Name (HI)</TableHead>
                       <TableHead>Number</TableHead>
+                      <TableHead>Email</TableHead>
                       <TableHead>Channel</TableHead>
                       <TableHead>Template</TableHead>
                       <TableHead>Uploaded</TableHead>
@@ -984,6 +985,7 @@ export default function IedupPipeline() {
                           <TableCell>{[b.first_name, b.last_name].filter(Boolean).join(" ")}</TableCell>
                           <TableCell className="font-medium">{b.name_hi || "—"}</TableCell>
                           <TableCell className="font-mono text-sm">{b.phone}</TableCell>
+                          <TableCell className="text-sm">{b.email || <span className="text-xs text-muted-foreground">—</span>}</TableCell>
                           <TableCell>
                             <select
                               value={pendingChannel[b.id] ?? b.action_channel ?? ""}
