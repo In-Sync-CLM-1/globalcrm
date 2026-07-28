@@ -60,7 +60,8 @@ interface BeneficiaryRow {
   last_call_at?: string | null;
   attempts?: number;
   connected?: number;
-  action?: string | null;
+  action_channel?: string | null;
+  action_template?: string | null;
   disposition?: string | null;
 }
 
@@ -75,26 +76,22 @@ interface UploadRow {
   name_en: string;
   number: string;
   name_hi: string;
-  action: string;
+  channel: string;
+  template: string;
   /** AI's best reading of a damaged name — shown for approval, never auto-applied. */
   suggestion?: { name: string; confidence: "high" | "medium" | "low" };
 }
 
-// Selectable actions = the IEDUP pipeline stages. Setting one on import triggers
-// that stage's automation (call or the mapped WhatsApp template).
-const IEDUP_ACTIONS = [
-  "Call",
-  "Send WhatsApp - After certificate",
-  "Send WhatsApp - After registration & payment verification",
-  "Send WhatsApp - Payment failed",
-  "Send WhatsApp - Add help desk number",
-  "Send WhatsApp - Photo rejected",
-  "Send WhatsApp - Short Attendance",
-  "Send WhatsApp - Assessment Link",
-  "Attendance",
+// Raw channel values. Templates are NOT hardcoded — they're fetched live from
+// the org's own Templates tab (communication_templates for WhatsApp,
+// email_templates for Email), same source used by the Templates page.
+const CHANNELS = [
+  { value: "call", label: "Call" },
+  { value: "whatsapp", label: "WhatsApp" },
+  { value: "email", label: "Email" },
 ];
 
-const CSV_TEMPLATE = `name,number,action\nVibhu Dixit,+917607359820,Call\n`;
+const CSV_TEMPLATE = `name,number,channel,template\nVibhu Dixit,+917607359820,whatsapp,iedup_cmyuva_assessment_link_v1\n`;
 
 // A beneficiary name should only ever be English letters, Devanagari, or the
 // punctuation that shows up in real names. Anything else means the file lost
@@ -158,7 +155,7 @@ export default function IedupPipeline() {
     queryFn: async () => {
       let q = supabase
         .from("contacts")
-        .select("id, first_name, last_name, name_hi, phone, do_not_call, status, created_at, pipeline_stage_id", { count: "exact" })
+        .select("id, first_name, last_name, name_hi, phone, do_not_call, status, created_at, action_channel, action_template", { count: "exact" })
         .eq("org_id", IEDUP_ORG_ID);
       if (filterFrom) q = q.gte("created_at", filterFrom);
       if (filterTo) q = q.lte("created_at", `${filterTo}T23:59:59.999`);
@@ -171,7 +168,7 @@ export default function IedupPipeline() {
       if (rows.length === 0) return { rows, total };
 
       const ids = rows.map((r) => r.id);
-      const [callsRes, statsRes, stagesRes, dispoRes] = await Promise.all([
+      const [callsRes, statsRes, dispoRes] = await Promise.all([
         supabase
           .from("call_logs")
           .select("contact_id, started_at")
@@ -180,8 +177,6 @@ export default function IedupPipeline() {
           .not("started_at", "is", null)
           .order("started_at", { ascending: false }),
         supabase.rpc("contact_ai_call_stats", { p_contact_ids: ids }),
-        // Action = the contact's pipeline stage (the "Send WhatsApp - …" / "Call" action).
-        supabase.from("pipeline_stages").select("id, name").eq("org_id", IEDUP_ORG_ID),
         // Disposition = latest call/WhatsApp outcome from the shared view.
         supabase.from("contact_latest_disposition").select("contact_id, disposition_name").eq("org_id", IEDUP_ORG_ID).in("contact_id", ids),
       ]);
@@ -195,10 +190,6 @@ export default function IedupPipeline() {
       for (const s of (statsRes.data || []) as Array<{ contact_id: string; attempts: number; connected: number }>) {
         stats.set(s.contact_id, { attempts: Number(s.attempts), connected: Number(s.connected) });
       }
-      const stageName = new Map<string, string>();
-      for (const s of (stagesRes.data || []) as Array<{ id: string; name: string }>) {
-        stageName.set(s.id, s.name);
-      }
       const dispo = new Map<string, string>();
       for (const d of (dispoRes.data || []) as Array<{ contact_id: string; disposition_name: string }>) {
         if (d.contact_id && d.disposition_name) dispo.set(d.contact_id, d.disposition_name);
@@ -210,7 +201,6 @@ export default function IedupPipeline() {
           last_call_at: latest.get(r.id) ?? null,
           attempts: stats.get(r.id)?.attempts || 0,
           connected: stats.get(r.id)?.connected || 0,
-          action: r.pipeline_stage_id ? (stageName.get(r.pipeline_stage_id) ?? null) : null,
           disposition: dispo.get(r.id) ?? null,
         })),
       };
@@ -220,6 +210,70 @@ export default function IedupPipeline() {
   const beneficiaries = (pageData?.rows ?? []) as BeneficiaryRow[];
   const total = pageData?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  // Templates available to fire — the org's OWN submitted/approved templates,
+  // same source the Templates tab reads (communication_templates / email_templates).
+  const { data: waTemplateNames } = useQuery({
+    queryKey: ["iedup-wa-template-names"],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("communication_templates")
+        .select("template_name")
+        .eq("org_id", IEDUP_ORG_ID)
+        .eq("status", "approved")
+        .order("template_name");
+      return (data || []).map((t: any) => t.template_name as string);
+    },
+  });
+  const { data: emailTemplateNames } = useQuery({
+    queryKey: ["iedup-email-template-names"],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("email_templates")
+        .select("name")
+        .eq("org_id", IEDUP_ORG_ID)
+        .eq("is_active", true)
+        .order("name");
+      return (data || []).map((t: any) => t.name as string);
+    },
+  });
+  function templatesForChannel(channel: string): string[] {
+    if (channel === "whatsapp") return waTemplateNames || [];
+    if (channel === "email") return emailTemplateNames || [];
+    return [];
+  }
+
+  // Fires a Channel + Template selection immediately against one or more
+  // beneficiaries. Replaces the old stage-driven automation entirely.
+  const [firingIds, setFiringIds] = useState<Set<string>>(new Set());
+  async function fireAction(contactIds: string[], channel: string, templateName: string | null) {
+    setFiringIds((prev) => new Set([...prev, ...contactIds]));
+    try {
+      const { data, error } = await supabase.functions.invoke("iedup-fire-action", {
+        body: { contact_ids: contactIds, channel, template_name: templateName },
+      });
+      if (error) throw new Error((data as any)?.error || error.message);
+      if (!data?.ok) throw new Error(data?.error || "Send failed");
+      const sent = data.sent ?? 0;
+      const failed = data.failed ?? 0;
+      if (sent > 0 && failed === 0) {
+        notify.success("Sent", `${sent} beneficiar${sent === 1 ? "y" : "ies"} messaged.`);
+      } else if (sent > 0) {
+        notify.info("Partially sent", `${sent} sent, ${failed} failed.`);
+      } else {
+        notify.error("Send failed", `${failed} failed — nothing went out.`);
+      }
+      refetchList();
+    } catch (err: any) {
+      notify.error("Could not send", err.message || "Try again.");
+    } finally {
+      setFiringIds((prev) => {
+        const next = new Set(prev);
+        for (const id of contactIds) next.delete(id);
+        return next;
+      });
+    }
+  }
 
   // Upload state
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -273,6 +327,15 @@ export default function IedupPipeline() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkDialing, setBulkDialing] = useState(false);
 
+  // A row mid-pick (channel chosen, template not yet chosen for WA/Email) needs
+  // to show that in-progress choice before anything is fired/persisted.
+  const [pendingChannel, setPendingChannel] = useState<Record<string, string>>({});
+
+  // Bulk Channel + Template + Send
+  const [bulkChannel, setBulkChannel] = useState("");
+  const [bulkTemplate, setBulkTemplate] = useState("");
+  const [bulkSending, setBulkSending] = useState(false);
+
   // Calling window editor state
   const [windowsDraft, setWindowsDraft] = useState<WindowSlot[]>([]);
   const [windowsDirty, setWindowsDirty] = useState(false);
@@ -300,7 +363,7 @@ export default function IedupPipeline() {
   async function handleFilePicked(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     if (!f) return;
-    Papa.parse<{ name?: string; number?: string; action?: string }>(f, {
+    Papa.parse<{ name?: string; number?: string; channel?: string; template?: string }>(f, {
       header: true,
       skipEmptyLines: true,
       complete: async (res) => {
@@ -316,7 +379,8 @@ export default function IedupPipeline() {
               name_en: fixed ?? raw,
               number: normalizePhone(String(r.number || "")),
               name_hi: "",
-              action: String(r.action || "").trim(),
+              channel: String(r.channel || "").trim().toLowerCase(),
+              template: String(r.template || "").trim(),
             };
           })
           .filter((r) => r.name_en && r.number);
@@ -376,35 +440,16 @@ export default function IedupPipeline() {
         );
       }
 
-      // Resolve the chosen Action to its pipeline stage so the import sets the
-      // stage (which fires that stage's automation via the enqueue trigger).
-      const { data: stages, error: stagesError } = await supabase
-        .from("pipeline_stages")
-        .select("id, name")
-        .eq("org_id", IEDUP_ORG_ID)
-        .eq("is_active", true);
-      if (stagesError || !stages || stages.length === 0) {
-        throw new Error(
-          "Could not load the Action list. Nothing was imported — please try again.",
-        );
-      }
-      const stageMap = new Map(
-        (stages || []).map((s: any) => [String(s.name).trim().toLowerCase(), s.id as string]),
-      );
-
-      // An action that doesn't match a known Action would import the row with
-      // nothing to send — refuse the whole file so it never fails silently.
-      const unmatched = [
-        ...new Set(
-          uploadRows
-            .map((r) => r.action.trim())
-            .filter((a) => a && !stageMap.has(a.toLowerCase())),
-        ),
+      // A channel that isn't one of the three real values would import the row
+      // with nothing sendable — refuse the whole file so it never fails silently.
+      const validChannels = new Set(CHANNELS.map((c) => c.value));
+      const badChannels = [
+        ...new Set(uploadRows.map((r) => r.channel).filter((c) => c && !validChannels.has(c))),
       ];
-      if (unmatched.length > 0) {
+      if (badChannels.length > 0) {
         throw new Error(
-          `Unrecognized Action(s): ${unmatched.join(", ")}. ` +
-            "Fix the Action column (or pick one from the dropdown for each row) and import again. Nothing was imported.",
+          `Unrecognized channel(s): ${badChannels.join(", ")}. ` +
+            "Channel must be call, whatsapp, or email. Fix the channel column and import again. Nothing was imported.",
         );
       }
 
@@ -419,7 +464,8 @@ export default function IedupPipeline() {
           phone: r.number,
           product: "CM YUVA",
           source: "iedup_csv_upload",
-          pipeline_stage_id: r.action ? (stageMap.get(r.action.trim().toLowerCase()) || null) : null,
+          action_channel: r.channel || null,
+          action_template: r.template || null,
         };
       });
       const { error } = await supabase.from("contacts").insert(inserts);
@@ -829,6 +875,52 @@ export default function IedupPipeline() {
                         </>
                       )}
                     </Button>
+                    <select
+                      value={bulkChannel}
+                      onChange={(e) => {
+                        setBulkChannel(e.target.value);
+                        setBulkTemplate("");
+                      }}
+                      className="h-8 rounded-md border bg-background px-2 text-sm"
+                    >
+                      <option value="">Channel…</option>
+                      {CHANNELS.map((c) => (
+                        <option key={c.value} value={c.value}>{c.label}</option>
+                      ))}
+                    </select>
+                    {bulkChannel && bulkChannel !== "call" && (
+                      <select
+                        value={bulkTemplate}
+                        onChange={(e) => setBulkTemplate(e.target.value)}
+                        className="h-8 rounded-md border bg-background px-2 text-sm"
+                      >
+                        <option value="">Template…</option>
+                        {templatesForChannel(bulkChannel).map((t) => (
+                          <option key={t} value={t}>{t}</option>
+                        ))}
+                      </select>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={bulkSending || !bulkChannel || (bulkChannel !== "call" && !bulkTemplate)}
+                      onClick={async () => {
+                        setBulkSending(true);
+                        await fireAction(Array.from(selectedIds), bulkChannel, bulkChannel === "call" ? null : bulkTemplate);
+                        setBulkSending(false);
+                        setSelectedIds(new Set());
+                        setBulkChannel("");
+                        setBulkTemplate("");
+                      }}
+                    >
+                      {bulkSending ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Sending…
+                        </>
+                      ) : (
+                        <>Send ({selectedIds.size})</>
+                      )}
+                    </Button>
                   </>
                 )}
               </div>
@@ -859,7 +951,8 @@ export default function IedupPipeline() {
                       <TableHead>Name (EN)</TableHead>
                       <TableHead>Name (HI)</TableHead>
                       <TableHead>Number</TableHead>
-                      <TableHead>Action</TableHead>
+                      <TableHead>Channel</TableHead>
+                      <TableHead>Template</TableHead>
                       <TableHead>Uploaded</TableHead>
                       <TableHead>Disposition</TableHead>
                       <TableHead>Last call</TableHead>
@@ -885,11 +978,45 @@ export default function IedupPipeline() {
                           <TableCell className="font-medium">{b.name_hi || "—"}</TableCell>
                           <TableCell className="font-mono text-sm">{b.phone}</TableCell>
                           <TableCell>
-                            {b.action ? (
-                              <Badge variant="outline" className="whitespace-nowrap">{b.action}</Badge>
-                            ) : (
-                              <span className="text-xs text-muted-foreground">—</span>
-                            )}
+                            <select
+                              value={pendingChannel[b.id] ?? b.action_channel ?? ""}
+                              disabled={firingIds.has(b.id)}
+                              onChange={(e) => {
+                                const channel = e.target.value;
+                                setPendingChannel((prev) => ({ ...prev, [b.id]: channel }));
+                                if (channel === "call") fireAction([b.id], "call", null);
+                              }}
+                              className="h-8 rounded-md border bg-background px-2 text-sm"
+                            >
+                              <option value="">— none —</option>
+                              {CHANNELS.map((c) => (
+                                <option key={c.value} value={c.value}>{c.label}</option>
+                              ))}
+                            </select>
+                          </TableCell>
+                          <TableCell>
+                            {(() => {
+                              const channel = pendingChannel[b.id] ?? b.action_channel ?? "";
+                              if (!channel || channel === "call") {
+                                return <span className="text-xs text-muted-foreground">—</span>;
+                              }
+                              return (
+                                <select
+                                  value={channel === b.action_channel ? (b.action_template ?? "") : ""}
+                                  disabled={firingIds.has(b.id)}
+                                  onChange={(e) => {
+                                    const template = e.target.value;
+                                    if (template) fireAction([b.id], channel, template);
+                                  }}
+                                  className="h-8 rounded-md border bg-background px-2 text-sm"
+                                >
+                                  <option value="">— select —</option>
+                                  {templatesForChannel(channel).map((t) => (
+                                    <option key={t} value={t}>{t}</option>
+                                  ))}
+                                </select>
+                              );
+                            })()}
                           </TableCell>
                           <TableCell className="text-xs text-muted-foreground">
                             {b.created_at ? new Date(b.created_at).toLocaleDateString() : "—"}
@@ -1072,7 +1199,8 @@ export default function IedupPipeline() {
                     <TableHead>Name (EN)</TableHead>
                     <TableHead>Name (HI) — editable</TableHead>
                     <TableHead>Number</TableHead>
-                    <TableHead>Action</TableHead>
+                    <TableHead>Channel</TableHead>
+                    <TableHead>Template</TableHead>
                     <TableHead className="w-10" />
                   </TableRow>
                 </TableHeader>
@@ -1159,19 +1287,40 @@ export default function IedupPipeline() {
                       <TableCell className="font-mono text-sm">{r.number}</TableCell>
                       <TableCell>
                         <select
-                          value={IEDUP_ACTIONS.includes(r.action) ? r.action : ""}
+                          value={r.channel}
                           onChange={(e) =>
                             setUploadRows((prev) =>
-                              prev.map((x, idx) => (idx === i ? { ...x, action: e.target.value } : x)),
+                              prev.map((x, idx) => (idx === i ? { ...x, channel: e.target.value, template: "" } : x)),
                             )
                           }
                           className="h-8 rounded-md border bg-background px-2 text-sm"
                         >
                           <option value="">— none —</option>
-                          {IEDUP_ACTIONS.map((a) => (
-                            <option key={a} value={a}>{a}</option>
+                          {CHANNELS.map((c) => (
+                            <option key={c.value} value={c.value}>{c.label}</option>
                           ))}
                         </select>
+                      </TableCell>
+                      <TableCell>
+                        {r.channel === "call" ? (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        ) : (
+                          <select
+                            value={r.template}
+                            onChange={(e) =>
+                              setUploadRows((prev) =>
+                                prev.map((x, idx) => (idx === i ? { ...x, template: e.target.value } : x)),
+                              )
+                            }
+                            disabled={!r.channel}
+                            className="h-8 rounded-md border bg-background px-2 text-sm"
+                          >
+                            <option value="">— select —</option>
+                            {templatesForChannel(r.channel).map((t) => (
+                              <option key={t} value={t}>{t}</option>
+                            ))}
+                          </select>
+                        )}
                       </TableCell>
                       <TableCell>
                         <Button
