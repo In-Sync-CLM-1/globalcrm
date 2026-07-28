@@ -33,6 +33,9 @@ verify_jwt = true
 [functions.sync-exotel-whatsapp-templates]
 verify_jwt = true
 
+[functions.iedup-fire-action]
+verify_jwt = true
+
 [functions.send-whatsapp-message]
 verify_jwt = true
 
