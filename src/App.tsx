@@ -4,7 +4,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Loader2 } from "lucide-react";
-import { AuthProvider } from "@/contexts/AuthProvider";
+import { AuthProvider, useAuth } from "@/contexts/AuthProvider";
 import { OrgContextProvider } from "@/contexts/OrgContextProvider";
 
 // Retry wrapper for lazy imports - handles chunk hash changes after deployment
@@ -99,6 +99,18 @@ const SdrTestRun = lazyRetry(() => import("./pages/recruit/SdrTestRun"));
 const SdrTestDone = lazyRetry(() => import("./pages/recruit/SdrTestDone"));
 const SdrTestAdmin = lazyRetry(() => import("./pages/recruit/SdrTestAdmin"));
 
+// The landing page is a public marketing page with no auth check of its own,
+// so a visitor arriving with an already-valid session (e.g. the RMPL OPM
+// SSO handoff, or just a returning user with a live session) saw the
+// marketing page instead of their dashboard. Redirect once session state
+// has loaded.
+function RootRoute() {
+  const { session, isLoading } = useAuth();
+  if (isLoading) return null;
+  if (session) return <Navigate to="/dashboard" replace />;
+  return <LandingPage />;
+}
+
 const App = () => (
   <AuthProvider>
     <OrgContextProvider>
@@ -109,7 +121,7 @@ const App = () => (
           <Suspense fallback={<PageLoader />}>
             <Routes>
           {/* Public routes */}
-          <Route path="/" element={<LandingPage />} />
+          <Route path="/" element={<RootRoute />} />
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<SignUp />} />
           <Route path="/install" element={<Install />} />
