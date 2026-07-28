@@ -14,6 +14,7 @@ import { EmptyState } from "@/components/common/EmptyState";
 import { MessageSquare, RefreshCw, Plus, Mail } from "lucide-react";
 import { format } from "date-fns";
 import { StandardEmailTemplateDialog } from "@/components/Templates/StandardEmailTemplateDialog";
+import { useIsIedup } from "@/hooks/useIsIedup";
 
 interface WhatsAppTemplate {
   id: string;
@@ -40,6 +41,7 @@ interface EmailTemplate {
 
 const Templates = () => {
   const { effectiveOrgId } = useOrgContext();
+  const { isIedup } = useIsIedup();
   const notify = useNotification();
   const [syncing, setSyncing] = useState(false);
   const [queuedJobId, setQueuedJobId] = useState<string | null>(null);
@@ -210,23 +212,27 @@ const Templates = () => {
           <div className="flex gap-2">
             {activeTab === "whatsapp" ? (
               <>
-                <Button onClick={() => window.location.href = '/templates/create'} variant="default">
-                  <Plus className="mr-2 h-4 w-4" />
-                  Create Template
-                </Button>
-                <Button onClick={handleSync} disabled={syncing} variant="outline">
-                  {syncing ? (
-                    <>
-                      <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                      Syncing...
-                    </>
-                  ) : (
-                    <>
-                      <RefreshCw className="mr-2 h-4 w-4" />
-                      Sync Templates
-                    </>
-                  )}
-                </Button>
+                {!isIedup && (
+                  <>
+                    <Button onClick={() => window.location.href = '/templates/create'} variant="default">
+                      <Plus className="mr-2 h-4 w-4" />
+                      Create Template
+                    </Button>
+                    <Button onClick={handleSync} disabled={syncing} variant="outline">
+                      {syncing ? (
+                        <>
+                          <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                          Syncing...
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="mr-2 h-4 w-4" />
+                          Sync Templates
+                        </>
+                      )}
+                    </Button>
+                  </>
+                )}
               </>
             ) : (
               <Button onClick={handleCreateEmail} variant="default">
@@ -254,12 +260,14 @@ const Templates = () => {
               <EmptyState
                 icon={<MessageSquare className="h-12 w-12" />}
                 title="No templates found"
-                message="Configure your WhatsApp settings and sync templates from Exotel"
+                message={isIedup ? "No WhatsApp templates yet. Contact In-Sync support to add one." : "Configure your WhatsApp settings and sync templates from Exotel"}
                 action={
-                  <Button onClick={handleSync} disabled={syncing}>
-                    <RefreshCw className={`mr-2 h-4 w-4 ${syncing ? 'animate-spin' : ''}`} />
-                    {syncing ? 'Syncing...' : 'Sync Templates'}
-                  </Button>
+                  isIedup ? undefined : (
+                    <Button onClick={handleSync} disabled={syncing}>
+                      <RefreshCw className={`mr-2 h-4 w-4 ${syncing ? 'animate-spin' : ''}`} />
+                      {syncing ? 'Syncing...' : 'Sync Templates'}
+                    </Button>
+                  )
                 }
               />
             ) : (
