@@ -53,6 +53,7 @@ interface BeneficiaryRow {
   last_name: string | null;
   name_hi: string | null;
   phone: string | null;
+  email: string | null;
   do_not_call: boolean | null;
   status: string | null;
   created_at: string | null;
@@ -76,6 +77,7 @@ interface UploadRow {
   name_en: string;
   number: string;
   name_hi: string;
+  email: string;
   channel: string;
   template: string;
   /** AI's best reading of a damaged name — shown for approval, never auto-applied. */
@@ -91,7 +93,7 @@ const CHANNELS = [
   { value: "email", label: "Email" },
 ];
 
-const CSV_TEMPLATE = `name,number,channel,template\nVibhu Dixit,+917607359820,whatsapp,iedup_cmyuva_assessment_link_v1\n`;
+const CSV_TEMPLATE = `name,number,email,channel,template\nVibhu Dixit,+917607359820,vibhu@example.com,whatsapp,iedup_cmyuva_assessment_link_v1\n`;
 
 // A beneficiary name should only ever be English letters, Devanagari, or the
 // punctuation that shows up in real names. Anything else means the file lost
@@ -320,6 +322,7 @@ export default function IedupPipeline() {
   const [manualNameEn, setManualNameEn] = useState("");
   const [manualNameHi, setManualNameHi] = useState("");
   const [manualNumber, setManualNumber] = useState("");
+  const [manualEmail, setManualEmail] = useState("");
   const [manualTransliterating, setManualTransliterating] = useState(false);
   const [manualSaving, setManualSaving] = useState(false);
 
@@ -363,7 +366,7 @@ export default function IedupPipeline() {
   async function handleFilePicked(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     if (!f) return;
-    Papa.parse<{ name?: string; number?: string; channel?: string; template?: string }>(f, {
+    Papa.parse<{ name?: string; number?: string; email?: string; channel?: string; template?: string }>(f, {
       header: true,
       skipEmptyLines: true,
       complete: async (res) => {
@@ -379,6 +382,7 @@ export default function IedupPipeline() {
               name_en: fixed ?? raw,
               number: normalizePhone(String(r.number || "")),
               name_hi: "",
+              email: String(r.email || "").trim(),
               channel: String(r.channel || "").trim().toLowerCase(),
               template: String(r.template || "").trim(),
             };
@@ -462,6 +466,7 @@ export default function IedupPipeline() {
           last_name: parts.slice(1).join(" ") || null,
           name_hi: r.name_hi || r.name_en,
           phone: r.number,
+          email: r.email || null,
           product: "CM YUVA",
           source: "iedup_csv_upload",
           action_channel: r.channel || null,
@@ -529,6 +534,7 @@ export default function IedupPipeline() {
     setManualNameEn("");
     setManualNameHi("");
     setManualNumber("");
+    setManualEmail("");
     setManualOpen(true);
   }
 
@@ -569,6 +575,7 @@ export default function IedupPipeline() {
         last_name: parts.slice(1).join(" ") || null,
         name_hi: (manualNameHi || name).trim(),
         phone: num,
+        email: manualEmail.trim() || null,
         product: "CM YUVA",
         source: "iedup_manual_add",
       });
@@ -1140,6 +1147,16 @@ export default function IedupPipeline() {
                   placeholder="+91 9876543210"
                 />
               </div>
+              <div>
+                <Label htmlFor="manual-email">Email (optional — needed for the Email channel)</Label>
+                <Input
+                  id="manual-email"
+                  type="email"
+                  value={manualEmail}
+                  onChange={(e) => setManualEmail(e.target.value)}
+                  placeholder="name@example.com"
+                />
+              </div>
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setManualOpen(false)} disabled={manualSaving}>
@@ -1199,6 +1216,7 @@ export default function IedupPipeline() {
                     <TableHead>Name (EN)</TableHead>
                     <TableHead>Name (HI) — editable</TableHead>
                     <TableHead>Number</TableHead>
+                    <TableHead>Email</TableHead>
                     <TableHead>Channel</TableHead>
                     <TableHead>Template</TableHead>
                     <TableHead className="w-10" />
@@ -1285,6 +1303,18 @@ export default function IedupPipeline() {
                         />
                       </TableCell>
                       <TableCell className="font-mono text-sm">{r.number}</TableCell>
+                      <TableCell>
+                        <Input
+                          value={r.email}
+                          onChange={(e) =>
+                            setUploadRows((prev) =>
+                              prev.map((x, idx) => (idx === i ? { ...x, email: e.target.value } : x)),
+                            )
+                          }
+                          placeholder="optional"
+                          className="h-8"
+                        />
+                      </TableCell>
                       <TableCell>
                         <select
                           value={r.channel}
