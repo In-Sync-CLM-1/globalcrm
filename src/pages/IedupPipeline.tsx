@@ -473,7 +473,7 @@ export default function IedupPipeline() {
           action_template: r.template || null,
         };
       });
-      const { error } = await supabase.from("contacts").insert(inserts);
+      const { data: insertedRows, error } = await supabase.from("contacts").insert(inserts).select("id");
       if (error) throw error;
       notify.success(
         "Beneficiaries imported",
@@ -485,6 +485,27 @@ export default function IedupPipeline() {
       setUploadRows([]);
       refetchList();
       qc.invalidateQueries({ queryKey: ["iedup-data-counts"] });
+
+      // Rows that arrived with a Channel + Template (Call needs no template)
+      // fire immediately, grouped by identical channel+template so each
+      // combination is a single send call. Insert order matches inserts order.
+      if (insertedRows && insertedRows.length === uploadRows.length) {
+        const groups = new Map<string, { channel: string; template: string | null; ids: string[] }>();
+        uploadRows.forEach((r, i) => {
+          if (!r.channel) return;
+          if (r.channel !== "call" && !r.template) return;
+          const key = `${r.channel}::${r.template}`;
+          const g = groups.get(key) || { channel: r.channel, template: r.channel === "call" ? null : r.template, ids: [] };
+          g.ids.push(insertedRows[i].id);
+          groups.set(key, g);
+        });
+        const FIRE_BATCH_SIZE = 200; // matches iedup-fire-action's per-call cap
+        for (const g of groups.values()) {
+          for (let i = 0; i < g.ids.length; i += FIRE_BATCH_SIZE) {
+            await fireAction(g.ids.slice(i, i + FIRE_BATCH_SIZE), g.channel, g.template);
+          }
+        }
+      }
     } catch (err: any) {
       notify.error("Import failed", err.message || "Could not save beneficiaries.");
     } finally {
