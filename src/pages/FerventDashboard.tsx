@@ -395,7 +395,7 @@ export default function FerventDashboard() {
         { key: "department", label: "Department" },
         { key: "city", label: "City" },
         { key: "state", label: "State" },
-        { key: "mobile_number_1", label: "Mobile Number" },
+        { key: "mobile_number_1", label: "Phone 1" },
         { key: "official_email", label: "Official Email" },
         { key: "created_at", label: "Added On", format: (v: string) => format(new Date(v), "yyyy-MM-dd") },
       ],

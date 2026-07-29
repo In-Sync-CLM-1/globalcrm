@@ -759,11 +759,42 @@ function displayName(r: any): string {
   return [r.first_name, r.last_name].filter((v) => v && String(v).trim()).join(' ').trim() || r.company_name || '';
 }
 
+// The 4 phone slots, in the order a fresh number should fill them.
+const PHONE_FIELDS = ['mobile_number_1', 'mobile_number_2', 'direct_number', 'phone_number'] as const;
+
+// A person can carry more than one real number, and the same person often
+// shows up across more than one row of an upload (or a row folding into an
+// existing record) with a different number each time. Plain overwrite would
+// let whichever row merges in last stomp a perfectly good number already
+// sitting in that same slot. Instead, gather every distinct number across
+// both records' 4 slots and refill the same 4 slots with them in order, so
+// a second (or third, or fourth) genuine number is kept rather than lost.
+// Only 4 slots exist, so a 5th distinct number has nowhere to go and is dropped.
+function mergePhoneFields(base: any, incoming: any): Record<string, string | null> {
+  const seen = new Set<string>();
+  const collected: string[] = [];
+  for (const field of PHONE_FIELDS) {
+    for (const src of [base, incoming]) {
+      const v = src?.[field];
+      if (v === null || v === undefined || String(v).trim() === '') continue;
+      const key = normPhone(v) ?? String(v).trim();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      collected.push(String(v).trim());
+    }
+  }
+  const out: Record<string, string | null> = {};
+  PHONE_FIELDS.forEach((field, i) => { out[field] = collected[i] ?? null; });
+  return out;
+}
+
 // Incoming non-empty values overwrite base; empty/missing values keep base's.
+// Phone fields are consolidated instead of overwritten (see mergePhoneFields).
 function mergeNonEmpty(base: any, incoming: any): any {
-  const out = { ...base };
+  const out = { ...base, ...mergePhoneFields(base, incoming) };
   for (const [k, v] of Object.entries(incoming)) {
     if (k === 'unique_id' || k === 'org_id' || k === 'created_by') continue;
+    if ((PHONE_FIELDS as readonly string[]).includes(k)) continue;
     if (v !== null && v !== undefined && String(v).trim() !== '') out[k] = v;
   }
   return out;
@@ -974,9 +1005,13 @@ async function processFerventBatch(
       const strong = cands.find((c: any) => c.match_type === 'phone' || c.match_type === 'email');
       if (strong) {
         const existingEntry = mergesByTarget.get(strong.existing_record.id);
+        // Seed the accumulator from the real DB record (not {}) the first time
+        // this target is touched, so phone consolidation below has visibility
+        // into numbers already sitting in the DB's 4 slots, not just whatever
+        // this batch's incoming rows happen to carry.
         mergesByTarget.set(strong.existing_record.id, {
           target_id: strong.existing_record.id,
-          record: mergeNonEmpty(existingEntry?.record || {}, record),
+          record: mergeNonEmpty(existingEntry?.record || strong.existing_record, record),
         });
         return;
       }
@@ -1004,7 +1039,7 @@ async function processFerventBatch(
           const existingEntry = mergesByTarget.get(targetId);
           mergesByTarget.set(targetId, {
             target_id: targetId,
-            record: mergeNonEmpty(existingEntry?.record || {}, check.incoming),
+            record: mergeNonEmpty(existingEntry?.record || check.candidate, check.incoming),
           });
         } else {
           newRows.push(check.incoming);
