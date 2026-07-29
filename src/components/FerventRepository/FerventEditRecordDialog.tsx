@@ -11,8 +11,9 @@ import { normalizeEmployeeSize, parseTurnoverUsdMillion, formatTurnoverUsdMillio
 // All user-editable fields on a repository record. sr_no/db_sourced_year are
 // numeric; everything else is free text. id/org_id/created_at/updated_at/
 // created_by/import_job_id are not user-editable — they're system-managed.
-const EDITABLE_FIELDS: { key: keyof RepositoryRecord; label: string; type?: "number" }[] = [
+const EDITABLE_FIELDS: { key: keyof RepositoryRecord; label: string; type?: "number" | "select"; options?: string[] }[] = [
   { key: "unique_id", label: "Unique ID" },
+  { key: "source_type", label: "Source", type: "select", options: ["domestic", "international"] },
   { key: "db_sourced_year", label: "DB Sourced Year", type: "number" },
   { key: "ucdb_status", label: "UCDB Status" },
   { key: "company_name", label: "Company Name" },
@@ -143,17 +144,30 @@ export function FerventEditRecordDialog({ open, onOpenChange, record, orgId, onS
           <DialogTitle>Edit {[record.first_name, record.last_name].filter(Boolean).join(" ") || "Record"}</DialogTitle>
         </DialogHeader>
         <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-          {EDITABLE_FIELDS.map(({ key, label, type }) => (
+          {EDITABLE_FIELDS.map(({ key, label, type, options }) => (
             <div key={key as string}>
               <Label htmlFor={`edit-${key as string}`} className="text-xs text-muted-foreground">
                 {label}
               </Label>
-              <Input
-                id={`edit-${key as string}`}
-                type={type === "number" ? "number" : "text"}
-                value={values[key as string] ?? ""}
-                onChange={(e) => setValues({ ...values, [key as string]: e.target.value })}
-              />
+              {type === "select" ? (
+                <select
+                  id={`edit-${key as string}`}
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={values[key as string] ?? ""}
+                  onChange={(e) => setValues({ ...values, [key as string]: e.target.value })}
+                >
+                  {(options ?? []).map((opt) => (
+                    <option key={opt} value={opt}>{opt.charAt(0).toUpperCase() + opt.slice(1)}</option>
+                  ))}
+                </select>
+              ) : (
+                <Input
+                  id={`edit-${key as string}`}
+                  type={type === "number" ? "number" : "text"}
+                  value={values[key as string] ?? ""}
+                  onChange={(e) => setValues({ ...values, [key as string]: e.target.value })}
+                />
+              )}
             </div>
           ))}
         </div>

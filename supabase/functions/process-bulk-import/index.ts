@@ -22,6 +22,7 @@ interface ImportJob {
   file_path: string;
   import_type: string;
   target_id: string | null;
+  source_type?: string | null;
 }
 
 interface ContactRecord {
@@ -1174,6 +1175,7 @@ async function failFerventJob(supabase: any, jobId: string, reason: string, extr
 function buildFerventRecord(row: Record<string, string>, importJob: ImportJob): any {
   return {
     org_id: importJob.org_id,
+    source_type: importJob.source_type || 'domestic',
     sr_no: intOrNull(row.sr_no),
     unique_id: row.unique_id || null,
     db_sourced_year: intOrNull(row.db_sourced_year),

@@ -46,6 +46,7 @@ export interface RepositoryRecord {
   id: string;
   unique_id: string | null;
   upload_status: string | null;
+  source_type: string | null;
   db_sourced_year: number | null;
   ucdb_status: string | null;
   company_name: string | null;
@@ -199,6 +200,7 @@ function DisabledAction({ icon: Icon, label }: { icon: any; label: string }) {
 const EXPORT_COLUMNS: { key: string; label: string; format?: (v: any, row: RepositoryRecord) => string }[] = [
   { key: "unique_id", label: "Unique ID" },
   { key: "upload_status", label: "Status", format: (v: string | null) => (v === "existing" ? "Updated" : "Fresh") },
+  { key: "source_type", label: "Source", format: (v: string | null) => (v === "international" ? "International" : v === "domestic" ? "Domestic" : "") },
   { key: "db_sourced_year", label: "DB Sourced Year" },
   { key: "ucdb_status", label: "UCDB Status" },
   { key: "company_name", label: "Company Name" },
@@ -646,6 +648,7 @@ export default function FerventRepository() {
                       {[
                         ["unique_id", "Unique ID"],
                         ["upload_status", "Status"],
+                        ["source_type", "Source"],
                         ["db_sourced_year", "DB Sourced Year"],
                         ["ucdb_status", "UCDB Status"],
                         ["company_name", "Company Name"],
@@ -696,6 +699,13 @@ export default function FerventRepository() {
                           <Badge variant={r.upload_status === "existing" ? "secondary" : "outline"}>
                             {r.upload_status === "existing" ? "Updated" : "Fresh"}
                           </Badge>
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap">
+                          {r.source_type ? (
+                            <Badge variant={r.source_type === "international" ? "secondary" : "outline"}>
+                              {r.source_type === "international" ? "International" : "Domestic"}
+                            </Badge>
+                          ) : "—"}
                         </TableCell>
                         <TableCell className="whitespace-nowrap">{r.db_sourced_year || "—"}</TableCell>
                         <TableCell className="whitespace-nowrap">{r.ucdb_status ? <Badge variant="outline">{r.ucdb_status}</Badge> : "—"}</TableCell>
@@ -774,6 +784,7 @@ export default function FerventRepository() {
               <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
                 {[
                   ["Unique ID", selectedRecord.unique_id],
+                  ["Source", selectedRecord.source_type === "international" ? "International" : selectedRecord.source_type === "domestic" ? "Domestic" : null],
                   ["DB Sourced Year", selectedRecord.db_sourced_year],
                   ["UCDB Status", selectedRecord.ucdb_status],
                   ["Company Name", selectedRecord.company_name],

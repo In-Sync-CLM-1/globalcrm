@@ -5067,6 +5067,7 @@ export type Database = {
           personal_email_1: string | null
           personal_email_2: string | null
           phone_number: string | null
+          source_type: string
           sr_no: number | null
           state: string | null
           std_code: string | null
@@ -5106,6 +5107,7 @@ export type Database = {
           personal_email_1?: string | null
           personal_email_2?: string | null
           phone_number?: string | null
+          source_type: string
           sr_no?: number | null
           state?: string | null
           std_code?: string | null
@@ -5145,6 +5147,7 @@ export type Database = {
           personal_email_1?: string | null
           personal_email_2?: string | null
           phone_number?: string | null
+          source_type?: string
           sr_no?: number | null
           state?: string | null
           std_code?: string | null
@@ -5369,6 +5372,7 @@ export type Database = {
           import_type: string
           org_id: string
           processed_rows: number | null
+          source_type: string | null
           stage_details: Json | null
           started_at: string | null
           status: string
@@ -5394,6 +5398,7 @@ export type Database = {
           import_type: string
           org_id: string
           processed_rows?: number | null
+          source_type?: string | null
           stage_details?: Json | null
           started_at?: string | null
           status?: string
@@ -5419,6 +5424,7 @@ export type Database = {
           import_type?: string
           org_id?: string
           processed_rows?: number | null
+          source_type?: string | null
           stage_details?: Json | null
           started_at?: string | null
           status?: string
