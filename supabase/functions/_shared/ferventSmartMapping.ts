@@ -320,6 +320,27 @@ async function buildSmartMapping(
 
   if (fullNameIndex === null) fullNameIndex = detectFullNameIndex(normHeaders, fieldToIndex);
 
+  // A real Unique ID varies row to row. A column that holds the same value
+  // across the sampled rows is a batch/lot/tick label, not a per-record ID —
+  // trusting it collapses every row sharing that value down to one during
+  // import-time dedup (lost 44 of 45 real contacts in the "Lot-2" upload,
+  // where the AI mapped a "Select" column onto unique_id). Drop it rather
+  // than propagate a constant into a field the pipeline treats as identity.
+  if ('unique_id' in fieldToIndex) {
+    const idx = fieldToIndex['unique_id'];
+    const seen = new Set<string>();
+    let nonEmpty = 0;
+    for (const row of sampleRows) {
+      const v = (row[idx] ?? '').trim();
+      if (!v) continue;
+      nonEmpty++;
+      seen.add(v);
+    }
+    if (nonEmpty >= 3 && seen.size === 1) {
+      delete fieldToIndex['unique_id'];
+    }
+  }
+
   const hasIdentity = identityFields.some((f) => f in fieldToIndex) || fullNameIndex !== null;
   if (!hasIdentity) {
     return { reject: true, rejectReason: noIdentityMessage, usedAi };
