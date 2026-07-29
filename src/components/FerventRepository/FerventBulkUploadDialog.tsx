@@ -14,7 +14,7 @@ const TEMPLATE_HEADERS = [
   "Sr. No.", "Unique ID", "DB Sourced Year", "UCDB Status", "Company Name",
   "First Name", "Last Name", "Designation", "Department",
   "Designation Level", "City", "State", "Country", "STD Code",
-  "Mobile Number 1", "Mobile Number 2", "Direct Number", "Phone Number",
+  "Phone 1", "Phone 2", "Phone 3", "Phone 4",
   "Official Email ID", "Personal Email ID 1", "Personal Email ID 2",
   "Contact LinkedIn ID", "Domain Name", "Website", "Industry", "SubIndustry",
   "Employee Size", "Turnover", "Company LinkedIn ID",
