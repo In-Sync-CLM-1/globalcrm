@@ -3,9 +3,13 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Button } from "@/components/ui/button";
 import { Upload, FileText, AlertCircle, Download } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import { useNotification } from "@/hooks/useNotification";
 import { convertExcelToCsv, isExcelFile, isLegacyExcelFile, toCsvFileName } from "./ferventExcelToCsv";
+
+type SourceType = "domestic" | "international";
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const MAX_RECORDS = 10000;
@@ -87,6 +91,7 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
   const [validationError, setValidationError] = useState<string>("");
   const [preview, setPreview] = useState<UploadPreview | null>(null);
   const [sheetNotice, setSheetNotice] = useState<string>("");
+  const [sourceType, setSourceType] = useState<SourceType | "">("");
   const notification = useNotification();
 
   const validateFile = (f: File): string | null => {
@@ -185,7 +190,7 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
   };
 
   const handleUpload = async () => {
-    if (!uploadFile) return;
+    if (!uploadFile || !sourceType) return;
     setIsUploading(true);
     try {
       const text = await uploadFile.text();
@@ -217,6 +222,7 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
           status: "pending",
           total_rows: recordCount,
           current_stage: "uploaded",
+          source_type: sourceType,
         })
         .select()
         .single();
@@ -241,6 +247,7 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
       onUploadStarted();
       onOpenChange(false);
       resetSelection();
+      setSourceType("");
     } catch (error) {
       notification.error("Import failed", error instanceof Error ? error.message : "Something went wrong");
     } finally {
@@ -252,6 +259,7 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
     if (!isUploading) {
       resetSelection();
       setValidationError("");
+      setSourceType("");
       onOpenChange(false);
     }
   };
@@ -285,6 +293,24 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
               <AlertDescription>{validationError}</AlertDescription>
             </Alert>
           )}
+
+          <div>
+            <Label className="text-sm font-medium">Source of this data *</Label>
+            <RadioGroup
+              value={sourceType}
+              onValueChange={(v) => setSourceType(v as SourceType)}
+              className="grid-cols-2 mt-1"
+            >
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="domestic" id="source-domestic" />
+                <Label htmlFor="source-domestic" className="font-normal cursor-pointer">Domestic</Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="international" id="source-international" />
+                <Label htmlFor="source-international" className="font-normal cursor-pointer">International</Label>
+              </div>
+            </RadioGroup>
+          </div>
 
           <div
             className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
@@ -333,6 +359,7 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
           <div className="bg-muted p-3 rounded-lg text-xs space-y-1">
             <p className="font-medium">How it works:</p>
             <ul className="list-disc list-inside space-y-1 text-muted-foreground">
+              <li>Choose whether this file is Domestic or International data — required for every upload, applied to every record it adds or updates</li>
               <li>Excel (.xlsx) or UTF-8 encoded CSV file — for Excel, the first sheet containing data is used</li>
               <li>Columns can be in any order and named however your source names them — we auto-detect them</li>
               <li>Each row needs at least a name, an email, or a phone number so it can be identified; rows with none of these are skipped and emailed back to you</li>
@@ -347,7 +374,7 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
             <Button type="button" variant="outline" onClick={handleClose} disabled={isUploading}>
               Cancel
             </Button>
-            <Button type="button" onClick={handleUpload} disabled={!uploadFile || isUploading || isReading}>
+            <Button type="button" onClick={handleUpload} disabled={!uploadFile || !sourceType || isUploading || isReading}>
               {isUploading ? "Importing..." : isReading ? "Reading..." : "Import"}
             </Button>
           </div>
