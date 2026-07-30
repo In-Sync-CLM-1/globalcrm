@@ -18,11 +18,27 @@ export function useNotification(): NotificationActions {
       toast({ title, description });
     },
     error: (title: string, error?: any) => {
-      toast({
+      const fallback = typeof error === 'string' ? error : (error?.message || "An error occurred. Please try again.");
+      const t = toast({
         variant: "destructive",
         title,
-        description: typeof error === 'string' ? error : (error?.message || "An error occurred. Please try again."),
+        description: fallback,
       });
+
+      // supabase-js's functions.invoke() throws a generic "Edge Function returned
+      // a non-2xx status code" message on failure — the real reason the function
+      // returned sits in the response body, reachable only via error.context.
+      const context = (error as any)?.context;
+      if (context && typeof context.json === 'function') {
+        context.clone().json()
+          .then((body: any) => {
+            const detail = body?.error || body?.message;
+            if (detail && detail !== fallback) {
+              t.update({ id: t.id, variant: "destructive", title, description: detail } as any);
+            }
+          })
+          .catch(() => {});
+      }
     },
     info: (title: string, description?: string) => {
       toast({ title, description, variant: "default" });
