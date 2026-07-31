@@ -430,7 +430,9 @@ export default function TemplateBuilder() {
                       value={headerContent}
                       onChange={(e) => setHeaderContent(e.target.value)}
                       placeholder="Welcome, {{1}}!"
+                      maxLength={60}
                     />
+                    <p className="text-xs text-muted-foreground mt-1">{headerContent.length}/60 characters</p>
 
                     {headerPositions.length > 0 && (
                       <div className="mt-3 space-y-2">
@@ -534,9 +536,10 @@ export default function TemplateBuilder() {
                     onChange={(e) => setBodyContent(e.target.value)}
                     placeholder="Hello {{1}}, your order {{2}} is confirmed!"
                     rows={6}
+                    maxLength={1024}
                   />
                   <p className="text-xs text-muted-foreground mt-1">
-                    Pick a contact field above to add it. Each variable gets auto-filled when you send.
+                    {bodyContent.length}/1024 characters — pick a contact field above to add it. Each variable gets auto-filled when you send.
                   </p>
                 </div>
 
