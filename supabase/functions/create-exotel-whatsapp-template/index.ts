@@ -285,11 +285,14 @@ Deno.serve(async (req) => {
     }
 
     if (!exotelResponse.ok) {
-      const errorMessage = exotelResult?.response?.whatsapp?.templates?.[0]?.data?.error?.error_user_msg 
-        || exotelResult?.error 
-        || exotelResult?.message 
+      const failedTemplate = exotelResult?.response?.whatsapp?.templates?.[0];
+      const errorMessage = failedTemplate?.error_data?.description
+        || failedTemplate?.error_data?.message
+        || failedTemplate?.data?.error?.error_user_msg
+        || exotelResult?.error
+        || exotelResult?.message
         || `Exotel API error: ${exotelResponse.status}`;
-      
+
       return new Response(
         JSON.stringify({ error: errorMessage, details: exotelResult }),
         { status: exotelResponse.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -299,10 +302,12 @@ Deno.serve(async (req) => {
     // Check if the template was created successfully
     const templateResponse = exotelResult?.response?.whatsapp?.templates?.[0];
     if (templateResponse?.code !== 200) {
-      const errorMessage = templateResponse?.data?.error?.error_user_msg 
-        || templateResponse?.data?.error?.message 
+      const errorMessage = templateResponse?.error_data?.description
+        || templateResponse?.error_data?.message
+        || templateResponse?.data?.error?.error_user_msg
+        || templateResponse?.data?.error?.message
         || 'Template creation failed';
-      
+
       return new Response(
         JSON.stringify({ error: errorMessage, details: exotelResult }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

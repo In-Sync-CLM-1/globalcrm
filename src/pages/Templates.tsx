@@ -125,7 +125,7 @@ const Templates = () => {
       }
     } catch (error: any) {
       console.error("Error syncing templates:", error);
-      notify.error("Error", error.message || "Failed to sync templates");
+      notify.error("Error", error);
       setSyncing(false);
     }
   };
