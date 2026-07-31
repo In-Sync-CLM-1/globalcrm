@@ -210,6 +210,11 @@ export default function TemplateBuilder() {
       return;
     }
 
+    if (headerType === 'text' && !headerContent.trim()) {
+      notify.error("Validation Error", "Header text is required when Header Type is Text — enter text or set Header Type to None");
+      return;
+    }
+
     // Validate buttons have required text
     const invalidButtons = buttons.filter(btn => !btn.text?.trim());
     if (invalidButtons.length > 0) {
