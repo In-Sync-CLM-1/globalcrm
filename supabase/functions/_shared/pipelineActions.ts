@@ -3,6 +3,7 @@
 // queued) and iedup-fire-action (raw, manually-fired) so both paths share one
 // proven implementation of sending + wallet billing instead of drifting apart.
 import { replaceVariables } from "./templateVariables.ts";
+import { resolveWhatsAppFieldMappings } from "./whatsappFieldMappings.ts";
 
 // Per-org Exotel WhatsApp sender (WABA from-number).
 export const WA_SENDER_BY_ORG: Record<string, string> = {
@@ -11,12 +12,8 @@ export const WA_SENDER_BY_ORG: Record<string, string> = {
 
 const WHATSAPP_UTILITY_COST_PER_MSG = 0.20;
 const WHATSAPP_MARKETING_COST_PER_MSG = 1.00;
+// Legacy fallback for templates created before the `category` column was backfilled.
 export const MARKETING_TEMPLATES = new Set<string>(["iedup_ramp_round1_selection_v1"]);
-export function waCostFor(templateName: string | null): number {
-  return templateName && MARKETING_TEMPLATES.has(templateName)
-    ? WHATSAPP_MARKETING_COST_PER_MSG
-    : WHATSAPP_UTILITY_COST_PER_MSG;
-}
 
 // Per-org email sender. Mirrors the IEDUP training domain (separate Resend
 // account from the shared "fmamit" one — that account was already at its
@@ -140,9 +137,32 @@ export async function sendWhatsAppTemplate(
 
   const cleanTo = phone.replace(/^\+/, "").replace(/^0+/, "");
 
-  const name = contact.name_hi || contact.first_name || "प्रतिभागी";
-  const NAME_PARAM_PREFIXES = ["iedup_cmyuva_training_helpdesk", "iedup_cmyuva_assessment_link"];
-  const params: string[] = NAME_PARAM_PREFIXES.some((p) => templateName.startsWith(p)) ? [name] : [];
+  // Look up the template's own field_mappings/category so body params and
+  // billing category track whatever the Template picker last saved, instead
+  // of a hardcoded allowlist that silently misses every new template (e.g.
+  // ramp_invite_v3_3107 sent with 0 params against a 1-param body — Exotel
+  // EX_TEMPLATE_PARAM_ERROR — because it postdated the old NAME_PARAM_PREFIXES list).
+  const { data: tplRow } = await supabase
+    .from("communication_templates")
+    .select("field_mappings, category")
+    .eq("org_id", orgId)
+    .eq("template_name", templateName)
+    .maybeSingle();
+  const fieldMappings = tplRow?.field_mappings as { header?: Record<string, string>; body?: Record<string, string> } | null;
+  const hasBodyMappings = !!fieldMappings?.body && Object.keys(fieldMappings.body).length > 0;
+
+  let params: string[];
+  if (hasBodyMappings) {
+    const resolved = await resolveWhatsAppFieldMappings(fieldMappings, contact, supabase);
+    params = Object.entries(resolved.bodyValues)
+      .sort(([a], [b]) => Number(a) - Number(b))
+      .map(([, value]) => value);
+  } else {
+    // Legacy templates created before field_mappings existed.
+    const name = contact.name_hi || contact.first_name || "प्रतिभागी";
+    const NAME_PARAM_PREFIXES = ["iedup_cmyuva_training_helpdesk", "iedup_cmyuva_assessment_link"];
+    params = NAME_PARAM_PREFIXES.some((p) => templateName.startsWith(p)) ? [name] : [];
+  }
   const components = params.length > 0
     ? [{ type: "body", parameters: params.map((p) => ({ type: "text", text: p })) }]
     : [];
@@ -162,8 +182,8 @@ export async function sendWhatsAppTemplate(
     .single();
   const waLogId = waLogRow?.id as string | undefined;
 
-  const cost = waCostFor(templateName);
-  const category = MARKETING_TEMPLATES.has(templateName) ? "marketing" : "utility";
+  const category = tplRow?.category === "marketing" || MARKETING_TEMPLATES.has(templateName) ? "marketing" : "utility";
+  const cost = category === "marketing" ? WHATSAPP_MARKETING_COST_PER_MSG : WHATSAPP_UTILITY_COST_PER_MSG;
   if (waLogId) {
     const reserved = await reserveFunds(supabase, {
       orgId, serviceType: "whatsapp", referenceId: waLogId, quantity: 1, cost, floor,
