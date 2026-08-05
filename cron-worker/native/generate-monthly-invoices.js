@@ -26,8 +26,12 @@ async function tick(env, orgIdFilter) {
       const billingPeriod = "monthly";
       const bpStartStr = billingPeriodStart.toISOString().split("T")[0];
 
+      // A cancelled invoice (e.g. a past billing-mistake voided by an admin) must
+      // NOT count as "already invoiced this period" -- otherwise the org silently
+      // never gets billed for that month again. Only a live (non-cancelled) proforma
+      // for this period should skip regeneration.
       const existingInvoice = await pgSelectOne(env, "subscription_invoices",
-        `org_id=eq.${sub.org_id}&invoice_type=eq.proforma&billing_period_start=eq.${bpStartStr}&select=id&limit=1`);
+        `org_id=eq.${sub.org_id}&invoice_type=eq.proforma&billing_period_start=eq.${bpStartStr}&payment_status=neq.cancelled&select=id&limit=1`);
 
       if (existingInvoice) continue;
 
