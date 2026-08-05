@@ -32,6 +32,11 @@ interface Organization {
   callVolume?: number;
   emailVolume?: number;
   whatsappVolume?: number;
+  isInternal?: boolean;
+  subscriptionStatus?: string;
+  lastPaymentDate?: string | null;
+  nextDueDate?: string | null;
+  nextDueAmount?: number | null;
 }
 
 interface OrgStats {
@@ -98,16 +103,32 @@ export default function PlatformAdmin() {
     if (!authorized) return;
     setLoading(true);
     try {
-      const [{ data: orgs, error: orgsError }, { data: platformStats }] = await Promise.all([
+      const [{ data: orgs, error: orgsError }, { data: platformStats }, { data: subs }, { data: dueInvoices }] = await Promise.all([
         supabase.from("organizations").select("*").order("created_at", { ascending: false }),
         supabase.rpc("get_platform_admin_stats"),
+        supabase.from("organization_subscriptions").select("org_id, subscription_status, last_payment_date, next_billing_date"),
+        supabase.from("subscription_invoices").select("org_id, due_date, total_amount").in("payment_status", ["pending", "overdue"]),
       ]);
 
       if (orgsError) throw orgsError;
 
+      const subByOrg = new Map((subs || []).map((s: any) => [s.org_id, s]));
+      // The earliest still-unpaid invoice per org is the real "next payment due"
+      // date — the subscription's own next_billing_date is only a payment-cadence
+      // snapshot that can go stale (see Billing.tsx for the same fix).
+      const nextDueByOrg = new Map<string, { due_date: string; total_amount: number }>();
+      for (const inv of dueInvoices || []) {
+        const cur = nextDueByOrg.get(inv.org_id);
+        if (!cur || new Date(inv.due_date) < new Date(cur.due_date)) {
+          nextDueByOrg.set(inv.org_id, { due_date: inv.due_date, total_amount: Number(inv.total_amount) });
+        }
+      }
+
       const orgsWithStats = await Promise.all(
         (orgs || []).map(async (org) => {
           const { data: orgStats } = await supabase.rpc("get_org_statistics", { p_org_id: org.id });
+          const sub = subByOrg.get(org.id) as any;
+          const nextDue = nextDueByOrg.get(org.id);
           return {
             ...org,
             is_active: (org.settings as any)?.is_active !== false,
@@ -119,6 +140,11 @@ export default function PlatformAdmin() {
             callVolume: (orgStats as any)?.call_volume || 0,
             emailVolume: (orgStats as any)?.email_volume || 0,
             whatsappVolume: (orgStats as any)?.whatsapp_volume || 0,
+            isInternal: !!org.is_internal,
+            subscriptionStatus: sub?.subscription_status || null,
+            lastPaymentDate: sub?.last_payment_date || null,
+            nextDueDate: nextDue?.due_date || sub?.next_billing_date || null,
+            nextDueAmount: nextDue?.total_amount ?? null,
           };
         })
       );

@@ -23,13 +23,22 @@ interface Organization {
   callVolume?: number;
   emailVolume?: number;
   whatsappVolume?: number;
+  isInternal?: boolean;
+  subscriptionStatus?: string;
+  lastPaymentDate?: string | null;
+  nextDueDate?: string | null;
+  nextDueAmount?: number | null;
 }
 
 interface Props {
   organizations: Organization[];
 }
 
-type SortKey = "name" | "userCount" | "contactCount" | "usersActive30Days" | "callVolume" | "emailVolume" | "whatsappVolume";
+type SortKey = "name" | "userCount" | "contactCount" | "usersActive30Days" | "callVolume" | "emailVolume" | "whatsappVolume" | "lastPaymentDate" | "nextDueDate";
+
+const inr = (n: number) => `₹${Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+const fmtDate = (d?: string | null) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—");
+const isPast = (d?: string | null) => !!d && new Date(d) < new Date(new Date().toDateString());
 
 export function PlatformOrgsTable({ organizations }: Props) {
   const [search, setSearch] = useState("");
@@ -71,7 +80,9 @@ export function PlatformOrgsTable({ organizations }: Props) {
     rows.sort((a, b) => {
       let cmp = 0;
       if (sortKey === "name") cmp = a.name.localeCompare(b.name);
-      else cmp = ((a[sortKey] as number) || 0) - ((b[sortKey] as number) || 0);
+      else if (sortKey === "lastPaymentDate" || sortKey === "nextDueDate") {
+        cmp = new Date(a[sortKey] || 0).getTime() - new Date(b[sortKey] || 0).getTime();
+      } else cmp = ((a[sortKey] as number) || 0) - ((b[sortKey] as number) || 0);
       return sortAsc ? cmp : -cmp;
     });
 
@@ -118,6 +129,8 @@ export function PlatformOrgsTable({ organizations }: Props) {
                   <SortHeader label="Calls" field="callVolume" />
                   <SortHeader label="Emails" field="emailVolume" />
                   <SortHeader label="WhatsApp" field="whatsappVolume" />
+                  <SortHeader label="Last Payment" field="lastPaymentDate" />
+                  <SortHeader label="Next Due" field="nextDueDate" />
                   <TableHead>Status</TableHead>
                   <TableHead>Created</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
@@ -126,7 +139,7 @@ export function PlatformOrgsTable({ organizations }: Props) {
               <TableBody>
                 {filtered.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={11} className="py-8 text-center text-muted-foreground">
+                    <TableCell colSpan={13} className="py-8 text-center text-muted-foreground">
                       No organizations found
                     </TableCell>
                   </TableRow>
@@ -163,6 +176,21 @@ export function PlatformOrgsTable({ organizations }: Props) {
                         <Badge variant="secondary" className="font-mono text-xs">
                           {org.whatsappVolume}
                         </Badge>
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {org.isInternal ? <span className="text-xs italic">Internal</span> : fmtDate(org.lastPaymentDate)}
+                      </TableCell>
+                      <TableCell className="text-sm">
+                        {org.isInternal ? (
+                          <span className="text-xs italic text-muted-foreground">Internal</span>
+                        ) : org.nextDueDate ? (
+                          <span className={isPast(org.nextDueDate) ? "font-medium text-red-600" : "text-muted-foreground"}>
+                            {fmtDate(org.nextDueDate)}
+                            {org.nextDueAmount != null && <span className="ml-1 text-xs">({inr(org.nextDueAmount)})</span>}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
                       </TableCell>
                       <TableCell>
                         <Badge className={org.is_active !== false ? "bg-green-500/15 text-green-600 border-green-500/20" : "bg-red-500/15 text-red-600 border-red-500/20"} variant="outline">
@@ -220,6 +248,16 @@ export function PlatformOrgsTable({ organizations }: Props) {
                 <Badge variant={detailOrg?.is_active !== false ? "default" : "destructive"}>
                   {detailOrg?.is_active !== false ? "Active" : "Disabled"}
                 </Badge>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Last payment</p>
+                <p className="font-medium">{detailOrg?.isInternal ? "Internal — not billed" : fmtDate(detailOrg?.lastPaymentDate)}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Next due</p>
+                <p className={`font-medium ${!detailOrg?.isInternal && isPast(detailOrg?.nextDueDate) ? "text-red-600" : ""}`}>
+                  {detailOrg?.isInternal ? "Internal — not billed" : detailOrg?.nextDueDate ? `${fmtDate(detailOrg.nextDueDate)}${detailOrg.nextDueAmount != null ? ` (${inr(detailOrg.nextDueAmount)})` : ""}` : "—"}
+                </p>
               </div>
               <div>
                 <p className="text-muted-foreground">Users</p>
