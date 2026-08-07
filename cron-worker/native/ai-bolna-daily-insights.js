@@ -3,7 +3,7 @@ import { pgSelect } from "./_lib/postgrest.js";
 
 const ALL = "__all__"; // sentinel product for the org-wide lump (Dashboard Overview)
 
-async function analyze(anthropicKey, label, isLump, completed) {
+async function analyze(groqKey, cerebrasKey, label, isLump, completed) {
   const groups = {};
   for (const r of completed) {
     const o = r.extracted_data?.General?.outcome?.objective || "unknown";
@@ -41,14 +41,29 @@ Max 4 items per array. Be specific (cite Bolna's extraction or transcript snippe
     }
   }
 
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "x-api-key": anthropicKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-    body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 2000, messages: [{ role: "user", content: promptText }] }),
-  });
-  if (!res.ok) { console.error(`anthropic ${label}:`, (await res.text()).slice(0, 300)); return null; }
-  const json = await res.json();
-  const text = json.content?.[0]?.text || "{}";
+  // Text-only tier: Groq first, Cerebras as the fallback if Groq is
+  // unavailable/errors.
+  let json = null;
+  if (groqKey) {
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${groqKey}`, "content-type": "application/json" },
+      body: JSON.stringify({ model: "llama-3.3-70b-versatile", max_tokens: 2000, messages: [{ role: "user", content: promptText }] }),
+    });
+    if (res.ok) json = await res.json();
+    else console.error(`groq ${label}:`, (await res.text()).slice(0, 300));
+  }
+  if (!json && cerebrasKey) {
+    const res = await fetch("https://api.cerebras.ai/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${cerebrasKey}`, "content-type": "application/json" },
+      body: JSON.stringify({ model: "gemma-4-31b", max_tokens: 2000, messages: [{ role: "user", content: promptText }] }),
+    });
+    if (res.ok) json = await res.json();
+    else console.error(`cerebras ${label}:`, (await res.text()).slice(0, 300));
+  }
+  if (!json) return null;
+  const text = json.choices?.[0]?.message?.content || "{}";
   try {
     const m = text.match(/\{[\s\S]*\}/);
     return JSON.parse(m ? m[0] : text);
@@ -65,7 +80,7 @@ async function upsertInsight(env, body) {
 }
 
 async function tick(env, forDateOverride) {
-  if (!env.ANTHROPIC_API_KEY) return { ok: false, error: "ANTHROPIC_API_KEY missing" };
+  if (!env.GROQ_API_KEY && !env.CEREBRAS_API_KEY) return { ok: false, error: "GROQ_API_KEY / CEREBRAS_API_KEY missing" };
 
   const istNow = new Date(Date.now() + 5.5 * 3600 * 1000);
   const forDate = forDateOverride || istNow.toISOString().slice(0, 10);
@@ -100,7 +115,7 @@ async function tick(env, forDateOverride) {
   const results = {};
   for (const job of jobs) {
     if (job.completed.length === 0) { results[job.product] = "skipped (no completed calls)"; continue; }
-    const insights = await analyze(env.ANTHROPIC_API_KEY, job.product, job.product === ALL, job.completed);
+    const insights = await analyze(env.GROQ_API_KEY, env.CEREBRAS_API_KEY, job.product, job.product === ALL, job.completed);
     if (!insights) { results[job.product] = "analysis failed"; continue; }
     try {
       await upsertInsight(env, {

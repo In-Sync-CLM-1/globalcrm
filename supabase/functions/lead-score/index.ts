@@ -1,4 +1,4 @@
-// On-demand, cached AI lead scoring with Claude Haiku.
+// On-demand, cached AI lead scoring, Groq first with Cerebras as fallback.
 // Called when a contact detail page opens. Gathers the lead's scoring
 // parameters, hashes them, and only calls the model when the parameters have
 // changed since the last score (or when force=true). Otherwise returns the
@@ -12,7 +12,8 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const MODEL = "claude-haiku-4-5";
+const GROQ_MODEL = "llama-3.3-70b-versatile";
+const CEREBRAS_MODEL = "gemma-4-31b";
 
 const SYSTEM_PROMPT = `You are a B2B lead-scoring AI. Score lead quality 0-100, weighting pipeline stage most heavily, then engagement, then business profile and data quality.
 
@@ -44,15 +45,72 @@ function extractJson(text: string): any {
   return JSON.parse(t);
 }
 
+// Text-only tier: Groq first, Cerebras as the fallback if Groq is
+// unavailable/errors. Both are OpenAI-compatible chat-completions APIs.
+async function callGroqText(system: string, userContent: string, maxTokens: number): Promise<string | null> {
+  const key = Deno.env.get("GROQ_API_KEY");
+  if (!key) return null;
+  try {
+    const resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: GROQ_MODEL,
+        max_tokens: maxTokens,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: userContent },
+        ],
+      }),
+    });
+    if (!resp.ok) {
+      console.error("Groq call failed:", resp.status, await resp.text());
+      return null;
+    }
+    const data = await resp.json();
+    return data.choices?.[0]?.message?.content ?? null;
+  } catch (e) {
+    console.error("Groq call error:", e);
+    return null;
+  }
+}
+
+async function callCerebrasText(system: string, userContent: string, maxTokens: number): Promise<string | null> {
+  const key = Deno.env.get("CEREBRAS_API_KEY");
+  if (!key) return null;
+  try {
+    const resp = await fetch("https://api.cerebras.ai/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: CEREBRAS_MODEL,
+        max_tokens: maxTokens,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: userContent },
+        ],
+      }),
+    });
+    if (!resp.ok) {
+      console.error("Cerebras call failed:", resp.status, await resp.text());
+      return null;
+    }
+    const data = await resp.json();
+    return data.choices?.[0]?.message?.content ?? null;
+  } catch (e) {
+    console.error("Cerebras call error:", e);
+    return null;
+  }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
     const { contact_id, force } = await req.json();
     if (!contact_id) throw new Error("contact_id is required");
-
-    const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
-    if (!ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY is not configured");
 
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
@@ -136,33 +194,23 @@ serve(async (req) => {
       });
     }
 
-    // --- score with Claude Haiku ---
-    const resp = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "x-api-key": ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        max_tokens: 1024,
-        system: SYSTEM_PROMPT,
-        messages: [{ role: "user", content: `Score this lead:\n\n${JSON.stringify(params, null, 2)}` }],
-      }),
-    });
-    if (!resp.ok) {
-      const t = await resp.text();
-      console.error("anthropic error", resp.status, t);
-      return json({ error: resp.status === 429 ? "Rate limited, try again shortly." : "Scoring failed." }, resp.status === 429 ? 429 : 500);
+    // --- score with Groq (Cerebras fallback) ---
+    const userContent = `Score this lead:\n\n${JSON.stringify(params, null, 2)}`;
+    let modelUsed = GROQ_MODEL;
+    let aiContent = await callGroqText(SYSTEM_PROMPT, userContent, 1024);
+    if (!aiContent) {
+      modelUsed = CEREBRAS_MODEL;
+      aiContent = await callCerebrasText(SYSTEM_PROMPT, userContent, 1024);
     }
-    const data = await resp.json();
-    const report = extractJson(data.content[0].text);
+    if (!aiContent) {
+      return json({ error: "Scoring failed." }, 500);
+    }
+    const report = extractJson(aiContent);
     const score = Math.max(0, Math.min(100, Math.round(Number(report.score) || 0)));
     const category = String(report.category || "cold");
     const breakdown = report.breakdown && typeof report.breakdown === "object" ? report.breakdown : {};
 
-    const score_breakdown = { ...breakdown, _reasoning: report.reasoning || "", _input_hash: input_hash, _model: MODEL };
+    const score_breakdown = { ...breakdown, _reasoning: report.reasoning || "", _input_hash: input_hash, _model: modelUsed };
     const now = new Date().toISOString();
     if (existing) {
       await supabase.from("contact_lead_scores")

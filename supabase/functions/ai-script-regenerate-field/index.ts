@@ -14,6 +14,58 @@ type Field =
   | "behavioral_guidelines"
   | "objection_handling";
 
+// Text-only tier: Groq first, Cerebras as the fallback if Groq is
+// unavailable/errors. Both are OpenAI-compatible chat-completions APIs.
+async function callGroqText(userContent: string, maxTokens: number): Promise<string | null> {
+  const key = Deno.env.get("GROQ_API_KEY");
+  if (!key) return null;
+  try {
+    const resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "llama-3.3-70b-versatile",
+        max_tokens: maxTokens,
+        messages: [{ role: "user", content: userContent }],
+      }),
+    });
+    if (!resp.ok) {
+      console.error("Groq call failed:", resp.status, await resp.text());
+      return null;
+    }
+    const data = await resp.json();
+    return data.choices?.[0]?.message?.content ?? null;
+  } catch (e) {
+    console.error("Groq call error:", e);
+    return null;
+  }
+}
+
+async function callCerebrasText(userContent: string, maxTokens: number): Promise<string | null> {
+  const key = Deno.env.get("CEREBRAS_API_KEY");
+  if (!key) return null;
+  try {
+    const resp = await fetch("https://api.cerebras.ai/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "gemma-4-31b",
+        max_tokens: maxTokens,
+        messages: [{ role: "user", content: userContent }],
+      }),
+    });
+    if (!resp.ok) {
+      console.error("Cerebras call failed:", resp.status, await resp.text());
+      return null;
+    }
+    const data = await resp.json();
+    return data.choices?.[0]?.message?.content ?? null;
+  } catch (e) {
+    console.error("Cerebras call error:", e);
+    return null;
+  }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -21,9 +73,8 @@ serve(async (req) => {
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
-  const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY");
-  if (!anthropicKey) {
-    return new Response(JSON.stringify({ ok: false, error: "ANTHROPIC_API_KEY missing" }),
+  if (!Deno.env.get("GROQ_API_KEY") && !Deno.env.get("CEREBRAS_API_KEY")) {
+    return new Response(JSON.stringify({ ok: false, error: "GROQ_API_KEY / CEREBRAS_API_KEY missing" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 
@@ -121,26 +172,11 @@ TASK: Produce a clearly different alternative. Match the same intent and constra
 Return ONLY this JSON (no markdown, no commentary):
 { "value": "<the new alternative>" }`;
 
-  const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "x-api-key": anthropicKey,
-      "anthropic-version": "2023-06-01",
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 800,
-      messages: [{ role: "user", content: prompt }],
-    }),
-  });
-  if (!anthropicRes.ok) {
-    const err = await anthropicRes.text();
-    return new Response(JSON.stringify({ ok: false, error: `Anthropic error: ${err.slice(0, 400)}` }),
+  const text = (await callGroqText(prompt, 800)) ?? (await callCerebrasText(prompt, 800));
+  if (text === null) {
+    return new Response(JSON.stringify({ ok: false, error: "Both Groq and Cerebras calls failed" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
-  const anthropicJson = await anthropicRes.json();
-  const text = anthropicJson.content?.[0]?.text || "{}";
   let parsed: { value?: string } = {};
   try {
     const m = text.match(/\{[\s\S]*\}/);

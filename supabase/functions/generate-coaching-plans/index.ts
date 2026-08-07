@@ -7,7 +7,8 @@ const corsHeaders = {
 };
 
 const INSYNC_DEMO_ORG_ID = "61f7f96d-e80c-4d9b-a765-8eb32bd3c70d";
-const HAIKU_MODEL = "claude-haiku-4-5";
+const GROQ_MODEL = "llama-3.3-70b-versatile";
+const CEREBRAS_MODEL = "gemma-4-31b";
 const MIN_CALLS = 5;
 const LOOKBACK_DAYS = 60;
 const MAX_CALLS_PER_AGENT = 30; // most recent N to keep prompt size in check
@@ -51,48 +52,6 @@ Three concrete prospect scenarios the SDR should role-play, drawn from objection
 - Respond ONLY with JSON matching the schema. No prose around it.
 - Ground every claim in patterns visible in the data. If you can't find evidence for a weakness, drop it — don't pad to three.
 - Keep total content tight. The whole plan should be readable in 2 minutes.`;
-
-const COACHING_SCHEMA = {
-  type: "object",
-  properties: {
-    strengths: {
-      type: "array",
-      items: { type: "string" },
-    },
-    weaknesses: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          pattern: { type: "string" },
-          evidence: { type: "string" },
-          fix: { type: "string" },
-        },
-        required: ["pattern", "evidence", "fix"],
-        additionalProperties: false,
-      },
-    },
-    drills: {
-      type: "array",
-      items: { type: "string" },
-    },
-    role_play_scenarios: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          scenario: { type: "string" },
-          why: { type: "string" },
-          success_criteria: { type: "string" },
-        },
-        required: ["scenario", "why", "success_criteria"],
-        additionalProperties: false,
-      },
-    },
-  },
-  required: ["strengths", "weaknesses", "drills", "role_play_scenarios"],
-  additionalProperties: false,
-};
 
 interface CallRow {
   id: string;
@@ -159,43 +118,63 @@ function buildUserMessage(calls: CallRow[]): string {
   return lines.join("\n");
 }
 
-async function generatePlan(calls: CallRow[], anthropicKey: string): Promise<CoachingPlan> {
-  const resp = await fetch("https://api.anthropic.com/v1/messages", {
+// Text-only tier: Groq first, Cerebras as the fallback if Groq is
+// unavailable/errors. Both are OpenAI-compatible chat-completions APIs.
+async function callGroqText(userContent: string): Promise<string | null> {
+  const key = Deno.env.get("GROQ_API_KEY");
+  if (!key) return null;
+  const resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
-    headers: {
-      "x-api-key": anthropicKey,
-      "anthropic-version": "2023-06-01",
-      "content-type": "application/json",
-    },
+    headers: { Authorization: `Bearer ${key}`, "content-type": "application/json" },
     body: JSON.stringify({
-      model: HAIKU_MODEL,
+      model: GROQ_MODEL,
       max_tokens: 2048,
-      system: [
-        {
-          type: "text",
-          text: COACHING_SYSTEM_PROMPT,
-          cache_control: { type: "ephemeral" },
-        },
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: COACHING_SYSTEM_PROMPT },
+        { role: "user", content: userContent },
       ],
-      messages: [{ role: "user", content: buildUserMessage(calls) }],
-      output_config: {
-        format: {
-          type: "json_schema",
-          schema: COACHING_SCHEMA,
-        },
-      },
     }),
   });
-
   if (!resp.ok) {
-    throw new Error(`Anthropic coaching failed: ${resp.status} ${await resp.text()}`);
+    console.error(`Groq coaching failed: ${resp.status} ${await resp.text()}`);
+    return null;
   }
   const data = await resp.json();
-  const textBlock = (data.content || []).find((b: any) => b.type === "text");
-  if (!textBlock) {
-    throw new Error(`Anthropic returned no text block: ${JSON.stringify(data)}`);
+  return data.choices?.[0]?.message?.content ?? null;
+}
+
+async function callCerebrasText(userContent: string): Promise<string | null> {
+  const key = Deno.env.get("CEREBRAS_API_KEY");
+  if (!key) return null;
+  const resp = await fetch("https://api.cerebras.ai/v1/chat/completions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${key}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      model: CEREBRAS_MODEL,
+      max_tokens: 2048,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: COACHING_SYSTEM_PROMPT },
+        { role: "user", content: userContent },
+      ],
+    }),
+  });
+  if (!resp.ok) {
+    console.error(`Cerebras coaching failed: ${resp.status} ${await resp.text()}`);
+    return null;
   }
-  return JSON.parse(textBlock.text) as CoachingPlan;
+  const data = await resp.json();
+  return data.choices?.[0]?.message?.content ?? null;
+}
+
+async function generatePlan(calls: CallRow[]): Promise<CoachingPlan> {
+  const userContent = buildUserMessage(calls);
+  const text = (await callGroqText(userContent)) ?? (await callCerebrasText(userContent));
+  if (text === null) {
+    throw new Error("Both Groq and Cerebras coaching calls failed");
+  }
+  return JSON.parse(text) as CoachingPlan;
 }
 
 serve(async (req) => {
@@ -208,10 +187,9 @@ serve(async (req) => {
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
 
-  const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY");
-  if (!anthropicKey) {
+  if (!Deno.env.get("GROQ_API_KEY") && !Deno.env.get("CEREBRAS_API_KEY")) {
     return new Response(
-      JSON.stringify({ error: "ANTHROPIC_API_KEY missing" }),
+      JSON.stringify({ error: "GROQ_API_KEY / CEREBRAS_API_KEY missing" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   }
@@ -277,7 +255,7 @@ serve(async (req) => {
     const topObj = topObjections(objections, 8);
 
     try {
-      const plan = await generatePlan(sampled, anthropicKey);
+      const plan = await generatePlan(sampled);
 
       await supabase
         .from("agent_coaching_plans")

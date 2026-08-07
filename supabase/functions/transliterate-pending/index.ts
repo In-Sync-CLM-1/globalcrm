@@ -21,8 +21,9 @@ serve(async (req) => {
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const supabase = createClient(supabaseUrl, serviceKey);
-  const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY");
-  if (!anthropicKey) return done(500, { ok: false, error: "ANTHROPIC_API_KEY missing" });
+  if (!Deno.env.get("GROQ_API_KEY") && !Deno.env.get("CEREBRAS_API_KEY")) {
+    return done(500, { ok: false, error: "GROQ_API_KEY / CEREBRAS_API_KEY missing" });
+  }
 
   // Allow an explicit org override; default to IEDUP (the only Hindi-name org).
   let orgId = IEDUP_ORG_ID;
@@ -37,7 +38,7 @@ serve(async (req) => {
     if (rows.length === 0) break;
 
     // Convert via the existing transliterate-names fn (service-role auth).
-    const namesHi = await transliterateBatch(anthropicKey, rows.map((r) => r.name_en));
+    const namesHi = await transliterateBatch(rows.map((r) => r.name_en));
 
     // Only write rows we actually converted to Devanagari (skip fallbacks so a
     // failed batch is retried next run rather than stuck on English).
@@ -72,10 +73,11 @@ function hasDevanagari(s: string): boolean {
   return false;
 }
 
-// Transliterate English names to Devanagari via Claude Haiku (same approach as
-// the transliterate-names fn). Returns one entry per input; falls back to the
-// English name on any failure so a bad batch is retried (not written) later.
-async function transliterateBatch(apiKey: string, names: string[]): Promise<string[]> {
+// Transliterate English names to Devanagari, Groq first with Cerebras as
+// fallback (same approach as the transliterate-names fn). Returns one entry
+// per input; falls back to the English name on any failure so a bad batch is
+// retried (not written) later.
+async function transliterateBatch(names: string[]): Promise<string[]> {
   if (names.length === 0) return [];
   const system =
     "You transliterate Indian personal names from English (Latin script) to Hindi (Devanagari script). " +
@@ -90,28 +92,66 @@ async function transliterateBatch(apiKey: string, names: string[]): Promise<stri
     ...names.map((n, i) => `${i + 1}. ${n}`),
   ].join("\n");
   try {
-    const r = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "claude-haiku-4-5",
-        max_tokens: 4096,
-        temperature: 0,
-        system,
-        messages: [{ role: "user", content: user }],
-      }),
-    });
-    if (!r.ok) return names.slice();
-    const data = await r.json();
-    const text = Array.isArray(data?.content)
-      ? data.content.filter((b: any) => b?.type === "text").map((b: any) => b.text).join("")
-      : "";
+    const text = (await callGroqText(system, user, 4096)) ?? (await callCerebrasText(system, user, 4096));
+    if (text === null) return names.slice();
     const cleaned = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
     const parsed = JSON.parse(cleaned);
     const out = Array.isArray(parsed?.names) ? parsed.names : [];
     return names.map((src, i) => (typeof out[i] === "string" && out[i].trim() ? out[i].trim() : src));
   } catch {
     return names.slice();
+  }
+}
+
+// Text-only tier: Groq first, Cerebras as the fallback if Groq is
+// unavailable/errors. Both are OpenAI-compatible chat-completions APIs.
+async function callGroqText(system: string, userContent: string, maxTokens: number): Promise<string | null> {
+  const key = Deno.env.get("GROQ_API_KEY");
+  if (!key) return null;
+  try {
+    const resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "llama-3.3-70b-versatile",
+        max_tokens: maxTokens,
+        temperature: 0,
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: userContent },
+        ],
+      }),
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    return data.choices?.[0]?.message?.content ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function callCerebrasText(system: string, userContent: string, maxTokens: number): Promise<string | null> {
+  const key = Deno.env.get("CEREBRAS_API_KEY");
+  if (!key) return null;
+  try {
+    const resp = await fetch("https://api.cerebras.ai/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "gemma-4-31b",
+        max_tokens: maxTokens,
+        temperature: 0,
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: userContent },
+        ],
+      }),
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    return data.choices?.[0]?.message?.content ?? null;
+  } catch {
+    return null;
   }
 }
 

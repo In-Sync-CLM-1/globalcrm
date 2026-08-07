@@ -3,7 +3,8 @@ import { pgSelect, pgPatch } from "./_lib/postgrest.js";
 
 const INSYNC_DEMO_ORG_ID = "61f7f96d-e80c-4d9b-a765-8eb32bd3c70d";
 const BATCH_LIMIT = 10;
-const HAIKU_MODEL = "claude-haiku-4-5";
+const GROQ_MODEL = "llama-3.3-70b-versatile";
+const CEREBRAS_MODEL = "gemma-4-31b";
 const WHISPER_MODEL = "whisper-large-v3";
 
 const ANALYSIS_SYSTEM_PROMPT = `You are an expert call quality analyst for an Indian B2B SaaS sales team. You review transcripts of outbound prospecting and follow-up calls between Sales Development Representatives (SDRs) and prospects, and you return a structured JSON evaluation of how the call went.
@@ -56,20 +57,6 @@ Integer 1–10 of the SDR's overall performance on THIS call. Use the rubric:
 - Never invent details that aren't in the transcript. If something can't be determined from the transcript, say so explicitly in the relevant field (e.g. summary: "Brief call with no audible response from prospect; SDR left a voicemail").
 - Indian English idioms, Hindi loanwords, and code-switching between English and Hindi are normal — treat them as ordinary speech, not as quality issues.`;
 
-const ANALYSIS_SCHEMA = {
-  type: "object",
-  properties: {
-    summary: { type: "string" },
-    agent_tone: { type: "string", enum: ["warm", "professional", "robotic", "aggressive", "uncertain", "rushed"] },
-    script_adherence: { type: "string" },
-    objections: { type: "array", items: { type: "string" } },
-    next_step: { type: "string" },
-    quality_score: { type: "integer" },
-  },
-  required: ["summary", "agent_tone", "script_adherence", "objections", "next_step", "quality_score"],
-  additionalProperties: false,
-};
-
 async function transcribeWithGroq(audio, groqKey) {
   const form = new FormData();
   form.append("file", new Blob([audio], { type: "audio/mpeg" }), "recording.mp3");
@@ -86,8 +73,8 @@ async function transcribeWithGroq(audio, groqKey) {
   return (data.text || "").trim();
 }
 
-async function analyzeWithClaude(transcript, duration, anthropicKey) {
-  const userMessage = `Analyze the following sales call transcript and return the structured JSON evaluation.
+function buildAnalysisUserMessage(transcript, duration) {
+  return `Analyze the following sales call transcript and return the structured JSON evaluation.
 
 Call duration: ${Math.floor(duration / 60)}m ${duration % 60}s
 
@@ -95,31 +82,71 @@ Transcript:
 ---
 ${transcript || "(empty transcript — likely a very short call, voicemail, or no audible speech)"}
 ---`;
+}
 
-  const resp = await fetch("https://api.anthropic.com/v1/messages", {
+async function analyzeWithGroq(transcript, duration, groqKey) {
+  const userMessage = buildAnalysisUserMessage(transcript, duration);
+
+  const resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
-    headers: { "x-api-key": anthropicKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+    headers: { Authorization: `Bearer ${groqKey}`, "content-type": "application/json" },
     body: JSON.stringify({
-      model: HAIKU_MODEL, max_tokens: 1024,
-      system: [{ type: "text", text: ANALYSIS_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
-      messages: [{ role: "user", content: userMessage }],
-      output_config: { format: { type: "json_schema", schema: ANALYSIS_SCHEMA } },
+      model: GROQ_MODEL, max_tokens: 1024,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: ANALYSIS_SYSTEM_PROMPT },
+        { role: "user", content: userMessage },
+      ],
     }),
   });
-  if (!resp.ok) throw new Error(`Anthropic analysis failed: ${resp.status} ${await resp.text()}`);
+  if (!resp.ok) throw new Error(`Groq analysis failed: ${resp.status} ${await resp.text()}`);
   const data = await resp.json();
-  const textBlock = (data.content || []).find((b) => b.type === "text");
-  if (!textBlock) throw new Error(`Anthropic returned no text block: ${JSON.stringify(data)}`);
-  return JSON.parse(textBlock.text);
+  const content = data.choices?.[0]?.message?.content;
+  if (!content) throw new Error(`Groq returned no content: ${JSON.stringify(data)}`);
+  return JSON.parse(content);
+}
+
+async function analyzeWithCerebras(transcript, duration, cerebrasKey) {
+  const userMessage = buildAnalysisUserMessage(transcript, duration);
+
+  const resp = await fetch("https://api.cerebras.ai/v1/chat/completions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${cerebrasKey}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      model: CEREBRAS_MODEL, max_tokens: 1024,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: ANALYSIS_SYSTEM_PROMPT },
+        { role: "user", content: userMessage },
+      ],
+    }),
+  });
+  if (!resp.ok) throw new Error(`Cerebras analysis failed: ${resp.status} ${await resp.text()}`);
+  const data = await resp.json();
+  const content = data.choices?.[0]?.message?.content;
+  if (!content) throw new Error(`Cerebras returned no content: ${JSON.stringify(data)}`);
+  return JSON.parse(content);
+}
+
+// Text-only tier: Groq first, Cerebras as the fallback if Groq is
+// unavailable/errors.
+async function analyzeCall(transcript, duration, groqKey, cerebrasKey) {
+  try {
+    return await analyzeWithGroq(transcript, duration, groqKey);
+  } catch (groqError) {
+    if (!cerebrasKey) throw groqError;
+    console.error("Groq analysis failed, falling back to Cerebras:", groqError);
+    return await analyzeWithCerebras(transcript, duration, cerebrasKey);
+  }
 }
 
 async function tick(env) {
   const workerUrl = env.R2_RECORDINGS_WORKER_URL;
   const workerSecret = env.R2_RECORDINGS_SECRET;
   const groqKey = env.GROQ_API_KEY;
-  const anthropicKey = env.ANTHROPIC_API_KEY;
-  if (!workerUrl || !workerSecret || !groqKey || !anthropicKey) {
-    return { error: "Missing required env vars (R2_RECORDINGS_*, GROQ_API_KEY, ANTHROPIC_API_KEY)" };
+  const cerebrasKey = env.CEREBRAS_API_KEY;
+  if (!workerUrl || !workerSecret || !groqKey) {
+    return { error: "Missing required env vars (R2_RECORDINGS_*, GROQ_API_KEY)" };
   }
 
   const pending = await pgSelect(env, "call_logs",
@@ -150,7 +177,7 @@ async function tick(env) {
     }
 
     try {
-      const analysis = await analyzeWithClaude(transcript, duration, anthropicKey);
+      const analysis = await analyzeCall(transcript, duration, groqKey, cerebrasKey);
       await pgPatch(env, "call_logs", `id=eq.${row.id}`, {
         analysis_summary: analysis.summary, analysis_tone: analysis.agent_tone,
         analysis_script_adherence: analysis.script_adherence, analysis_objections: analysis.objections,

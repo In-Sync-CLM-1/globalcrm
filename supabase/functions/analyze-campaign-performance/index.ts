@@ -5,6 +5,58 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Text-only tier: Groq first, Cerebras as the fallback if Groq is
+// unavailable/errors. Both are OpenAI-compatible chat-completions APIs.
+async function callGroqText(system: string, userContent: string, maxTokens: number, temperature: number): Promise<string | null> {
+  const key = Deno.env.get('GROQ_API_KEY');
+  if (!key) return null;
+  const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'llama-3.3-70b-versatile',
+      max_tokens: maxTokens,
+      temperature,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: userContent },
+      ],
+    }),
+  });
+  if (!resp.ok) {
+    console.error('Groq API error:', resp.status, await resp.text());
+    return null;
+  }
+  const data = await resp.json();
+  return data.choices?.[0]?.message?.content ?? null;
+}
+
+async function callCerebrasText(system: string, userContent: string, maxTokens: number, temperature: number): Promise<string | null> {
+  const key = Deno.env.get('CEREBRAS_API_KEY');
+  if (!key) return null;
+  const resp = await fetch('https://api.cerebras.ai/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'gemma-4-31b',
+      max_tokens: maxTokens,
+      temperature,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: userContent },
+      ],
+    }),
+  });
+  if (!resp.ok) {
+    console.error('Cerebras API error:', resp.status, await resp.text());
+    return null;
+  }
+  const data = await resp.json();
+  return data.choices?.[0]?.message?.content ?? null;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -13,9 +65,8 @@ Deno.serve(async (req) => {
   try {
     const supabase = getSupabaseClient();
 
-    const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY');
-    if (!ANTHROPIC_API_KEY) {
-      throw new Error('ANTHROPIC_API_KEY not configured');
+    if (!Deno.env.get('GROQ_API_KEY') && !Deno.env.get('CEREBRAS_API_KEY')) {
+      throw new Error('GROQ_API_KEY / CEREBRAS_API_KEY not configured');
     }
 
     // Get all organizations
@@ -116,34 +167,25 @@ Respond ONLY with valid JSON in this exact format:
   "suggestedAction": "Specific action to take"
 }`;
 
-        // Call Anthropic Claude AI
+        // Call Groq first, Cerebras as fallback
         try {
-          const aiResponse = await fetch('https://api.anthropic.com/v1/messages', {
-            method: 'POST',
-            headers: {
-              'x-api-key': ANTHROPIC_API_KEY,
-              'anthropic-version': '2023-06-01',
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              model: 'claude-haiku-4-5-20251001',
-              max_tokens: 4096,
-              system: 'You are an expert marketing analyst. Always respond with valid JSON only.',
-              messages: [
-                { role: 'user', content: prompt }
-              ],
-              temperature: 0.7,
-            }),
-          });
+          const responseText = (await callGroqText(
+            'You are an expert marketing analyst. Always respond with valid JSON only.',
+            prompt,
+            4096,
+            0.7,
+          )) ?? (await callCerebrasText(
+            'You are an expert marketing analyst. Always respond with valid JSON only.',
+            prompt,
+            4096,
+            0.7,
+          ));
 
-          if (!aiResponse.ok) {
-            console.error(`AI API error for campaign ${campaignId}:`, await aiResponse.text());
+          if (responseText === null) {
+            console.error(`AI API error for campaign ${campaignId}: both Groq and Cerebras calls failed`);
             continue;
           }
 
-          const aiData = await aiResponse.json();
-          const responseText = aiData.content[0].text;
-          
           // Extract JSON from response
           let insights;
           try {

@@ -5,6 +5,64 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Text-only tier: Groq first, Cerebras as the fallback if Groq is
+// unavailable/errors. Both are OpenAI-compatible chat-completions APIs.
+async function callGroqText(system: string, userContent: string, maxTokens: number): Promise<string | null> {
+  const key = Deno.env.get('GROQ_API_KEY');
+  if (!key) return null;
+  try {
+    const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        max_tokens: maxTokens,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: userContent },
+        ],
+      }),
+    });
+    if (!resp.ok) {
+      console.error('Groq API error:', resp.status, await resp.text());
+      return null;
+    }
+    const data = await resp.json();
+    return data.choices?.[0]?.message?.content ?? null;
+  } catch (e) {
+    console.error('Groq call error:', e);
+    return null;
+  }
+}
+
+async function callCerebrasText(system: string, userContent: string, maxTokens: number): Promise<string | null> {
+  const key = Deno.env.get('CEREBRAS_API_KEY');
+  if (!key) return null;
+  try {
+    const resp = await fetch('https://api.cerebras.ai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'gemma-4-31b',
+        max_tokens: maxTokens,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: userContent },
+        ],
+      }),
+    });
+    if (!resp.ok) {
+      console.error('Cerebras API error:', resp.status, await resp.text());
+      return null;
+    }
+    const data = await resp.json();
+    return data.choices?.[0]?.message?.content ?? null;
+  } catch (e) {
+    console.error('Cerebras call error:', e);
+    return null;
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -13,9 +71,8 @@ Deno.serve(async (req) => {
   try {
     const supabase = getSupabaseClient();
 
-    const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY');
-    if (!ANTHROPIC_API_KEY) {
-      throw new Error('ANTHROPIC_API_KEY not configured');
+    if (!Deno.env.get('GROQ_API_KEY') && !Deno.env.get('CEREBRAS_API_KEY')) {
+      throw new Error('GROQ_API_KEY / CEREBRAS_API_KEY not configured');
     }
 
     // Verify platform admin access
@@ -104,29 +161,12 @@ Provide exactly 4-5 concise bullet-point insights covering:
 
 Keep each insight to 1-2 sentences. Be specific with numbers. Start each insight with a bold category label.`;
 
-    const aiResponse = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'x-api-key': ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 1024,
-        system: 'You are a concise platform operations analyst. Provide actionable insights in bullet-point format. Use **bold** for emphasis.',
-        messages: [{ role: 'user', content: prompt }],
-      }),
-    });
-
-    if (!aiResponse.ok) {
-      const errorText = await aiResponse.text();
-      console.error('Anthropic API error:', errorText);
+    const insightSystemPrompt = 'You are a concise platform operations analyst. Provide actionable insights in bullet-point format. Use **bold** for emphasis.';
+    const insight = (await callGroqText(insightSystemPrompt, prompt, 1024))
+      ?? (await callCerebrasText(insightSystemPrompt, prompt, 1024));
+    if (insight === null) {
       throw new Error('AI analysis failed');
     }
-
-    const aiData = await aiResponse.json();
-    const insight = aiData.content?.[0]?.text || 'No insights available.';
 
     return new Response(JSON.stringify({ insight }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

@@ -150,7 +150,7 @@ function detectFullNameIndex(normHeaders: string[], fieldToIndex: Record<string,
 
 // --- AI refinement ---------------------------------------------------------
 const GROQ_MODEL = 'llama-3.3-70b-versatile';
-const HAIKU_MODEL = 'claude-haiku-4-5';
+const CEREBRAS_MODEL = 'gemma-4-31b';
 
 const MAPPING_SYSTEM_PROMPT =
   'You map the columns of an uploaded B2B contact spreadsheet onto a fixed set of canonical database fields. ' +
@@ -226,28 +226,31 @@ async function callGroqMapping(systemPrompt: string, userContent: string): Promi
   }
 }
 
-async function callHaikuMapping(systemPrompt: string, userContent: string): Promise<AiMapping | null> {
-  const key = Deno.env.get('ANTHROPIC_API_KEY');
+async function callCerebrasMapping(systemPrompt: string, userContent: string): Promise<AiMapping | null> {
+  const key = Deno.env.get('CEREBRAS_API_KEY');
   if (!key) return null;
   try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    const resp = await fetch('https://api.cerebras.ai/v1/chat/completions', {
       method: 'POST',
-      headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: HAIKU_MODEL,
-        max_tokens: 1024,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: userContent }],
+        model: CEREBRAS_MODEL,
+        temperature: 0,
+        response_format: { type: 'json_object' },
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userContent },
+        ],
       }),
     });
     if (!resp.ok) {
-      console.error('[SMART-MAP] Haiku mapping failed:', resp.status, await resp.text());
+      console.error('[SMART-MAP] Cerebras mapping failed:', resp.status, await resp.text());
       return null;
     }
     const data = await resp.json();
-    return parseAiMapping(data.content?.[0]?.text ?? '');
+    return parseAiMapping(data.choices?.[0]?.message?.content ?? '');
   } catch (e) {
-    console.error('[SMART-MAP] Haiku mapping error:', e);
+    console.error('[SMART-MAP] Cerebras mapping error:', e);
     return null;
   }
 }
@@ -267,7 +270,7 @@ function headerIndex(rawHeaders: string[], normHeaders: string[], wanted: string
 // Generic engine behind buildFerventMapping/buildContactsMapping — parameterised
 // on the canonical field list + synonyms + identity fields so other import
 // types can reuse the same AI-assisted column-mapping without duplicating the
-// Groq/Haiku plumbing.
+// Groq/Cerebras plumbing.
 async function buildSmartMapping(
   canonicalFields: { key: string; desc: string }[],
   synonyms: Record<string, string[]>,
@@ -281,7 +284,7 @@ async function buildSmartMapping(
   const fieldToIndex = deterministicMap(synonyms, normHeaders);
 
   const userContent = buildAiUserContent(canonicalFields, rawHeaders, sampleRows);
-  const ai = await callGroqMapping(systemPrompt, userContent) ?? await callHaikuMapping(systemPrompt, userContent);
+  const ai = await callGroqMapping(systemPrompt, userContent) ?? await callCerebrasMapping(systemPrompt, userContent);
   const usedAi = ai !== null;
 
   let fullNameIndex: number | null = null;

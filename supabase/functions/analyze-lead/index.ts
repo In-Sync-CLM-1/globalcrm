@@ -6,6 +6,69 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+const GROQ_MODEL = 'llama-3.3-70b-versatile';
+const CEREBRAS_MODEL = 'gemma-4-31b';
+
+// Text-only tier: Groq first, Cerebras as the fallback if Groq is
+// unavailable/errors. Both are OpenAI-compatible chat-completions APIs.
+async function callGroqText(system: string, userContent: string, maxTokens: number): Promise<string | null> {
+  const key = Deno.env.get('GROQ_API_KEY');
+  if (!key) return null;
+  try {
+    const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: GROQ_MODEL,
+        max_tokens: maxTokens,
+        response_format: { type: 'json_object' },
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: userContent },
+        ],
+      }),
+    });
+    if (!resp.ok) {
+      console.error('Groq call failed:', resp.status, await resp.text());
+      return null;
+    }
+    const data = await resp.json();
+    return data.choices?.[0]?.message?.content ?? null;
+  } catch (e) {
+    console.error('Groq call error:', e);
+    return null;
+  }
+}
+
+async function callCerebrasText(system: string, userContent: string, maxTokens: number): Promise<string | null> {
+  const key = Deno.env.get('CEREBRAS_API_KEY');
+  if (!key) return null;
+  try {
+    const resp = await fetch('https://api.cerebras.ai/v1/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: CEREBRAS_MODEL,
+        max_tokens: maxTokens,
+        response_format: { type: 'json_object' },
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: userContent },
+        ],
+      }),
+    });
+    if (!resp.ok) {
+      console.error('Cerebras call failed:', resp.status, await resp.text());
+      return null;
+    }
+    const data = await resp.json();
+    return data.choices?.[0]?.message?.content ?? null;
+  } catch (e) {
+    console.error('Cerebras call error:', e);
+    return null;
+  }
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -13,11 +76,6 @@ serve(async (req) => {
 
   try {
     const { contact, searchQuery, contacts } = await req.json();
-    const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY');
-
-    if (!ANTHROPIC_API_KEY) {
-      throw new Error('ANTHROPIC_API_KEY is not configured');
-    }
 
     // Handle search query - filter contacts based on criteria
     if (searchQuery && contacts) {
@@ -72,48 +130,20 @@ Return the IDs of contacts that match the search criteria.`;
 
       console.log('Filtering contacts with query:', searchQuery);
 
-      const searchResponse = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'x-api-key': ANTHROPIC_API_KEY,
-          'anthropic-version': '2023-06-01',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: 'claude-haiku-4-5-20251001',
-          max_tokens: 4096,
-          system: searchSystemPrompt,
-          messages: [
-            { role: 'user', content: searchUserPrompt }
-          ],
-          // Enforces valid JSON in the reply instead of relying on prompt
-          // instructions alone -- an unenforced "Return ONLY JSON" was
-          // occasionally answered with markdown-fenced or prose-wrapped
-          // JSON, which JSON.parse below then threw on (found 2026-07-22,
-          // see project_globalcrm_native_worker_migration memory).
-          output_config: {
-            format: {
-              type: 'json_schema',
-              schema: {
-                type: 'object',
-                properties: {
-                  filteredContactIds: { type: 'array', items: { type: 'string' } },
-                },
-                required: ['filteredContactIds'],
-                additionalProperties: false,
-              },
-            },
-          },
-        }),
-      });
+      // JSON mode enforces valid JSON in the reply instead of relying on
+      // prompt instructions alone -- an unenforced "Return ONLY JSON" was
+      // occasionally answered with markdown-fenced or prose-wrapped
+      // JSON, which JSON.parse below then threw on (found 2026-07-22,
+      // see project_globalcrm_native_worker_migration memory).
+      const searchContent = await callGroqText(searchSystemPrompt, searchUserPrompt, 4096)
+        ?? await callCerebrasText(searchSystemPrompt, searchUserPrompt, 4096);
 
-      if (!searchResponse.ok) {
+      if (!searchContent) {
         throw new Error('Failed to process search query');
       }
 
-      const searchData = await searchResponse.json();
-      const searchResult = JSON.parse(searchData.content[0].text);
-      
+      const searchResult = JSON.parse(searchContent);
+
       console.log('Search result:', searchResult);
 
       return new Response(
@@ -249,71 +279,15 @@ Focus heavily on the pipeline_stage (especially stage_order) and engagement_metr
 
     console.log('Scoring lead:', contactData.name);
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'x-api-key': ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 4096,
-        system: systemPrompt,
-        messages: [
-          { role: 'user', content: userPrompt }
-        ],
-        // See the search-branch call above -- same enforced-JSON fix.
-        output_config: {
-          format: {
-            type: 'json_schema',
-            schema: {
-              type: 'object',
-              properties: {
-                score: { type: 'integer' },
-                category: { type: 'string', enum: ['hot', 'warm', 'cool', 'cold', 'unqualified'] },
-                breakdown: {
-                  type: 'object',
-                  properties: {
-                    'Pipeline Stage': { type: 'integer' },
-                    'Activity Engagement': { type: 'integer' },
-                    'Business Profile': { type: 'integer' },
-                    'Data Quality': { type: 'integer' },
-                  },
-                  required: ['Pipeline Stage', 'Activity Engagement', 'Business Profile', 'Data Quality'],
-                  additionalProperties: false,
-                },
-                reasoning: { type: 'string' },
-              },
-              required: ['score', 'category', 'breakdown', 'reasoning'],
-              additionalProperties: false,
-            },
-          },
-        },
-      }),
-    });
+    // See the search-branch call above -- same enforced-JSON fix, Groq
+    // first with Cerebras as the fallback.
+    const aiResponse = await callGroqText(systemPrompt, userPrompt, 4096)
+      ?? await callCerebrasText(systemPrompt, userPrompt, 4096);
 
-    if (!response.ok) {
-      if (response.status === 429) {
-        return new Response(
-          JSON.stringify({ error: 'Rate limit exceeded. Please try again later.' }),
-          { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-      if (response.status === 402) {
-        return new Response(
-          JSON.stringify({ error: 'Payment required. Please add credits to your workspace.' }),
-          { status: 402, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-      const errorText = await response.text();
-      console.error('AI Gateway error:', response.status, errorText);
+    if (!aiResponse) {
       throw new Error('Failed to score lead');
     }
 
-    const data = await response.json();
-    const aiResponse = data.content[0].text;
-    
     console.log('AI Response:', aiResponse);
     
     try {

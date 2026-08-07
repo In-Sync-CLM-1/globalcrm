@@ -5,6 +5,77 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Shape the model must return, expressed as JSON-mode instructions (Groq/Cerebras
+// are OpenAI-compatible and don't support Anthropic's forced tool_choice, so we
+// ask for the same shape via response_format: json_object instead).
+const PIPELINE_INSIGHTS_JSON_INSTRUCTIONS = `
+
+Respond with ONLY a JSON object of this exact shape (no markdown, no commentary):
+{
+  "insights": [
+    {
+      "priority": "high" | "medium" | "low",
+      "insight_type": "bottleneck" | "at_risk_deals" | "velocity_issue" | "optimization",
+      "title": "Clear action statement (max 60 chars)",
+      "description": "Why this matters (1 sentence)",
+      "impact": "Expected result",
+      "supportingData": { "stage": "...", "metric": "..." },
+      "analysis": "Your reasoning (2-3 sentences)",
+      "suggestedAction": "Specific action to take"
+    }
+  ]
+}`;
+
+// Text-only tier: Groq first, Cerebras as the fallback if Groq is
+// unavailable/errors. Both are OpenAI-compatible chat-completions APIs.
+async function callGroqText(system: string, userContent: string, maxTokens: number): Promise<string | null> {
+  const key = Deno.env.get('GROQ_API_KEY');
+  if (!key) return null;
+  const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'llama-3.3-70b-versatile',
+      max_tokens: maxTokens,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: userContent },
+      ],
+    }),
+  });
+  if (!resp.ok) {
+    console.error('Groq API error:', resp.status, await resp.text());
+    return null;
+  }
+  const data = await resp.json();
+  return data.choices?.[0]?.message?.content ?? null;
+}
+
+async function callCerebrasText(system: string, userContent: string, maxTokens: number): Promise<string | null> {
+  const key = Deno.env.get('CEREBRAS_API_KEY');
+  if (!key) return null;
+  const resp = await fetch('https://api.cerebras.ai/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'gemma-4-31b',
+      max_tokens: maxTokens,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: userContent },
+      ],
+    }),
+  });
+  if (!resp.ok) {
+    console.error('Cerebras API error:', resp.status, await resp.text());
+    return null;
+  }
+  const data = await resp.json();
+  return data.choices?.[0]?.message?.content ?? null;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -13,9 +84,8 @@ Deno.serve(async (req) => {
   try {
     const supabase = getSupabaseClient();
 
-    const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY');
-    if (!ANTHROPIC_API_KEY) {
-      throw new Error('ANTHROPIC_API_KEY not configured');
+    if (!Deno.env.get('GROQ_API_KEY') && !Deno.env.get('CEREBRAS_API_KEY')) {
+      throw new Error('GROQ_API_KEY / CEREBRAS_API_KEY not configured');
     }
 
     // Get all organizations
@@ -131,103 +201,47 @@ Identify the TOP 2-3 most critical pipeline issues and opportunities:
 
 For each insight, provide clear actionable recommendations.`;
 
-      // Call Anthropic Claude AI with tool calling
+      // Call Groq first, Cerebras as fallback, using JSON mode instead of
+      // Anthropic's forced tool_choice (not supported by either provider).
       try {
-        const aiResponse = await fetch('https://api.anthropic.com/v1/messages', {
-          method: 'POST',
-          headers: {
-            'x-api-key': ANTHROPIC_API_KEY,
-            'anthropic-version': '2023-06-01',
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            model: 'claude-haiku-4-5-20251001',
-            max_tokens: 4096,
-            system: 'You are an expert sales operations analyst. Provide actionable pipeline insights.',
-            messages: [
-              { role: 'user', content: prompt }
-            ],
-            tools: [{
-              name: 'create_pipeline_insights',
-              description: 'Generate actionable pipeline insights',
-              input_schema: {
-                type: 'object',
-                properties: {
-                  insights: {
-                    type: 'array',
-                    items: {
-                      type: 'object',
-                      properties: {
-                        priority: { type: 'string', enum: ['high', 'medium', 'low'] },
-                        insight_type: { type: 'string', enum: ['bottleneck', 'at_risk_deals', 'velocity_issue', 'optimization'] },
-                        title: { type: 'string', description: 'Clear action statement (max 60 chars)' },
-                        description: { type: 'string', description: 'Why this matters (1 sentence)' },
-                        impact: { type: 'string', description: 'Expected result' },
-                        supportingData: {
-                          type: 'object',
-                          properties: {
-                            stage: { type: 'string' },
-                            metric: { type: 'string' }
-                          }
-                        },
-                        analysis: { type: 'string', description: 'Your reasoning (2-3 sentences)' },
-                        suggestedAction: { type: 'string', description: 'Specific action to take' }
-                      },
-                      required: ['priority', 'insight_type', 'title', 'description', 'suggestedAction']
-                    }
-                  }
-                },
-                required: ['insights']
-              }
-            }],
-            tool_choice: { type: 'tool', name: 'create_pipeline_insights' }
-          }),
-        });
+        const system = 'You are an expert sales operations analyst. Provide actionable pipeline insights.';
+        const responseText = (await callGroqText(system, prompt + PIPELINE_INSIGHTS_JSON_INSTRUCTIONS, 4096))
+          ?? (await callCerebrasText(system, prompt + PIPELINE_INSIGHTS_JSON_INSTRUCTIONS, 4096));
 
-        if (!aiResponse.ok) {
-          const errorText = await aiResponse.text();
-          console.error(`AI API error for org ${org.id}:`, errorText);
+        if (responseText === null) {
+          console.error(`AI API error for org ${org.id}: both Groq and Cerebras calls failed`);
           continue;
         }
+        console.log(`AI response for org ${org.id}:`, responseText);
 
-        const aiData = await aiResponse.json();
-        console.log(`AI response for org ${org.id}:`, JSON.stringify(aiData));
-        
-        // Extract insights from tool call
+        // Extract insights from the JSON response
         let insightsArray = [];
         try {
-          const toolCall = aiData.content.find((b: { type: string }) => b.type === 'tool_use');
-          if (toolCall) {
-            insightsArray = toolCall.input.insights || [];
-          } else {
-            // Fallback: try to parse direct response
-            const responseText = aiData.content.find((b: { type: string }) => b.type === 'text')?.text || '';
-            console.log(`Fallback parsing for org ${org.id}, response:`, responseText);
-            
-            // Try multiple extraction methods
-            let parsed;
-            try {
-              // Method 1: Direct JSON parse
-              parsed = JSON.parse(responseText);
-            } catch {
-              // Method 2: Extract JSON from markdown
-              const jsonMatch = responseText.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
-              if (jsonMatch) {
-                parsed = JSON.parse(jsonMatch[1]);
-              } else {
-                // Method 3: Find any JSON object or array
-                const objectMatch = responseText.match(/\{[\s\S]*\}/);
-                if (objectMatch) {
-                  parsed = JSON.parse(objectMatch[0]);
-                }
+          console.log(`Parsing response for org ${org.id}, response:`, responseText);
+
+          // Try multiple extraction methods
+          let parsed;
+          try {
+            // Method 1: Direct JSON parse
+            parsed = JSON.parse(responseText);
+          } catch {
+            // Method 2: Extract JSON from markdown
+            const jsonMatch = responseText.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+            if (jsonMatch) {
+              parsed = JSON.parse(jsonMatch[1]);
+            } else {
+              // Method 3: Find any JSON object or array
+              const objectMatch = responseText.match(/\{[\s\S]*\}/);
+              if (objectMatch) {
+                parsed = JSON.parse(objectMatch[0]);
               }
             }
-            
-            // Handle both single object and array responses
-            if (parsed) {
-              insightsArray = Array.isArray(parsed) ? parsed : 
-                             parsed.insights ? parsed.insights : [parsed];
-            }
+          }
+
+          // Handle both single object and array responses
+          if (parsed) {
+            insightsArray = Array.isArray(parsed) ? parsed :
+                           parsed.insights ? parsed.insights : [parsed];
           }
         } catch (parseError) {
           console.error(`Failed to parse AI response for org ${org.id}:`, parseError);
