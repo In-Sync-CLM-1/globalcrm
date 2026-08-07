@@ -1,9 +1,68 @@
 // Shared: classify an AI call transcript into one of the org's outcome keys, and
 // apply the resulting disposition. Used by ai-bolna-webhook (live) and the
-// backfill function. Classification runs on Claude Haiku (our own key) — NOT on
-// Bolna's LLM (which only supports gpt-4o-mini).
+// backfill function. Classification runs on Groq first, Cerebras as fallback
+// (our own keys) — NOT on Bolna's LLM (which only supports gpt-4o-mini).
 
-const HAIKU_MODEL = "claude-haiku-4-5-20251001";
+const GROQ_MODEL = "llama-3.3-70b-versatile";
+const CEREBRAS_MODEL = "gemma-4-31b";
+
+// Text-only tier: Groq first, Cerebras as the fallback if Groq is
+// unavailable/errors. Both are OpenAI-compatible chat-completions APIs.
+async function callGroqText(system: string, userContent: string, maxTokens: number): Promise<string | null> {
+  const key = Deno.env.get("GROQ_API_KEY");
+  if (!key) return null;
+  try {
+    const resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        model: GROQ_MODEL,
+        max_tokens: maxTokens,
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: userContent },
+        ],
+      }),
+    });
+    if (!resp.ok) {
+      console.error("classifyCall Groq error:", resp.status, await resp.text());
+      return null;
+    }
+    const data = await resp.json();
+    return data.choices?.[0]?.message?.content ?? null;
+  } catch (e) {
+    console.error("classifyCall Groq fetch error:", String(e));
+    return null;
+  }
+}
+
+async function callCerebrasText(system: string, userContent: string, maxTokens: number): Promise<string | null> {
+  const key = Deno.env.get("CEREBRAS_API_KEY");
+  if (!key) return null;
+  try {
+    const resp = await fetch("https://api.cerebras.ai/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        model: CEREBRAS_MODEL,
+        max_tokens: maxTokens,
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: userContent },
+        ],
+      }),
+    });
+    if (!resp.ok) {
+      console.error("classifyCall Cerebras error:", resp.status, await resp.text());
+      return null;
+    }
+    const data = await resp.json();
+    return data.choices?.[0]?.message?.content ?? null;
+  } catch (e) {
+    console.error("classifyCall Cerebras fetch error:", String(e));
+    return null;
+  }
+}
 
 export interface CallClassification {
   outcome_key: string;
@@ -14,7 +73,6 @@ export interface CallClassification {
 }
 
 export async function classifyCall(
-  anthropicKey: string,
   args: { transcript: string; productLabel: string; outcomeKeys: string[]; todayIso?: string },
 ): Promise<CallClassification | null> {
   const transcript = (args.transcript || "").trim();
@@ -36,23 +94,8 @@ export async function classifyCall(
     `summary = max 240 chars, neutral, capturing what was discussed (used to brief a later reminder call).\n` +
     `JSON shape: {"outcome_key":"...","demo_date":null,"demo_time":null,"opt_out":false,"summary":"..."}`;
 
-  let resp: Response;
-  try {
-    resp = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "x-api-key": anthropicKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-      body: JSON.stringify({ model: HAIKU_MODEL, max_tokens: 350, system, messages: [{ role: "user", content: user }] }),
-    });
-  } catch (e) {
-    console.error("classifyCall fetch error:", String(e));
-    return null;
-  }
-  if (!resp.ok) {
-    console.error("classifyCall anthropic error:", resp.status, await resp.text());
-    return null;
-  }
-  const data = await resp.json();
-  const text = (data?.content || []).find((b: any) => b.type === "text")?.text ?? "";
+  const text = (await callGroqText(system, user, 350)) ?? (await callCerebrasText(system, user, 350));
+  if (text === null) return null;
   const m = text.match(/\{[\s\S]*\}/);
   if (!m) return null;
   try {
@@ -145,7 +188,6 @@ export interface ReminderReply {
   reschedule_time: string | null; // HH:MM 24h (IST) if resolvable
 }
 export async function classifyJoinIntent(
-  anthropicKey: string,
   transcript: string,
   todayIso?: string,
 ): Promise<ReminderReply> {
@@ -153,19 +195,11 @@ export async function classifyJoinIntent(
   const t = (transcript || "").trim();
   if (t.length < 5) return empty;
   const today = todayIso || new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+  const system = "You read a short reminder-call transcript and decide if the person confirmed they will JOIN their scheduled demo. If they cannot and propose another time, capture it and resolve it to an absolute date/time. Reply with ONLY a JSON object.";
+  const user = `Transcript:\n"""\n${t.slice(0, 6000)}\n"""\n\nToday is ${today}, timezone IST — resolve relative times like "tomorrow" or "Friday 3pm". Return JSON: {"intent":"yes|no|unclear","reschedule_text":"<their words, or null>","reschedule_date":"YYYY-MM-DD or null","reschedule_time":"HH:MM 24h or null"}`;
   try {
-    const resp = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "x-api-key": anthropicKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-      body: JSON.stringify({
-        model: HAIKU_MODEL, max_tokens: 120,
-        system: "You read a short reminder-call transcript and decide if the person confirmed they will JOIN their scheduled demo. If they cannot and propose another time, capture it and resolve it to an absolute date/time. Reply with ONLY a JSON object.",
-        messages: [{ role: "user", content: `Transcript:\n"""\n${t.slice(0, 6000)}\n"""\n\nToday is ${today}, timezone IST — resolve relative times like "tomorrow" or "Friday 3pm". Return JSON: {"intent":"yes|no|unclear","reschedule_text":"<their words, or null>","reschedule_date":"YYYY-MM-DD or null","reschedule_time":"HH:MM 24h or null"}` }],
-      }),
-    });
-    if (!resp.ok) return empty;
-    const data = await resp.json();
-    const text = ((data?.content || []).find((b: any) => b.type === "text")?.text || "");
+    const text = (await callGroqText(system, user, 120)) ?? (await callCerebrasText(system, user, 120));
+    if (text === null) return empty;
     const m = text.match(/\{[\s\S]*\}/);
     if (!m) return empty;
     const o = JSON.parse(m[0]);

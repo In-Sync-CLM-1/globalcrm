@@ -708,7 +708,7 @@ async function processBatch(
 // =============================================================================
 
 const GROQ_MODEL = 'llama-3.3-70b-versatile';
-const HAIKU_MODEL = 'claude-haiku-4-5';
+const CEREBRAS_MODEL = 'gemma-4-31b';
 
 // Sub-8-digit values (checked live 2026-07-27: 15 of 21,795 rows, mostly bare
 // extensions) are dropped rather than matched on: they aren't unique on their
@@ -845,38 +845,37 @@ async function callGroqVerify(items: any[]): Promise<Set<number> | null> {
 }
 
 // Backup for when Groq is down/unconfigured/rate-limited.
-async function callHaikuVerify(items: any[]): Promise<Set<number> | null> {
-  const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
-  if (!anthropicKey) return null;
+async function callCerebrasVerify(items: any[]): Promise<Set<number> | null> {
+  const cerebrasKey = Deno.env.get('CEREBRAS_API_KEY');
+  if (!cerebrasKey) return null;
   try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    const resp = await fetch('https://api.cerebras.ai/v1/chat/completions', {
       method: 'POST',
-      headers: {
-        'x-api-key': anthropicKey,
-        'anthropic-version': '2023-06-01',
-        'Content-Type': 'application/json',
-      },
+      headers: { Authorization: `Bearer ${cerebrasKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: HAIKU_MODEL,
-        max_tokens: 1024,
-        system: NAME_VERIFY_SYSTEM_PROMPT,
-        messages: [{ role: 'user', content: JSON.stringify(items) }],
+        model: CEREBRAS_MODEL,
+        temperature: 0,
+        response_format: { type: 'json_object' },
+        messages: [
+          { role: 'system', content: NAME_VERIFY_SYSTEM_PROMPT },
+          { role: 'user', content: JSON.stringify(items) },
+        ],
       }),
     });
     if (!resp.ok) {
-      console.error('[AI-DEDUPE] Haiku verification failed:', resp.status, await resp.text());
+      console.error('[AI-DEDUPE] Cerebras verification failed:', resp.status, await resp.text());
       return null;
     }
     const data = await resp.json();
-    return parseVerifyResults(data.content[0].text);
+    return parseVerifyResults(data.choices[0].message.content);
   } catch (e) {
-    console.error('[AI-DEDUPE] Haiku verification error:', e);
+    console.error('[AI-DEDUPE] Cerebras verification error:', e);
     return null;
   }
 }
 
 // One call verifies every name-only candidate pair in the batch at once.
-// Groq first, Claude Haiku as backup if Groq is unavailable or errors.
+// Groq first, Cerebras as backup if Groq is unavailable or errors.
 // Fails closed: if both are unavailable, nothing is confirmed and those
 // rows fall through to "new" rather than risk merging two different people.
 async function verifySamePersonBatch(
@@ -905,11 +904,11 @@ async function verifySamePersonBatch(
   const groqResult = await callGroqVerify(items);
   if (groqResult) return groqResult;
 
-  console.warn('[AI-DEDUPE] Groq unavailable, falling back to Haiku');
-  const haikuResult = await callHaikuVerify(items);
-  if (haikuResult) return haikuResult;
+  console.warn('[AI-DEDUPE] Groq unavailable, falling back to Cerebras');
+  const cerebrasResult = await callCerebrasVerify(items);
+  if (cerebrasResult) return cerebrasResult;
 
-  console.error('[AI-DEDUPE] Both Groq and Haiku verification failed; treating all as not-same-person');
+  console.error('[AI-DEDUPE] Both Groq and Cerebras verification failed; treating all as not-same-person');
   return new Set();
 }
 
@@ -1174,7 +1173,7 @@ async function processFerventBatch(
 // =============================================================================
 // FERVENT SMART-FORMATTING IMPORT
 // Entry point for fervent_repository uploads. Understands whatever layout the
-// file arrived in (AI-assisted, Groq -> Haiku), derives inferable fields,
+// file arrived in (AI-assisted, Groq -> Cerebras), derives inferable fields,
 // rejects the whole file if its shape is unusable or too many rows can't be
 // identified, imports the good rows through the existing dedup/upsert pipeline,
 // and emails any unusable rows back to the uploader to fix and re-upload.

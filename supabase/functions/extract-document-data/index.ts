@@ -79,6 +79,52 @@ Example: {"document_name": "Service Agreement 2025", "document_type": "agreement
 
     // Build the content block based on mime type (document for PDFs, image for images)
     const isPdf = mimeType === 'application/pdf';
+
+    // 1st choice: Groq. It only accepts image formats — not PDF — so for PDF
+    // input we skip straight to Claude Haiku below, which is the only
+    // provider here that reads real PDF documents natively. Since almost all
+    // documents here are PDFs, Haiku still does most of the real work; Groq
+    // picks up the rare image-only upload.
+    if (!isPdf) {
+      const groqKey = Deno.env.get('GROQ_API_KEY');
+      if (groqKey) {
+        try {
+          const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${groqKey}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+              max_tokens: 4096,
+              messages: [
+                { role: 'system', content: systemPrompt },
+                {
+                  role: 'user',
+                  content: [
+                    { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64}` } },
+                    { type: 'text', text: 'Please extract the data from this document.' },
+                  ],
+                },
+              ],
+            }),
+          });
+          if (groqRes.ok) {
+            const groqData = await groqRes.json();
+            const content = groqData.choices?.[0]?.message?.content || '';
+            const jsonMatch = content.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+              const extractedData = JSON.parse(jsonMatch[0]);
+              console.log('Extracted data (Groq):', extractedData);
+              return new Response(JSON.stringify({ success: true, extractedData }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+              });
+            }
+          }
+        } catch (groqError) {
+          console.error('Groq extraction failed, falling back to Haiku:', groqError);
+        }
+      }
+    }
+
     const documentContent = isPdf
       ? { type: 'document' as const, source: { type: 'base64' as const, media_type: 'application/pdf' as const, data: base64 } }
       : { type: 'image' as const, source: { type: 'base64' as const, media_type: mimeType, data: base64 } };

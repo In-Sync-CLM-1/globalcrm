@@ -38,11 +38,62 @@ type Result = {
   rationale?: string;
 };
 
+// Text-only tier: Groq first, Cerebras as the fallback if Groq is
+// unavailable/errors. Both are OpenAI-compatible chat-completions APIs.
+async function callGroqText(userContent: string, maxTokens: number): Promise<string | null> {
+  const key = Deno.env.get("GROQ_API_KEY");
+  if (!key) return null;
+  try {
+    const resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "llama-3.3-70b-versatile",
+        max_tokens: maxTokens,
+        messages: [{ role: "user", content: userContent }],
+      }),
+    });
+    if (!resp.ok) {
+      console.error("Groq call failed:", resp.status, await resp.text());
+      return null;
+    }
+    const data = await resp.json();
+    return data.choices?.[0]?.message?.content ?? null;
+  } catch (e) {
+    console.error("Groq call error:", e);
+    return null;
+  }
+}
+
+async function callCerebrasText(userContent: string, maxTokens: number): Promise<string | null> {
+  const key = Deno.env.get("CEREBRAS_API_KEY");
+  if (!key) return null;
+  try {
+    const resp = await fetch("https://api.cerebras.ai/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "gemma-4-31b",
+        max_tokens: maxTokens,
+        messages: [{ role: "user", content: userContent }],
+      }),
+    });
+    if (!resp.ok) {
+      console.error("Cerebras call failed:", resp.status, await resp.text());
+      return null;
+    }
+    const data = await resp.json();
+    return data.choices?.[0]?.message?.content ?? null;
+  } catch (e) {
+    console.error("Cerebras call error:", e);
+    return null;
+  }
+}
+
 // Generate (and persist) one script proposal for a single agent's script,
 // based on that product's most recent daily learnings.
 async function generateForScript(
   supabase: ReturnType<typeof createClient>,
-  anthropicKey: string,
   script: ScriptRow,
   forDate: string | null,
 ): Promise<Result> {
@@ -124,25 +175,10 @@ Return ONLY this JSON (no markdown, no commentary):
   "rationale": "<2-3 plain-English lines explaining what you changed and which layer each change went to>"
 }`;
 
-  const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "x-api-key": anthropicKey,
-      "anthropic-version": "2023-06-01",
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 2000,
-      messages: [{ role: "user", content: prompt }],
-    }),
-  });
-  if (!anthropicRes.ok) {
-    const err = await anthropicRes.text();
-    return { ...base, error: `Anthropic error: ${err.slice(0, 500)}` };
+  const text = (await callGroqText(prompt, 2000)) ?? (await callCerebrasText(prompt, 2000));
+  if (text === null) {
+    return { ...base, error: "Both Groq and Cerebras calls failed" };
   }
-  const anthropicJson = await anthropicRes.json();
-  const text = anthropicJson.content?.[0]?.text || "{}";
   let parsed: any = {};
   try {
     const m = text.match(/\{[\s\S]*\}/);
@@ -192,9 +228,8 @@ serve(async (req) => {
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
-  const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY");
-  if (!anthropicKey) {
-    return new Response(JSON.stringify({ ok: false, error: "ANTHROPIC_API_KEY missing" }),
+  if (!Deno.env.get("GROQ_API_KEY") && !Deno.env.get("CEREBRAS_API_KEY")) {
+    return new Response(JSON.stringify({ ok: false, error: "GROQ_API_KEY / CEREBRAS_API_KEY missing" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 
@@ -219,7 +254,7 @@ serve(async (req) => {
       .eq("id", scriptId)
       .maybeSingle();
     if (error || !script) return json({ ok: false, error: "Script not found" }, 404);
-    const result = await generateForScript(supabase, anthropicKey, script as ScriptRow, forDate);
+    const result = await generateForScript(supabase, script as ScriptRow, forDate);
     // 200 even for "no learnings yet" so the UI can surface the friendly message.
     return json(result, result.ok || result.skipped ? 200 : 500);
   }
@@ -232,7 +267,7 @@ serve(async (req) => {
 
   const results: Result[] = [];
   for (const s of (allScripts || []) as ScriptRow[]) {
-    results.push(await generateForScript(supabase, anthropicKey, s, forDate));
+    results.push(await generateForScript(supabase, s, forDate));
   }
 
   return json({
