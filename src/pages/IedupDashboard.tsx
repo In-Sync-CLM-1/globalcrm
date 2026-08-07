@@ -14,7 +14,7 @@ import {
 import { format, eachDayOfInterval, startOfDay, differenceInCalendarDays, startOfWeek } from "date-fns";
 import {
   Users as UsersIcon, PhoneCall, MessageSquare, IndianRupee,
-  AlertTriangle, CheckCircle2, XCircle, Eye, Send,
+  AlertTriangle, CheckCircle2, XCircle, Eye, Send, Mail,
 } from "lucide-react";
 import { useIsIedup, IEDUP_ORG_ID } from "@/hooks/useIsIedup";
 
@@ -35,7 +35,7 @@ const TEMPLATE_LABELS: Record<string, string> = {
 const templateLabel = (n: string | null) =>
   n ? (TEMPLATE_LABELS[n] || n.replace(/^iedup_cmyuva_/, "").replace(/_v\d+$/, "").replace(/_/g, " ")) : "—";
 
-const C = { sent: "#3b82f6", delivered: "#10b981", opened: "#8b5cf6", placed: "#6366f1", connected: "#10b981" };
+const C = { sent: "#3b82f6", delivered: "#10b981", opened: "#8b5cf6", placed: "#6366f1", connected: "#10b981", emailSent: "#f59e0b", emailFailed: "#ef4444" };
 
 export default function IedupDashboard() {
   const { isLoading: orgLoading } = useIsIedup();
@@ -84,6 +84,20 @@ export default function IedupDashboard() {
     refetchInterval: REFRESH_MS,
   });
 
+  // Emails within the selected period
+  const { data: emailRows } = useQuery({
+    queryKey: ["iedup-email", rangeKey],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("pipeline_email_log")
+        .select("status, subject, sent_at, failed_at, created_at, cost_charged")
+        .eq("org_id", IEDUP_ORG_ID)
+        .gte("created_at", fromIso).lte("created_at", toIso);
+      return data || [];
+    },
+    refetchInterval: REFRESH_MS,
+  });
+
   const { data: settings } = useQuery({
     queryKey: ["iedup-org-settings"],
     queryFn: async () => (await supabase.from("organization_settings").select("dialing_active, calling_windows, updated_at").eq("org_id", IEDUP_ORG_ID).maybeSingle()).data,
@@ -113,6 +127,14 @@ export default function IedupDashboard() {
     return { sent, delivered, opened, failed, cost, openRate, deliveryRate };
   }, [waRows]);
 
+  const email = useMemo(() => {
+    const all = emailRows || [];
+    const sent = all.filter((r: any) => r.status === "sent").length;
+    const failed = all.filter((r: any) => r.status === "failed").length;
+    const cost = all.reduce((a: number, r: any) => a + Number(r.cost_charged || 0), 0);
+    return { sent, failed, cost, total: sent + failed };
+  }, [emailRows]);
+
   // Per-bucket time series (daily, or weekly for long ranges)
   const trend = useMemo(() => {
     const spanDays = Math.max(1, differenceInCalendarDays(dateRange.to, dateRange.from) + 1);
@@ -127,7 +149,7 @@ export default function IedupDashboard() {
       : days;
     for (const d of seeds) {
       const k = keyOf(d).toISOString();
-      buckets.set(k, { key: k, label: format(new Date(k), labelFmt), sent: 0, delivered: 0, opened: 0, placed: 0, connected: 0 });
+      buckets.set(k, { key: k, label: format(new Date(k), labelFmt), sent: 0, delivered: 0, opened: 0, placed: 0, connected: 0, emailSent: 0, emailFailed: 0 });
     }
     const bump = (iso: string | null, fn: (b: any) => void) => {
       if (!iso) return;
@@ -145,8 +167,12 @@ export default function IedupDashboard() {
       bump(r.started_at || r.created_at, (b) => b.placed++);
       if (Number(r.conversation_duration || 0) >= 5) bump(r.started_at || r.created_at, (b) => b.connected++);
     });
+    (emailRows || []).forEach((r: any) => {
+      if (r.status === "sent") bump(r.sent_at || r.created_at, (b) => b.emailSent++);
+      if (r.status === "failed") bump(r.failed_at || r.created_at, (b) => b.emailFailed++);
+    });
     return Array.from(buckets.values());
-  }, [waRows, callRows, dateRange]);
+  }, [waRows, callRows, emailRows, dateRange]);
 
   const byTemplate = useMemo(() => {
     const m = new Map<string, { name: string; sent: number; opened: number }>();
@@ -185,12 +211,13 @@ export default function IedupDashboard() {
         </div>
 
         {/* Headline KPIs */}
-        <div className="grid shrink-0 grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        <div className="grid shrink-0 grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
           <KpiCard icon={<UsersIcon size={16} />} label="Beneficiaries" value={dataCounts?.total ?? "—"} tone="slate" />
           <KpiCard icon={<Send size={16} />} label="Messages sent" value={wa.sent} tone="blue" />
           <KpiCard icon={<CheckCircle2 size={16} />} label="Delivery rate" value={`${wa.deliveryRate}%`} tone="emerald" />
           <KpiCard icon={<Eye size={16} />} label="Open rate" value={`${wa.openRate}%`} tone="violet" />
           <KpiCard icon={<PhoneCall size={16} />} label="Calls placed" value={calls.placed} tone="indigo" />
+          <KpiCard icon={<Mail size={16} />} label="Emails sent" value={email.sent} tone="amber" />
         </div>
 
         {/* Primary trend + funnel */}
@@ -269,6 +296,44 @@ export default function IedupDashboard() {
                 </BarChart>
               </ResponsiveContainer>
             ) : <Empty>No WhatsApp activity in this period</Empty>}
+          </ChartCard>
+        </div>
+
+        {/* Email trend + status */}
+        <div className="grid grid-cols-1 gap-3 lg:min-h-0 lg:flex-1 lg:grid-cols-3">
+          <ChartCard className="lg:col-span-2" title="Emails over time" subtitle="Sent vs Failed">
+            {email.total > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={trend} margin={{ top: 6, right: 8, left: -18, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="g-emailSent" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={C.emailSent} stopOpacity={0.35} /><stop offset="95%" stopColor={C.emailSent} stopOpacity={0} />
+                    </linearGradient>
+                    <linearGradient id="g-emailFailed" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={C.emailFailed} stopOpacity={0.35} /><stop offset="95%" stopColor={C.emailFailed} stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.5} />
+                  <XAxis dataKey="label" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={16} />
+                  <YAxis tick={{ fontSize: 10 }} tickLine={false} axisLine={false} allowDecimals={false} />
+                  <Tooltip content={<ChartTooltip />} />
+                  <Legend wrapperStyle={{ fontSize: 11, paddingTop: 6 }} formatter={(v) => <span className="capitalize text-muted-foreground">{v}</span>} />
+                  <Area type="monotone" dataKey="emailSent" name="sent" stroke={C.emailSent} strokeWidth={2} fill="url(#g-emailSent)" />
+                  <Area type="monotone" dataKey="emailFailed" name="failed" stroke={C.emailFailed} strokeWidth={2} fill="url(#g-emailFailed)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : <Empty>No email activity in this period</Empty>}
+          </ChartCard>
+
+          <ChartCard title="Email status" subtitle="This period">
+            <div className="flex h-full flex-col justify-center gap-3 px-1">
+              <FunnelBar label="Sent" value={email.sent} total={email.total} color={C.emailSent} />
+              <FunnelBar label="Failed" value={email.failed} total={email.total} color={C.emailFailed} />
+              <div className="mt-1 flex items-baseline justify-between text-xs">
+                <span className="font-medium text-muted-foreground">Cost</span>
+                <span className="font-medium">₹{email.cost.toFixed(2)}</span>
+              </div>
+            </div>
           </ChartCard>
         </div>
 
@@ -356,7 +421,7 @@ const ChartTooltip = ({ active, payload, label }: any) => {
       {payload.map((p: any) => (
         <div key={p.dataKey} className="flex items-center gap-2">
           <span className="h-2 w-2 rounded-full" style={{ backgroundColor: p.color || p.fill }} />
-          <span className="capitalize text-muted-foreground">{p.dataKey}:</span>
+          <span className="capitalize text-muted-foreground">{p.name || p.dataKey}:</span>
           <span className="font-medium">{p.value}</span>
         </div>
       ))}
