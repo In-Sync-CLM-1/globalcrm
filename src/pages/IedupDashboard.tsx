@@ -195,7 +195,7 @@ export default function IedupDashboard() {
 
   return (
     <DashboardLayout>
-      <div className="flex flex-col gap-3 lg:h-full lg:overflow-hidden">
+      <div className="flex flex-col gap-3">
         {/* Header */}
         <div className="flex shrink-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -220,109 +220,55 @@ export default function IedupDashboard() {
           <KpiCard icon={<Mail size={16} />} label="Emails sent" value={email.sent} tone="amber" />
         </div>
 
-        {/* Primary trend + funnel */}
-        <div className="grid grid-cols-1 gap-3 lg:min-h-0 lg:flex-1 lg:grid-cols-3">
-          <ChartCard className="lg:col-span-2" title="WhatsApp outreach over time" subtitle="Sent → Delivered → Opened">
-            {hasWaData ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={trend} margin={{ top: 6, right: 8, left: -18, bottom: 0 }}>
-                  <defs>
-                    {(["sent", "delivered", "opened"] as const).map((k) => (
-                      <linearGradient key={k} id={`g-${k}`} x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor={C[k]} stopOpacity={0.35} />
-                        <stop offset="95%" stopColor={C[k]} stopOpacity={0} />
-                      </linearGradient>
-                    ))}
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.5} />
-                  <XAxis dataKey="label" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={16} />
-                  <YAxis tick={{ fontSize: 10 }} tickLine={false} axisLine={false} allowDecimals={false} />
-                  <Tooltip content={<ChartTooltip />} />
-                  <Legend wrapperStyle={{ fontSize: 11, paddingTop: 6 }} formatter={(v) => <span className="capitalize text-muted-foreground">{v}</span>} />
-                  <Area type="monotone" dataKey="sent" stroke={C.sent} strokeWidth={2} fill="url(#g-sent)" />
-                  <Area type="monotone" dataKey="delivered" stroke={C.delivered} strokeWidth={2} fill="url(#g-delivered)" />
-                  <Area type="monotone" dataKey="opened" stroke={C.opened} strokeWidth={2} fill="url(#g-opened)" />
-                </AreaChart>
-              </ResponsiveContainer>
-            ) : <Empty>No WhatsApp activity in this period</Empty>}
-          </ChartCard>
+        {/* One integrated trend: every channel, same timeline */}
+        <ChartCard title="Outreach over time" subtitle="WhatsApp · Calls · Email — all channels on one timeline" height="tall">
+          {hasWaData || hasCallData || email.total > 0 ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={trend} margin={{ top: 6, right: 8, left: -18, bottom: 0 }}>
+                <defs>
+                  {(["sent", "delivered", "opened", "placed", "connected", "emailSent", "emailFailed"] as const).map((k) => (
+                    <linearGradient key={k} id={`g-${k}`} x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={C[k]} stopOpacity={0.3} />
+                      <stop offset="95%" stopColor={C[k]} stopOpacity={0} />
+                    </linearGradient>
+                  ))}
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.5} />
+                <XAxis dataKey="label" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={16} />
+                <YAxis tick={{ fontSize: 10 }} tickLine={false} axisLine={false} allowDecimals={false} />
+                <Tooltip content={<ChartTooltip />} />
+                <Legend wrapperStyle={{ fontSize: 11, paddingTop: 6 }} formatter={(v) => <span className="capitalize text-muted-foreground">{v}</span>} />
+                <Area type="monotone" dataKey="sent" name="WA sent" stroke={C.sent} strokeWidth={2} fill="url(#g-sent)" />
+                <Area type="monotone" dataKey="delivered" name="WA delivered" stroke={C.delivered} strokeWidth={1.5} fill="url(#g-delivered)" />
+                <Area type="monotone" dataKey="opened" name="WA opened" stroke={C.opened} strokeWidth={1.5} fill="url(#g-opened)" />
+                <Area type="monotone" dataKey="placed" name="Calls placed" stroke={C.placed} strokeWidth={2} fill="url(#g-placed)" />
+                <Area type="monotone" dataKey="connected" name="Calls connected" stroke={C.connected} strokeWidth={1.5} fill="url(#g-connected)" />
+                <Area type="monotone" dataKey="emailSent" name="Email sent" stroke={C.emailSent} strokeWidth={2} fill="url(#g-emailSent)" />
+                <Area type="monotone" dataKey="emailFailed" name="Email failed" stroke={C.emailFailed} strokeWidth={1.5} fill="url(#g-emailFailed)" />
+              </AreaChart>
+            </ResponsiveContainer>
+          ) : <Empty>No outreach activity in this period</Empty>}
+        </ChartCard>
 
-          <ChartCard title="Delivery funnel" subtitle="This period">
+        {/* Per-channel detail */}
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+          <ChartCard title="WhatsApp delivery funnel" subtitle="This period">
             <div className="flex h-full flex-col justify-center gap-3 px-1">
               <FunnelBar label="Sent" value={wa.sent} total={wa.sent} color={C.sent} />
               <FunnelBar label="Delivered" value={wa.delivered} total={wa.sent} color={C.delivered} />
               <FunnelBar label="Opened" value={wa.opened} total={wa.sent} color={C.opened} />
             </div>
           </ChartCard>
-        </div>
 
-        {/* Calls trend + by-template */}
-        <div className="grid grid-cols-1 gap-3 lg:min-h-0 lg:flex-1 lg:grid-cols-2">
-          <ChartCard title="Calls over time" subtitle="Placed vs Connected">
-            {hasCallData ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={trend} margin={{ top: 6, right: 8, left: -18, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="g-placed" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor={C.placed} stopOpacity={0.35} /><stop offset="95%" stopColor={C.placed} stopOpacity={0} />
-                    </linearGradient>
-                    <linearGradient id="g-connected" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor={C.connected} stopOpacity={0.35} /><stop offset="95%" stopColor={C.connected} stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.5} />
-                  <XAxis dataKey="label" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={16} />
-                  <YAxis tick={{ fontSize: 10 }} tickLine={false} axisLine={false} allowDecimals={false} />
-                  <Tooltip content={<ChartTooltip />} />
-                  <Legend wrapperStyle={{ fontSize: 11, paddingTop: 6 }} formatter={(v) => <span className="capitalize text-muted-foreground">{v}</span>} />
-                  <Area type="monotone" dataKey="placed" stroke={C.placed} strokeWidth={2} fill="url(#g-placed)" />
-                  <Area type="monotone" dataKey="connected" stroke={C.connected} strokeWidth={2} fill="url(#g-connected)" />
-                </AreaChart>
-              </ResponsiveContainer>
-            ) : <Empty>No calls in this period</Empty>}
-          </ChartCard>
-
-          <ChartCard title="By message type" subtitle="Sent vs Opened">
-            {byTemplate.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={byTemplate} layout="vertical" margin={{ top: 4, right: 12, left: 8, bottom: 0 }}>
-                  <CartesianGrid horizontal={false} strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.5} />
-                  <XAxis type="number" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} allowDecimals={false} />
-                  <YAxis type="category" dataKey="name" width={96} tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
-                  <Tooltip content={<ChartTooltip />} />
-                  <Legend wrapperStyle={{ fontSize: 11, paddingTop: 6 }} formatter={(v) => <span className="capitalize text-muted-foreground">{v}</span>} />
-                  <Bar dataKey="sent" fill={C.sent} radius={[0, 4, 4, 0]} barSize={9} />
-                  <Bar dataKey="opened" fill={C.opened} radius={[0, 4, 4, 0]} barSize={9} />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : <Empty>No WhatsApp activity in this period</Empty>}
-          </ChartCard>
-        </div>
-
-        {/* Email trend + status */}
-        <div className="grid grid-cols-1 gap-3 lg:min-h-0 lg:flex-1 lg:grid-cols-3">
-          <ChartCard className="lg:col-span-2" title="Emails over time" subtitle="Sent vs Failed">
-            {email.total > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={trend} margin={{ top: 6, right: 8, left: -18, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="g-emailSent" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor={C.emailSent} stopOpacity={0.35} /><stop offset="95%" stopColor={C.emailSent} stopOpacity={0} />
-                    </linearGradient>
-                    <linearGradient id="g-emailFailed" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor={C.emailFailed} stopOpacity={0.35} /><stop offset="95%" stopColor={C.emailFailed} stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.5} />
-                  <XAxis dataKey="label" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={16} />
-                  <YAxis tick={{ fontSize: 10 }} tickLine={false} axisLine={false} allowDecimals={false} />
-                  <Tooltip content={<ChartTooltip />} />
-                  <Legend wrapperStyle={{ fontSize: 11, paddingTop: 6 }} formatter={(v) => <span className="capitalize text-muted-foreground">{v}</span>} />
-                  <Area type="monotone" dataKey="emailSent" name="sent" stroke={C.emailSent} strokeWidth={2} fill="url(#g-emailSent)" />
-                  <Area type="monotone" dataKey="emailFailed" name="failed" stroke={C.emailFailed} strokeWidth={2} fill="url(#g-emailFailed)" />
-                </AreaChart>
-              </ResponsiveContainer>
-            ) : <Empty>No email activity in this period</Empty>}
+          <ChartCard title="Calls" subtitle="This period">
+            <div className="flex h-full flex-col justify-center gap-3 px-1">
+              <FunnelBar label="Placed" value={calls.placed} total={calls.placed} color={C.placed} />
+              <FunnelBar label="Connected" value={calls.connected} total={calls.placed} color={C.connected} />
+              <div className="mt-1 flex items-baseline justify-between text-xs">
+                <span className="font-medium text-muted-foreground">Cost</span>
+                <span className="font-medium">₹{calls.costRupees.toFixed(2)}</span>
+              </div>
+            </div>
           </ChartCard>
 
           <ChartCard title="Email status" subtitle="This period">
@@ -336,6 +282,23 @@ export default function IedupDashboard() {
             </div>
           </ChartCard>
         </div>
+
+        {/* By message type */}
+        <ChartCard title="WhatsApp by message type" subtitle="Sent vs Opened">
+          {byTemplate.length > 0 ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={byTemplate} layout="vertical" margin={{ top: 4, right: 12, left: 8, bottom: 0 }}>
+                <CartesianGrid horizontal={false} strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.5} />
+                <XAxis type="number" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} allowDecimals={false} />
+                <YAxis type="category" dataKey="name" width={96} tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
+                <Tooltip content={<ChartTooltip />} />
+                <Legend wrapperStyle={{ fontSize: 11, paddingTop: 6 }} formatter={(v) => <span className="capitalize text-muted-foreground">{v}</span>} />
+                <Bar dataKey="sent" fill={C.sent} radius={[0, 4, 4, 0]} barSize={9} />
+                <Bar dataKey="opened" fill={C.opened} radius={[0, 4, 4, 0]} barSize={9} />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : <Empty>No WhatsApp activity in this period</Empty>}
+        </ChartCard>
 
       </div>
     </DashboardLayout>
@@ -366,14 +329,14 @@ function KpiCard({ icon, label, value, tone }: { icon: React.ReactNode; label: s
   );
 }
 
-function ChartCard({ title, subtitle, children, className = "" }: { title: string; subtitle?: string; children: React.ReactNode; className?: string }) {
+function ChartCard({ title, subtitle, children, className = "", height }: { title: string; subtitle?: string; children: React.ReactNode; className?: string; height?: "tall" }) {
   return (
-    <Card className={`flex flex-col p-4 ${className}`}>
+    <Card className={`flex shrink-0 flex-col p-4 ${className}`}>
       <div className="mb-2 shrink-0">
         <h3 className="text-sm font-semibold">{title}</h3>
         {subtitle && <p className="text-[11px] text-muted-foreground">{subtitle}</p>}
       </div>
-      <div className="h-[180px] lg:h-auto lg:min-h-0 lg:flex-1">{children}</div>
+      <div className={height === "tall" ? "h-[320px] lg:h-[400px]" : "h-[220px]"}>{children}</div>
     </Card>
   );
 }
