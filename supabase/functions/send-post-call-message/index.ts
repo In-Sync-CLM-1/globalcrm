@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { getSupabaseClient } from "../_shared/supabaseClient.ts";
+import { ORG_EMAIL_IDENTITY_OVERRIDE } from "../_shared/orgEmailIdentity.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -271,9 +272,10 @@ serve(async (req) => {
           } else {
             const subject = renderTemplate(emailTpl.subject || "", emailVars);
             const html = renderTemplate(emailTpl.html_content || emailTpl.body_content || "", emailVars);
-            const fromEmail = `noreply@${emailSettings.sending_domain}`;
+            const identityOverride = ORG_EMAIL_IDENTITY_OVERRIDE[callLog.org_id];
+            const fromEmail = identityOverride?.fromEmail ?? `noreply@${emailSettings.sending_domain}`;
             const fromName = "In-Sync";
-            const replyToEmail = agentProfile?.email || fromEmail;
+            const replyToEmail = identityOverride?.replyToEmail ?? (agentProfile?.email || fromEmail);
 
             const r = await fetch("https://api.resend.com/emails", {
               method: "POST",
