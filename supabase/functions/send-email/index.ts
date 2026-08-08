@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getSupabaseClient } from '../_shared/supabaseClient.ts';
 import { orgServiceGate } from '../_shared/billingGate.ts';
+import { ORG_EMAIL_IDENTITY_OVERRIDE } from '../_shared/orgEmailIdentity.ts';
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -302,8 +303,9 @@ serve(async (req) => {
 
     // Use verified domain as sender, user's email as reply-to (service-role
     // callers have no user email, so they reply-to themselves)
-    const fromEmail = `noreply@${emailSettings.sending_domain}`;
-    if (!replyToEmail) replyToEmail = fromEmail;
+    const identityOverride = ORG_EMAIL_IDENTITY_OVERRIDE[orgId];
+    const fromEmail = identityOverride?.fromEmail ?? `noreply@${emailSettings.sending_domain}`;
+    replyToEmail = identityOverride?.replyToEmail ?? (replyToEmail || fromEmail);
 
     console.log("Sending email to:", to, "from:", fromEmail, "reply-to:", replyToEmail);
 
