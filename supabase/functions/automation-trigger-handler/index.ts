@@ -1,5 +1,6 @@
 import { getSupabaseClient } from '../_shared/supabaseClient.ts';
 import { replaceVariables } from '../_shared/templateVariables.ts';
+import { ORG_EMAIL_IDENTITY_OVERRIDE } from '../_shared/orgEmailIdentity.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -602,6 +603,8 @@ async function sendAutomationEmail(supabase: any, executionId: string) {
       throw new Error('Sending domain not configured or not verified for this org');
     }
 
+    const identityOverride = ORG_EMAIL_IDENTITY_OVERRIDE[execution.contacts.org_id];
+
     // Resolve caller (the SDR who logged the call) for reply-to + from name
     let replyToEmail = '';
     let fromName = 'In-Sync';
@@ -617,8 +620,9 @@ async function sendAutomationEmail(supabase: any, executionId: string) {
         if (caller.email) replyToEmail = caller.email;
       }
     }
+    if (identityOverride) replyToEmail = identityOverride.replyToEmail;
 
-    const fromEmail = `noreply@${emailSettings.sending_domain}`;
+    const fromEmail = identityOverride?.fromEmail ?? `noreply@${emailSettings.sending_domain}`;
     const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY');
     if (!RESEND_API_KEY) throw new Error('RESEND_API_KEY not configured');
 
