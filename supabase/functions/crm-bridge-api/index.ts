@@ -306,7 +306,7 @@ async function handleListContacts(supabase: any, context: RequestContext, url: U
 
   let query = supabase
     .from('contacts')
-    .select('id, first_name, last_name, email, phone, company, job_title, status, source, created_at, updated_at', { count: 'exact' })
+    .select('id, first_name, last_name, email, phone, company, job_title, status, source, pipeline_stage_id, created_at, updated_at', { count: 'exact' })
     .eq('org_id', context.orgId)
     .range(offset, offset + limit - 1)
     .order('created_at', { ascending: false });
