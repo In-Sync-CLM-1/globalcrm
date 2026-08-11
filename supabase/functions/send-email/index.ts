@@ -59,6 +59,8 @@ interface SendEmailRequest {
   conversationId?: string;
   trackingPixelId?: string;
   unsubscribeToken?: string;
+  fromName?: string;
+  bareEmail?: boolean;
 }
 
 // Decodes a JWT payload without verifying the signature (the gateway already
@@ -121,7 +123,9 @@ serve(async (req) => {
       contactId,
       conversationId,
       trackingPixelId,
-      unsubscribeToken
+      unsubscribeToken,
+      fromName: fromNameOverride,
+      bareEmail
     }: SendEmailRequest = await req.json();
 
     const emailHtml = htmlContent || html || '';
@@ -306,6 +310,7 @@ serve(async (req) => {
     const identityOverride = ORG_EMAIL_IDENTITY_OVERRIDE[orgId];
     const fromEmail = identityOverride?.fromEmail ?? `noreply@${emailSettings.sending_domain}`;
     replyToEmail = identityOverride?.replyToEmail ?? (replyToEmail || fromEmail);
+    if (fromNameOverride) fromName = fromNameOverride;
 
     console.log("Sending email to:", to, "from:", fromEmail, "reply-to:", replyToEmail);
 
@@ -323,9 +328,11 @@ serve(async (req) => {
         </p>
       </div>
     `;
-    const finalHtml = emailHtml.includes('</body>')
-      ? emailHtml.replace('</body>', `${unsubscribeFooter}</body>`)
-      : emailHtml + unsubscribeFooter;
+    const finalHtml = bareEmail
+      ? emailHtml
+      : (emailHtml.includes('</body>')
+          ? emailHtml.replace('</body>', `${unsubscribeFooter}</body>`)
+          : emailHtml + unsubscribeFooter);
 
     // Send email via Resend
     const emailData = await sendEmail(to, subject, finalHtml, fromEmail, fromName, replyToEmail, unsubscribeUrl);
