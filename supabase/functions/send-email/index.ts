@@ -334,8 +334,11 @@ serve(async (req) => {
           ? emailHtml.replace('</body>', `${unsubscribeFooter}</body>`)
           : emailHtml + unsubscribeFooter);
 
-    // Send email via Resend
-    const emailData = await sendEmail(to, subject, finalHtml, fromEmail, fromName, replyToEmail, unsubscribeUrl);
+    // Send email via Resend. bareEmail sends look like a personal one-on-one
+    // note, not a newsletter -- the List-Unsubscribe header is what makes
+    // Gmail/Outlook show an "Unsubscribe" chip next to the sender even with
+    // no visible footer, so skip it for those.
+    const emailData = await sendEmail(to, subject, finalHtml, fromEmail, fromName, replyToEmail, bareEmail ? undefined : unsubscribeUrl);
 
     console.log("Email sent successfully:", emailData);
 
