@@ -154,7 +154,7 @@ serve(async (req) => {
     }
 
     // Fervent's row cap is enforced inside runFerventSmartImport against
-    // FERVENT_MAX_RECORDS (10,000, matching what the upload dialog states).
+    // FERVENT_MAX_RECORDS (50,000, matching what the upload dialog states).
     // A stale 5,000 check used to run here and rejected valid files.
 
     // Parse headers
@@ -1179,7 +1179,7 @@ async function processFerventBatch(
 // and emails any unusable rows back to the uploader to fix and re-upload.
 // =============================================================================
 
-const FERVENT_MAX_RECORDS = 10000;
+const FERVENT_MAX_RECORDS = 50000;
 const SKIP_REJECT_THRESHOLD = 0.10; // reject the whole file if >10% of rows are unusable
 
 function jsonResponse(body: any, status: number): Response {

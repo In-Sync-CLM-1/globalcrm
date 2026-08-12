@@ -11,8 +11,8 @@ import { convertExcelToCsv, isExcelFile, isLegacyExcelFile, toCsvFileName } from
 
 type SourceType = "domestic" | "international";
 
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
-const MAX_RECORDS = 10000;
+const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
+const MAX_RECORDS = 50000;
 
 const TEMPLATE_HEADERS = [
   "Sr. No.", "Unique ID", "DB Sourced Year", "UCDB Status", "Company Name",
@@ -102,7 +102,7 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
       }
       return "Please select a CSV or Excel (.xlsx) file";
     }
-    if (f.size > MAX_FILE_SIZE) return "File size must be less than 10MB";
+    if (f.size > MAX_FILE_SIZE) return "File size must be less than 20MB";
     return null;
   };
 
@@ -134,7 +134,7 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
       const { csvText, sheetName, ignoredSheets, rowCount } = await convertExcelToCsv(f);
       const converted = new File([csvText], toCsvFileName(f.name), { type: "text/csv" });
       if (converted.size > MAX_FILE_SIZE) {
-        throw new Error("This spreadsheet holds more than 10MB of data. Please split it into smaller files.");
+        throw new Error("This spreadsheet holds more than 20MB of data. Please split it into smaller files.");
       }
       if (rowCount > MAX_RECORDS) {
         throw new Error(`This spreadsheet has ${rowCount.toLocaleString()} records. Maximum allowed is ${MAX_RECORDS.toLocaleString()}`);
@@ -272,7 +272,7 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
           <DialogDescription>
             Import your data in whatever column layout you have — we'll recognise the fields,
             fill in what can be inferred (like a name from an email), and format it for the database.
-            Any rows we can't use are emailed back to you to fix. Max 10,000 records, 10MB.
+            Any rows we can't use are emailed back to you to fix. Max 50,000 records, 20MB.
           </DialogDescription>
         </DialogHeader>
 
@@ -366,7 +366,7 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
               <li>Mobile numbers should include the country code, e.g. <code className="bg-background px-1 rounded">+919876543210</code></li>
               <li>Rows are matched on <code className="bg-background px-1 rounded">Unique ID</code> when given — a matching ID updates that existing record; a new ID adds a new record</li>
               <li>Rows with no Unique ID are matched automatically (by phone, email, or AI name verification) and merged, or added as new with a system-assigned ID</li>
-              <li>Maximum 10,000 records per upload; maximum file size 10MB</li>
+              <li>Maximum 50,000 records per upload; maximum file size 20MB</li>
             </ul>
           </div>
 
