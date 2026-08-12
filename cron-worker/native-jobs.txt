@@ -11,3 +11,4 @@ daily-lead-scoring|0 2 * * *|SUPABASE_FUNCTIONS_KEY
 queue-processor|*/5 * * * *|SUPABASE_FUNCTIONS_KEY
 automation-email-sender|*/5 * * * *|SUPABASE_FUNCTIONS_KEY
 scheduled-messages-processor|*/5 * * * *|SUPABASE_FUNCTIONS_KEY,RESEND_API_KEY
+resume-stalled-imports|*/2 * * * *|SUPABASE_FUNCTIONS_KEY

@@ -9,6 +9,34 @@ const MAX_RETRIES = 3;
 const BATCH_SIZE = 500; // Reduced for better memory management
 const PROGRESS_UPDATE_INTERVAL = 5000; // 5 seconds - more frequent updates
 
+// A single invocation can't safely run to the end of a large Fervent file —
+// the platform kills long-running functions and the job was silently left
+// stuck at "processing" forever (no failure path for that case). Instead we
+// self-checkpoint: once a batch flush pushes us past this budget, persist
+// progress (already done per-batch) and kick a fresh invocation of this same
+// function to pick up where the last one left off, keyed off processed_rows
+// already stored on the job row — no separate resume-cursor param needed.
+const FERVENT_TIME_BUDGET_MS = 60 * 1000;
+
+async function continueFerventImport(importJobId: string): Promise<void> {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL');
+  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  if (!supabaseUrl || !serviceKey) {
+    console.error('[CONTINUE] missing SUPABASE_URL/SERVICE_ROLE_KEY, cannot self re-invoke; stale-job sweep will pick this up');
+    return;
+  }
+  const kick = fetch(`${supabaseUrl}/functions/v1/process-bulk-import`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${serviceKey}` },
+    body: JSON.stringify({ importJobId }),
+  }).catch((e) => console.error('[CONTINUE] self re-invoke kick failed:', String(e)));
+  // Keep the fetch alive past this invocation's HTTP response (a bare
+  // fire-and-forget gets cut off once we return) — same pattern as
+  // web-lead-intake's dispatcher kick.
+  try { (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime?.waitUntil?.(kick); }
+  catch { /* EdgeRuntime unavailable — stale-job sweep picks it up within a few minutes */ }
+}
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -23,6 +51,12 @@ interface ImportJob {
   import_type: string;
   target_id: string | null;
   source_type?: string | null;
+  current_stage?: string | null;
+  processed_rows?: number | null;
+  success_count?: number | null;
+  updated_count?: number | null;
+  duplicate_count?: number | null;
+  error_count?: number | null;
 }
 
 interface ContactRecord {
@@ -1404,11 +1438,24 @@ async function runFerventSmartImport(
   }
 
   // --- Pass 2: import the good rows through the existing dedup pipeline -----
-  let successCount = 0, updatedCount = 0, duplicateCount = 0, errorCount = 0;
+  // Resuming a continuation (see FERVENT_TIME_BUDGET_MS below): pick up at
+  // processed_rows already persisted by the last leg rather than restarting
+  // the whole file, and carry its counts forward instead of starting at 0.
+  const isResume = importJob.current_stage === 'inserting'
+    && typeof importJob.processed_rows === 'number'
+    && importJob.processed_rows > 0
+    && importJob.processed_rows <= canonicalRows.length;
+  const startIndex = isResume ? (importJob.processed_rows as number) : 0;
+
+  let successCount = isResume ? (importJob.success_count || 0) : 0;
+  let updatedCount = isResume ? (importJob.updated_count || 0) : 0;
+  let duplicateCount = isResume ? (importJob.duplicate_count || 0) : 0;
+  let errorCount = isResume ? (importJob.error_count || 0) : 0;
   const duplicateSamples: Array<{ matched_on: string; value: string }> = [];
   const errors: Array<{ row?: number; field?: string; message: string; sample?: string }> = [];
   let batch: any[] = [];
   let batchNumber = 0;
+  let processedSoFar = startIndex;
 
   const flush = async () => {
     batchNumber++;
@@ -1418,10 +1465,11 @@ async function runFerventSmartImport(
     duplicateCount += result.skipped;
     if (result.dbErrors) { errorCount += result.dbErrors; if (result.dbErrorSamples) errors.push(...result.dbErrorSamples); }
     if (result.duplicateSamples) duplicateSamples.push(...result.duplicateSamples.slice(0, Math.max(0, 200 - duplicateSamples.length)));
+    processedSoFar += batch.length;
     batch = [];
     await updateJobProgress(supabase, importJob.id, {
       total_rows: totalRows,
-      processed_rows: Math.min(batchNumber * BATCH_SIZE, canonicalRows.length),
+      processed_rows: Math.min(processedSoFar, canonicalRows.length),
       success_count: successCount,
       updated_count: updatedCount,
       duplicate_count: duplicateCount,
@@ -1431,9 +1479,16 @@ async function runFerventSmartImport(
     });
   };
 
-  for (const row of canonicalRows) {
-    batch.push(buildFerventRecord(row, importJob));
-    if (batch.length >= BATCH_SIZE) await flush();
+  for (let idx = startIndex; idx < canonicalRows.length; idx++) {
+    batch.push(buildFerventRecord(canonicalRows[idx], importJob));
+    if (batch.length >= BATCH_SIZE) {
+      await flush();
+      if (processedSoFar < canonicalRows.length && Date.now() - startTime > FERVENT_TIME_BUDGET_MS) {
+        console.log(`[CONTINUE] time budget hit at ${processedSoFar}/${canonicalRows.length} rows, handing off to a fresh invocation`);
+        await continueFerventImport(importJob.id);
+        return jsonResponse({ success: true, continued: true, processed_rows: processedSoFar, total_rows: canonicalRows.length }, 200);
+      }
+    }
   }
   if (batch.length > 0) await flush();
 
