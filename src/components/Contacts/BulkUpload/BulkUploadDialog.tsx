@@ -8,8 +8,14 @@ import { useNotification } from "@/hooks/useNotification";
 import { logError } from "@/lib/errorLogger";
 import { IEDUP_ORG_ID } from "@/hooks/useIsIedup";
 
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
-const MAX_RECORDS = 5000;
+// Imports now process in chained batches on the backend (see
+// process-bulk-import's claimAndProcessStagedBatches), so there's no longer
+// a practical record-count ceiling — MAX_RECORDS is just a sanity/abuse
+// guard matching the backend's ABSOLUTE_MAX_RECORDS. MAX_FILE_SIZE stays a
+// real constraint: it's bounded by Supabase storage's project-wide 50MB
+// upload limit, kept a little under that for safety margin.
+const MAX_FILE_SIZE = 45 * 1024 * 1024; // 45MB
+const MAX_RECORDS = 2000000;
 
 interface BulkUploadDialogProps {
   open: boolean;
@@ -67,8 +73,8 @@ export function BulkUploadDialog({ open, onOpenChange, orgId, onUploadStarted }:
       return error;
     }
 
-    if (file.size > 10 * 1024 * 1024) {
-      const error = 'File size must be less than 10MB';
+    if (file.size > MAX_FILE_SIZE) {
+      const error = 'File size must be less than 45MB';
       console.error('[FILE-VALIDATION-FAILED]', { reason: 'file_too_large', size: file.size });
       return error;
     }
@@ -300,8 +306,8 @@ export function BulkUploadDialog({ open, onOpenChange, orgId, onUploadStarted }:
           <DialogTitle>Bulk Upload Contacts</DialogTitle>
           <DialogDescription>
             {smartImportEnabled
-              ? "Upload a CSV file with contact information. AI will read your file's columns automatically — no fixed template needed. Maximum 5,000 records and 10MB file size."
-              : "Upload a CSV file with contact information. Maximum 5,000 records and 10MB file size."}
+              ? "Upload a CSV file with contact information. AI will read your file's columns automatically — no fixed template needed. No practical limit on records — max file size 45MB."
+              : "Upload a CSV file with contact information. No practical limit on records — max file size 45MB."}
           </DialogDescription>
         </DialogHeader>
 
@@ -385,8 +391,8 @@ export function BulkUploadDialog({ open, onOpenChange, orgId, onUploadStarted }:
                 <li>Required columns: <code className="bg-background px-1 rounded">first_name</code>, <code className="bg-background px-1 rounded">email</code></li>
               )}
               <li>Optional <code className="bg-background px-1 rounded">Action</code> (or <code className="bg-background px-1 rounded">pipeline_stage</code>): must match a stage/action name; sets the contact's stage and triggers its automation on import</li>
-              <li>Maximum 5,000 records per upload</li>
-              <li>Maximum file size: 10MB</li>
+              <li>No practical limit on records per upload</li>
+              <li>Maximum file size: 45MB</li>
             </ul>
           </div>
 

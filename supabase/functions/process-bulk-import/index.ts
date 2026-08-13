@@ -9,16 +9,18 @@ const MAX_RETRIES = 3;
 const BATCH_SIZE = 500; // Reduced for better memory management
 const PROGRESS_UPDATE_INTERVAL = 5000; // 5 seconds - more frequent updates
 
-// A single invocation can't safely run to the end of a large Fervent file —
-// the platform kills long-running functions and the job was silently left
-// stuck at "processing" forever (no failure path for that case). Instead we
-// self-checkpoint: once a batch flush pushes us past this budget, persist
-// progress (already done per-batch) and kick a fresh invocation of this same
-// function to pick up where the last one left off, keyed off processed_rows
-// already stored on the job row — no separate resume-cursor param needed.
-const FERVENT_TIME_BUDGET_MS = 60 * 1000;
+// A single invocation can't safely run to the end of a large file — the
+// platform kills long-running functions and a job used to be silently left
+// stuck at "processing" forever (no failure path for that case). Applies to
+// every import_type, not just Fervent: rows get staged once (cheap, no
+// dedup/AI work) into import_staging, then a claim loop below processes
+// bounded slices and self-continues once a time budget is crossed, resuming
+// off the job's own processed_rows/counts — no separate resume-cursor param
+// needed, and cost per chain link no longer depends on total file size.
+const IMPORT_TIME_BUDGET_MS = 60 * 1000;
+const STAGE_INSERT_CHUNK = 1000; // plain bulk insert into import_staging, no DB round-trips per row
 
-async function continueFerventImport(importJobId: string): Promise<void> {
+async function continueImport(importJobId: string): Promise<void> {
   const supabaseUrl = Deno.env.get('SUPABASE_URL');
   const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
   if (!supabaseUrl || !serviceKey) {
@@ -37,6 +39,173 @@ async function continueFerventImport(importJobId: string): Promise<void> {
   catch { /* EdgeRuntime unavailable — stale-job sweep picks it up within a few minutes */ }
 }
 
+// Bulk-insert already-built target records into the staging table. Cheap:
+// no dedup/AI/DB-lookup work happens here, just a plain insert, so this is
+// safe to run for the whole file in one invocation even for very large files.
+async function stageRecords(supabase: any, importJobId: string, records: Array<{ row_index: number; record: any }>): Promise<void> {
+  for (let i = 0; i < records.length; i += STAGE_INSERT_CHUNK) {
+    const chunk = records.slice(i, i + STAGE_INSERT_CHUNK).map((r) => ({
+      import_job_id: importJobId,
+      row_index: r.row_index,
+      record: r.record,
+    }));
+    const { error } = await supabase.from('import_staging').insert(chunk);
+    if (error) throw new Error(`Failed to stage rows: ${error.message}`);
+  }
+}
+
+async function stageSkippedRows(supabase: any, importJobId: string, skipped: Array<{ row_index: number; values: any; reason: string }>): Promise<void> {
+  for (let i = 0; i < skipped.length; i += STAGE_INSERT_CHUNK) {
+    const chunk = skipped.slice(i, i + STAGE_INSERT_CHUNK).map((r) => ({
+      import_job_id: importJobId,
+      row_index: r.row_index,
+      values: r.values,
+      reason: r.reason,
+    }));
+    const { error } = await supabase.from('import_skipped_rows').insert(chunk);
+    if (error) console.error('[STAGE] Failed to record skipped rows (non-fatal):', error.message);
+  }
+}
+
+type BatchProcessor = (supabase: any, importJob: ImportJob, batch: any[], batchNumber: number) => Promise<{
+  inserted: number; updated: number; skipped: number; dbErrors?: number;
+  duplicateSamples?: Array<{ matched_on: string; value: string }>;
+  dbErrorSamples?: Array<{ row?: number; field?: string; message: string; sample?: string }>;
+}>;
+
+// Shared claim-and-process chain used by every import_type once its rows are
+// staged. Claims a bounded slice of unprocessed staging rows, runs them
+// through the existing per-type batch processor (processBatch, which already
+// dispatches to processFerventBatch for fervent_repository), deletes claimed
+// rows once processed, and self-continues on a time budget instead of trying
+// to finish the whole staged set in one invocation.
+async function claimAndProcessStagedBatches(
+  supabase: any,
+  importJob: ImportJob,
+  startTime: number,
+  processBatchFn: BatchProcessor,
+): Promise<{ done: boolean }> {
+  let successCount = importJob.success_count || 0;
+  let updatedCount = importJob.updated_count || 0;
+  let duplicateCount = importJob.duplicate_count || 0;
+  let errorCount = importJob.error_count || 0;
+  let processedSoFar = importJob.processed_rows || 0;
+  const totalRows = importJob.total_rows || 0;
+  let batchNumber = 0;
+
+  while (true) {
+    const { data: claimed, error: claimErr } = await supabase
+      .from('import_staging')
+      .select('id, row_index, record')
+      .eq('import_job_id', importJob.id)
+      .eq('processed', false)
+      .order('row_index', { ascending: true })
+      .limit(BATCH_SIZE);
+
+    if (claimErr) throw new Error(`Failed to claim staged rows: ${claimErr.message}`);
+    if (!claimed || claimed.length === 0) break;
+
+    batchNumber++;
+    const batchRecords = claimed.map((c: any) => c.record);
+    const result = await processBatchFn(supabase, importJob, batchRecords, batchNumber);
+    successCount += result.inserted;
+    updatedCount += result.updated;
+    duplicateCount += result.skipped;
+    if (result.dbErrors) errorCount += result.dbErrors;
+
+    const { error: delErr } = await supabase.from('import_staging').delete().in('id', claimed.map((c: any) => c.id));
+    if (delErr) console.error('[CLAIM] Failed to mark staged rows processed (non-fatal, may reprocess on resume):', delErr.message);
+
+    processedSoFar += claimed.length;
+    await updateJobProgress(supabase, importJob.id, {
+      total_rows: totalRows,
+      processed_rows: processedSoFar,
+      success_count: successCount,
+      updated_count: updatedCount,
+      duplicate_count: duplicateCount,
+      error_count: errorCount,
+      current_stage: 'inserting',
+      stage_details: { message: `Imported ${(successCount + updatedCount).toLocaleString()} of ${totalRows.toLocaleString()}…` },
+    });
+
+    if (Date.now() - startTime > IMPORT_TIME_BUDGET_MS) {
+      console.log(`[CONTINUE] time budget hit at ${processedSoFar}/${totalRows} rows, handing off to a fresh invocation`);
+      await continueImport(importJob.id);
+      return { done: false };
+    }
+  }
+
+  return { done: true };
+}
+
+// Shared finalize step for every import_type. Always reads counts off the
+// (freshly refetched) job row rather than accumulating them in memory, since
+// a large job may have finished on a different invocation than the one that
+// started it.
+async function finalizeImportJob(supabase: any, importJob: ImportJob, startTime: number): Promise<Response> {
+  await updateJobStage(supabase, importJob.id, 'finalizing', { message: 'Finalizing…' });
+
+  const totalRows = importJob.total_rows || 0;
+  const successCount = importJob.success_count || 0;
+  const updatedCount = importJob.updated_count || 0;
+  const duplicateCount = importJob.duplicate_count || 0;
+  const errorCount = importJob.error_count || 0;
+
+  let skippedEmailSent = false;
+  if (importJob.import_type === 'fervent_repository') {
+    const { data: skippedRowsData } = await supabase
+      .from('import_skipped_rows')
+      .select('values, reason')
+      .eq('import_job_id', importJob.id)
+      .order('row_index', { ascending: true });
+    const skippedRows = (skippedRowsData || []).map((r: any) => ({ values: r.values as string[], reason: r.reason as string }));
+    const rawHeaders = importJob.stage_details?.raw_headers as string[] | undefined;
+    if (skippedRows.length > 0 && rawHeaders) {
+      const emailResult = await emailSkippedRows(supabase, importJob, rawHeaders, skippedRows, {
+        imported: successCount + updatedCount,
+        total: totalRows + skippedRows.length,
+      });
+      skippedEmailSent = emailResult.sent;
+    }
+  }
+
+  await supabase.from('import_skipped_rows').delete().eq('import_job_id', importJob.id);
+
+  const { error: deleteError } = await supabase.storage.from('import-files').remove([importJob.file_path]);
+  if (deleteError) console.error('[CLEANUP] Failed to delete import file:', deleteError);
+
+  const duration = Math.round((Date.now() - startTime) / 1000);
+  await supabase.from('import_jobs').update({
+    status: 'completed',
+    current_stage: 'completed',
+    total_rows: totalRows,
+    processed_rows: totalRows,
+    success_count: successCount,
+    updated_count: updatedCount,
+    duplicate_count: duplicateCount,
+    error_count: errorCount,
+    completed_at: new Date().toISOString(),
+    file_cleaned_up: !deleteError,
+    file_cleanup_at: new Date().toISOString(),
+    stage_details: {
+      message: `Import completed in ${duration}s`,
+      total_success: successCount,
+      total_updated: updatedCount,
+      total_errors: errorCount,
+      total_duplicates: duplicateCount,
+      skipped_email_sent: skippedEmailSent,
+    },
+  }).eq('id', importJob.id);
+
+  if (importJob.import_type === 'fervent_repository') {
+    const { error: cacheErr } = await supabase.rpc('refresh_fervent_dashboard_cache', { p_org_id: importJob.org_id });
+    if (cacheErr) console.error('[CACHE] dashboard cache refresh failed (non-fatal):', cacheErr.message);
+  }
+
+  console.log('[SUCCESS] Import completed in', duration, 'seconds');
+  return jsonResponse({ success: true, processed: successCount, updated: updatedCount, duplicates: duplicateCount, errors: errorCount, total: totalRows }, 200);
+}
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -53,10 +222,12 @@ interface ImportJob {
   source_type?: string | null;
   current_stage?: string | null;
   processed_rows?: number | null;
+  total_rows?: number | null;
   success_count?: number | null;
   updated_count?: number | null;
   duplicate_count?: number | null;
   error_count?: number | null;
+  stage_details?: any;
 }
 
 interface ContactRecord {
@@ -163,6 +334,16 @@ serve(async (req) => {
 
     console.log('[JOB] Found:', importJob.file_name, 'Type:', importJob.import_type);
 
+    // Resuming a chained continuation: every row was already staged on the
+    // first leg (see stageRecords/claimAndProcessStagedBatches), so skip
+    // straight to the claim loop instead of re-downloading and re-parsing
+    // the file — cost of a resumed leg no longer depends on file size at all.
+    if (importJob.current_stage === 'inserting') {
+      const { done } = await claimAndProcessStagedBatches(supabase, importJob, startTime, processBatch);
+      if (!done) return jsonResponse({ success: true, continued: true }, 200);
+      return await finalizeImportJob(supabase, importJob, startTime);
+    }
+
     // Download file from storage
     await updateJobStage(supabase, importJobId, 'downloading', {
       message: 'Downloading file...'
@@ -187,9 +368,10 @@ serve(async (req) => {
       throw new Error('CSV file is empty');
     }
 
-    // Fervent's row cap is enforced inside runFerventSmartImport against
-    // FERVENT_MAX_RECORDS (50,000, matching what the upload dialog states).
-    // A stale 5,000 check used to run here and rejected valid files.
+    // No practical row-count ceiling: the stage-then-claim pipeline chains
+    // across invocations regardless of file size (see ABSOLUTE_MAX_RECORDS
+    // and claimAndProcessStagedBatches). A stale 5,000 check used to run
+    // here and rejected valid files.
 
     // Parse headers
     await updateJobStage(supabase, importJobId, 'validating', {
@@ -287,23 +469,22 @@ serve(async (req) => {
       }
     }
 
-    // Parse and process data
+    // Stage every row (cheap: parsing + shaping only, no DB writes to the
+    // target table yet) so the claim-and-process phase below can chain
+    // across invocations regardless of file size.
     await updateJobStage(supabase, importJobId, 'parsing', {
       message: 'Parsing CSV data...',
       headers_found: headers.length,
-      total_batches: Math.ceil((lines.length - 1) / BATCH_SIZE)
     });
 
     const totalRows = lines.length - 1;
-    let processedRows = 0;
-    let successCount = 0;
+    if (totalRows > ABSOLUTE_MAX_RECORDS) {
+      throw new Error(`File contains ${totalRows.toLocaleString()} rows, which is above the ${ABSOLUTE_MAX_RECORDS.toLocaleString()} sanity ceiling. Please split it into smaller files.`);
+    }
     let errorCount = 0;
-    let duplicateCount = 0;
-    let updatedCount = 0;
-    const duplicateSamples: Array<{ matched_on: string; value: string }> = [];
     const errors: Array<{row?: number; field?: string; message: string; sample?: string}> = [];
-    let batch: any[] = [];
-    let batchNumber = 0;
+    const staged: Array<{ row_index: number; record: any }> = [];
+    const skippedForEmail: Array<{ row_index: number; values: any; reason: string }> = [];
     let lastProgressUpdate = Date.now();
 
     let currentRowNumber = 1;
@@ -312,23 +493,11 @@ serve(async (req) => {
       const line = lines[i].trim();
       if (!line) continue;
 
-      // Progress update every 100 rows during parsing
-      if (i % 100 === 0) {
+      if (i % 500 === 0) {
         const now = Date.now();
         if (now - lastProgressUpdate > PROGRESS_UPDATE_INTERVAL) {
-          await updateJobProgress(supabase, importJobId, {
-            total_rows: totalRows,
-            processed_rows: processedRows,
-            success_count: successCount,
-            error_count: errorCount,
-            current_stage: 'parsing',
-            stage_details: {
-              message: `Parsing row ${i} of ${totalRows}...`,
-              rows_parsed: i
-            }
-          });
+          await updateJobStage(supabase, importJobId, 'parsing', { message: `Parsing row ${i} of ${totalRows}...`, rows_parsed: i });
           lastProgressUpdate = now;
-          console.log(`[PROGRESS] Parsed ${i}/${totalRows} rows`);
         }
       }
 
@@ -344,6 +513,7 @@ serve(async (req) => {
         } else if (!isContactsSalvageable(row).ok) {
           errorCount++;
           errors.push({ row: currentRowNumber, message: 'No name, email, or phone number to identify this record' });
+          skippedForEmail.push({ row_index: currentRowNumber, values, reason: 'No name, email, or phone number to identify this record' });
           continue;
         }
 
@@ -401,161 +571,35 @@ serve(async (req) => {
           };
         }
 
-        batch.push(record);
-        processedRows++;
-
-        // Check if too many errors - stop processing
-        if (errors.length >= 500) {
-          console.error('[ERROR] Too many errors (>500), stopping import');
-          await supabase.from('import_jobs').update({
-            status: 'failed',
-            error_count: errors.length,
-            error_details: errors,
-            completed_at: new Date().toISOString(),
-            stage_details: {
-              error: 'Import stopped: Too many errors',
-              max_errors_reached: true
-            }
-          }).eq('id', importJobId);
-          
-          return new Response(JSON.stringify({
-            success: false,
-            error: 'Too many errors (>500)',
-            errorCount: errors.length
-          }), {
-            status: 200,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-          });
-        }
-
-        // Process batch when full
-        if (batch.length >= BATCH_SIZE) {
-          batchNumber++;
-          console.log(`[BATCH] Processing batch ${batchNumber} with ${batch.length} records`);
-          
-          const result = await processBatch(supabase, importJob, batch, batchNumber);
-          successCount += result.inserted;
-          updatedCount += result.updated;
-
-          if (result.skipped > 0) {
-            console.log(`[BATCH] Skipped ${result.skipped} duplicate records in batch ${batchNumber}`);
-            duplicateCount += result.skipped;
-            if (result.duplicateSamples) {
-              duplicateSamples.push(...result.duplicateSamples.slice(0, Math.max(0, 200 - duplicateSamples.length)));
-            }
-          }
-          if (result.dbErrors) {
-            errorCount += result.dbErrors;
-            if (result.dbErrorSamples) errors.push(...result.dbErrorSamples);
-          }
-
-          batch = [];
-
-          // Update progress after each batch WITH error details for real-time visibility
-          await updateJobProgress(supabase, importJobId, {
-            total_rows: totalRows,
-            processed_rows: processedRows,
-            success_count: successCount,
-            error_count: errorCount,
-            duplicate_count: duplicateCount,
-            updated_count: updatedCount,
-            error_details: errors.slice(-100), // Save last 100 errors in real-time
-            current_stage: 'inserting',
-            stage_details: {
-              message: `Inserted batch ${batchNumber} (${successCount} records inserted, ${updatedCount} updated, ${errorCount} errors, ${duplicateCount} duplicates skipped)`,
-              batches_completed: batchNumber,
-              total_batches: Math.ceil(totalRows / BATCH_SIZE)
-            }
-          });
-          lastProgressUpdate = Date.now();
+        staged.push({ row_index: currentRowNumber, record });
+        if (staged.length >= STAGE_INSERT_CHUNK) {
+          await stageRecords(supabase, importJobId, staged.splice(0, staged.length));
         }
 
       } catch (error) {
         errorCount++;
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        errors.push({
-          row: currentRowNumber,
-          field: 'parsing',
-          message: errorMessage,
-          sample: line.substring(0, 100)
-        });
+        errors.push({ row: currentRowNumber, field: 'parsing', message: errorMessage, sample: line.substring(0, 100) });
         console.log(`[ERROR] Row ${currentRowNumber}: ${errorMessage}`);
       }
     }
+    if (staged.length > 0) await stageRecords(supabase, importJobId, staged);
+    if (skippedForEmail.length > 0) await stageSkippedRows(supabase, importJobId, skippedForEmail);
 
-    // Process remaining batch
-    if (batch.length > 0) {
-      batchNumber++;
-      const result = await processBatch(supabase, importJob, batch, batchNumber);
-      successCount += result.inserted;
-      updatedCount += result.updated;
-      if (result.skipped > 0) {
-        duplicateCount += result.skipped;
-        if (result.duplicateSamples) {
-          duplicateSamples.push(...result.duplicateSamples.slice(0, Math.max(0, 200 - duplicateSamples.length)));
-        }
-      }
-      if (result.dbErrors) {
-        errorCount += result.dbErrors;
-        if (result.dbErrorSamples) errors.push(...result.dbErrorSamples);
-      }
-    }
-
-    console.log('[COMPLETE] Processed:', successCount, 'success,', errorCount, 'errors');
-
-    // Finalize import
-    await updateJobStage(supabase, importJobId, 'finalizing', {
-      message: 'Finalizing import...',
-      total_success: successCount,
-      total_errors: errorCount
-    });
-
-    // Cleanup file
-    const { error: deleteError } = await supabase.storage
-      .from('bulk-imports')
-      .remove([importJob.file_path]);
-
-    if (deleteError) {
-      console.error('[CLEANUP] Failed to delete file:', deleteError);
-    } else {
-      console.log('[CLEANUP] File deleted successfully');
-    }
-
-    // Update final status
-    const duration = Math.round((Date.now() - startTime) / 1000);
-    await supabase.from('import_jobs').update({
-      status: 'completed',
-      current_stage: 'completed',
-      total_rows: totalRows,
-      processed_rows: processedRows,
-      success_count: successCount,
+    const stagedCount = totalRows - errorCount;
+    await updateJobProgress(supabase, importJobId, {
+      total_rows: stagedCount,
+      processed_rows: 0,
       error_count: errorCount,
-      duplicate_count: duplicateCount,
-      updated_count: updatedCount,
-      error_details: errors.slice(-500), // Store up to 500 errors for better debugging
-      completed_at: new Date().toISOString(),
-      file_cleaned_up: !deleteError,
-      file_cleanup_at: new Date().toISOString(),
-      stage_details: {
-        message: `Import completed in ${duration}s`,
-        total_success: successCount,
-        total_updated: updatedCount,
-        total_errors: errorCount,
-        total_duplicates: duplicateCount,
-        duplicate_samples: duplicateSamples
-      }
-    }).eq('id', importJobId);
-
-    console.log('[SUCCESS] Import completed in', duration, 'seconds');
-
-    return new Response(JSON.stringify({
-      success: true,
-      processed: successCount,
-      errors: errorCount
-    }), {
-      status: 200,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      error_details: errors.slice(-500),
+      current_stage: 'inserting',
+      stage_details: { message: `Staged ${stagedCount.toLocaleString()} rows, starting import…` },
     });
+
+    const { data: refetchedJob } = await supabase.from('import_jobs').select('*').eq('id', importJobId).single();
+    const { done } = await claimAndProcessStagedBatches(supabase, refetchedJob as ImportJob, startTime, processBatch);
+    if (!done) return jsonResponse({ success: true, continued: true }, 200);
+    return await finalizeImportJob(supabase, refetchedJob as ImportJob, startTime);
 
   } catch (error) {
     console.error('[ERROR] Processing failed:', error);
@@ -1213,7 +1257,7 @@ async function processFerventBatch(
 // and emails any unusable rows back to the uploader to fix and re-upload.
 // =============================================================================
 
-const FERVENT_MAX_RECORDS = 50000;
+const ABSOLUTE_MAX_RECORDS = 2000000; // sanity/abuse guard, not a practical limit — see runFerventSmartImport
 const SKIP_REJECT_THRESHOLD = 0.10; // reject the whole file if >10% of rows are unusable
 
 function jsonResponse(body: any, status: number): Response {
@@ -1374,8 +1418,12 @@ async function runFerventSmartImport(
 ): Promise<Response> {
   const totalRows = lines.length - 1;
 
-  if (totalRows > FERVENT_MAX_RECORDS) {
-    await failFerventJob(supabase, importJob.id, `File contains ${totalRows.toLocaleString()} rows. Maximum allowed is ${FERVENT_MAX_RECORDS.toLocaleString()} records.`);
+  // No practical record-count ceiling: the claim-and-chain pipeline below
+  // processes staged rows in bounded slices regardless of total file size,
+  // so cost per invocation no longer depends on how many rows the file has.
+  // ABSOLUTE_MAX_RECORDS is a sanity/abuse guard only, far beyond real use.
+  if (totalRows > ABSOLUTE_MAX_RECORDS) {
+    await failFerventJob(supabase, importJob.id, `File contains ${totalRows.toLocaleString()} rows, which is above the ${ABSOLUTE_MAX_RECORDS.toLocaleString()} sanity ceiling. Please split it into smaller files.`);
     return jsonResponse({ success: false, rejected: true, reason: 'too_many_rows' }, 200);
   }
 
@@ -1437,101 +1485,31 @@ async function runFerventSmartImport(
     return jsonResponse({ success: false, rejected: true, reason: 'too_many_unusable_rows' }, 200);
   }
 
-  // --- Pass 2: import the good rows through the existing dedup pipeline -----
-  // Resuming a continuation (see FERVENT_TIME_BUDGET_MS below): pick up at
-  // processed_rows already persisted by the last leg rather than restarting
-  // the whole file, and carry its counts forward instead of starting at 0.
-  const isResume = importJob.current_stage === 'inserting'
-    && typeof importJob.processed_rows === 'number'
-    && importJob.processed_rows > 0
-    && importJob.processed_rows <= canonicalRows.length;
-  const startIndex = isResume ? (importJob.processed_rows as number) : 0;
-
-  let successCount = isResume ? (importJob.success_count || 0) : 0;
-  let updatedCount = isResume ? (importJob.updated_count || 0) : 0;
-  let duplicateCount = isResume ? (importJob.duplicate_count || 0) : 0;
-  let errorCount = isResume ? (importJob.error_count || 0) : 0;
-  const duplicateSamples: Array<{ matched_on: string; value: string }> = [];
-  const errors: Array<{ row?: number; field?: string; message: string; sample?: string }> = [];
-  let batch: any[] = [];
-  let batchNumber = 0;
-  let processedSoFar = startIndex;
-
-  const flush = async () => {
-    batchNumber++;
-    const result = await processFerventBatch(supabase, importJob, batch, batchNumber);
-    successCount += result.inserted;
-    updatedCount += result.updated;
-    duplicateCount += result.skipped;
-    if (result.dbErrors) { errorCount += result.dbErrors; if (result.dbErrorSamples) errors.push(...result.dbErrorSamples); }
-    if (result.duplicateSamples) duplicateSamples.push(...result.duplicateSamples.slice(0, Math.max(0, 200 - duplicateSamples.length)));
-    processedSoFar += batch.length;
-    batch = [];
-    await updateJobProgress(supabase, importJob.id, {
-      total_rows: totalRows,
-      processed_rows: Math.min(processedSoFar, canonicalRows.length),
-      success_count: successCount,
-      updated_count: updatedCount,
-      duplicate_count: duplicateCount,
-      error_count: errorCount,
-      current_stage: 'inserting',
-      stage_details: { message: `Imported ${(successCount + updatedCount).toLocaleString()} of ${canonicalRows.length.toLocaleString()}…` },
-    });
-  };
-
-  for (let idx = startIndex; idx < canonicalRows.length; idx++) {
-    batch.push(buildFerventRecord(canonicalRows[idx], importJob));
-    if (batch.length >= BATCH_SIZE) {
-      await flush();
-      if (processedSoFar < canonicalRows.length && Date.now() - startTime > FERVENT_TIME_BUDGET_MS) {
-        console.log(`[CONTINUE] time budget hit at ${processedSoFar}/${canonicalRows.length} rows, handing off to a fresh invocation`);
-        await continueFerventImport(importJob.id);
-        return jsonResponse({ success: true, continued: true, processed_rows: processedSoFar, total_rows: canonicalRows.length }, 200);
-      }
-    }
-  }
-  if (batch.length > 0) await flush();
-
-  // --- Email the unusable rows back to the uploader ------------------------
-  await updateJobStage(supabase, importJob.id, 'finalizing', { message: 'Finalizing…' });
-  let skippedEmail: { sent: boolean; to: string | null } = { sent: false, to: null };
+  // --- Pass 2: stage the good rows, then hand off to the shared claim loop --
+  // This function only ever runs on the FIRST leg of a job (the top-level
+  // handler intercepts current_stage === 'inserting' and skips straight to
+  // claimAndProcessStagedBatches for any resume), so there's no resume-index
+  // bookkeeping needed here — just stage everything and go.
+  const stagePayload = canonicalRows.map((row, idx) => ({ row_index: idx + 1, record: buildFerventRecord(row, importJob) }));
+  await stageRecords(supabase, importJob.id, stagePayload);
   if (skippedRows.length > 0) {
-    skippedEmail = await emailSkippedRows(supabase, importJob, rawHeaders, skippedRows, { imported: successCount + updatedCount, total: totalRows });
+    await stageSkippedRows(supabase, importJob.id, skippedRows.map((r, idx) => ({ row_index: idx + 1, values: r.values, reason: r.reason })));
   }
 
-  // Cleanup uploaded file (best-effort).
-  const { error: deleteError } = await supabase.storage.from('import-files').remove([importJob.file_path]);
-  if (deleteError) console.error('[CLEANUP] Failed to delete import file:', deleteError);
-
-  const duration = Math.round((Date.now() - startTime) / 1000);
-  await supabase.from('import_jobs').update({
-    status: 'completed',
-    current_stage: 'completed',
-    total_rows: totalRows,
-    processed_rows: totalRows,
-    success_count: successCount,
-    updated_count: updatedCount,
-    duplicate_count: duplicateCount,
-    error_count: errorCount,
-    error_details: errors.slice(-500),
-    completed_at: new Date().toISOString(),
-    file_cleaned_up: !deleteError,
-    file_cleanup_at: new Date().toISOString(),
+  await updateJobProgress(supabase, importJob.id, {
+    total_rows: canonicalRows.length,
+    processed_rows: 0,
+    current_stage: 'inserting',
     stage_details: {
-      message: `Import completed in ${duration}s`,
-      total_success: successCount,
-      total_updated: updatedCount,
-      total_errors: errorCount,
-      total_duplicates: duplicateCount,
-      duplicate_samples: duplicateSamples,
-      skipped_count: skippedRows.length,
-      skipped_email_sent: skippedEmail.sent,
-      skipped_email_to: skippedEmail.to,
+      message: `Staged ${canonicalRows.length.toLocaleString()} rows, starting import…`,
+      raw_headers: rawHeaders,
       used_ai: mapResult.usedAi,
       resolved_columns: mapResult.resolved,
     },
-  }).eq('id', importJob.id);
+  });
 
-  console.log(`[SUCCESS] Fervent smart import in ${duration}s: ${successCount} inserted, ${updatedCount} updated, ${skippedRows.length} skipped/emailed(${skippedEmail.sent})`);
-  return jsonResponse({ success: true, processed: successCount, updated: updatedCount, skipped: skippedRows.length }, 200);
+  const { data: refetchedJob } = await supabase.from('import_jobs').select('*').eq('id', importJob.id).single();
+  const { done } = await claimAndProcessStagedBatches(supabase, refetchedJob as ImportJob, startTime, processFerventBatch);
+  if (!done) return jsonResponse({ success: true, continued: true }, 200);
+  return await finalizeImportJob(supabase, refetchedJob as ImportJob, startTime);
 }
