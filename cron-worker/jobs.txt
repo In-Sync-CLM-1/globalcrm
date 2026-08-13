@@ -10,3 +10,4 @@ check-inactive-contacts|rpc:check_inactive_contacts||0 9 * * *
 process-time-based-triggers|rpc:process_time_based_triggers||0 8 * * *
 aggregate-automation-performance|rpc:cron_aggregate_automation_performance||0 1 * * *
 sync-platform-email-list|rpc:sync_platform_email_list||0 2 * * *
+refresh-fervent-dashboard-cache|rpc:refresh_fervent_dashboard_cache_cron||*/5 * * * *

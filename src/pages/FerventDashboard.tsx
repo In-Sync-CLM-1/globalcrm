@@ -121,6 +121,10 @@ export default function FerventDashboard() {
   const [matchMode, setMatchMode] = useState<"exact" | "contains">("exact");
   const [drilldown, setDrilldown] = useState<{ label: string; rows: RepoRow[] } | null>(null);
 
+  // Full row set powers interactive filtering, drilldown, and CSV export —
+  // still fetched in full, but no longer blocks the initial paint (see
+  // cacheQuery below). Loads in the background; the moment it lands, every
+  // chart/stat below seamlessly swaps from the cached snapshot to live data.
   const { data: rows = [], isLoading } = useQuery({
     queryKey: ["fervent-dashboard-data"],
     queryFn: async () => {
@@ -144,23 +148,57 @@ export default function FerventDashboard() {
     },
   });
 
-  const filterOptions = useMemo(
-    () => ({
-      industry: distinctOptions(rows, "industry"),
-      designationLevel: distinctOptions(rows, "designation_level"),
-      designation: distinctOptions(rows, "designation"),
-      city: distinctOptions(rows, "city"),
-      state: distinctOptions(rows, "state"),
-      source: distinctOptions(rows, "ucdb_status"),
-    }),
-    [rows]
-  );
+  // Pre-aggregated snapshot (refreshed every 5 min by a cron worker, RMPL's
+  // dashboard-cache pattern — see refresh_fervent_dashboard_cache). Loads in
+  // a handful of milliseconds regardless of repository size, so the page can
+  // paint instantly instead of waiting on the full-table fetch above.
+  const { data: cache, isLoading: cacheLoading } = useQuery({
+    queryKey: ["fervent-dashboard-cache"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("fervent_dashboard_cache")
+        .select("*")
+        .eq("org_id", FERVENT_ORG_ID)
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+  });
 
   const activeFilters =
     (filters.dateFrom ? 1 : 0) + (filters.dateTo ? 1 : 0) +
     (filters.industry !== "all" ? 1 : 0) + (filters.designationLevel !== "all" ? 1 : 0) +
     (filters.designation !== "all" ? 1 : 0) + (filters.city !== "all" ? 1 : 0) +
     (filters.state !== "all" ? 1 : 0) + (filters.source !== "all" ? 1 : 0);
+
+  // Use the cache while the full row set is still loading and no filter is
+  // applied (filters need real rows to answer). Once `rows` lands, or a
+  // filter is touched, everything below switches to live computation from
+  // filteredRows — same as this page always worked, just no longer gating
+  // the first paint on it.
+  const showCache = !!cache && rows.length === 0 && activeFilters === 0;
+
+  const filterOptions = useMemo(() => {
+    if (cache?.filter_options && (showCache || rows.length === 0)) {
+      const fo = cache.filter_options as Record<string, string[]>;
+      return {
+        industry: fo.industry || [],
+        designationLevel: fo.designationLevel || [],
+        designation: fo.designation || [],
+        city: fo.city || [],
+        state: fo.state || [],
+        source: fo.source || [],
+      };
+    }
+    return {
+      industry: distinctOptions(rows, "industry"),
+      designationLevel: distinctOptions(rows, "designation_level"),
+      designation: distinctOptions(rows, "designation"),
+      city: distinctOptions(rows, "city"),
+      state: distinctOptions(rows, "state"),
+      source: distinctOptions(rows, "ucdb_status"),
+    };
+  }, [rows, cache]);
 
   const filteredRows = useMemo(() => {
     return rows.filter((r) => {
@@ -177,6 +215,18 @@ export default function FerventDashboard() {
   }, [rows, filters, matchMode]);
 
   const stats = useMemo(() => {
+    if (showCache && cache) {
+      const total = cache.total_count || 0;
+      const withEmail = cache.with_email_count || 0;
+      const withMobile = cache.with_mobile_count || 0;
+      return {
+        total, companies: cache.companies_count || 0, withEmail, withMobile,
+        industries: cache.industries_count || 0, addedThisMonth: cache.added_this_month_count || 0,
+        emailCoverage: total ? Math.round((withEmail / total) * 100) : 0,
+        mobileCoverage: total ? Math.round((withMobile / total) * 100) : 0,
+        missingBoth: cache.missing_both_count || 0,
+      };
+    }
     const total = filteredRows.length;
     const companies = new Set(filteredRows.map((r) => r.company_name).filter(Boolean)).size;
     const withEmail = filteredRows.filter(hasEmail).length;
@@ -188,26 +238,29 @@ export default function FerventDashboard() {
     const emailCoverage = total ? Math.round((withEmail / total) * 100) : 0;
     const mobileCoverage = total ? Math.round((withMobile / total) * 100) : 0;
     return { total, companies, withEmail, withMobile, industries, addedThisMonth, emailCoverage, mobileCoverage, missingBoth };
-  }, [filteredRows]);
+  }, [filteredRows, showCache, cache]);
 
-  const byIndustry = useMemo(() => groupBy(filteredRows, "industry"), [filteredRows]);
-  const byDesignationLevel = useMemo(() => groupBy(filteredRows, "designation_level"), [filteredRows]);
-  const byStatus = useMemo(() => groupBy(filteredRows, "ucdb_status"), [filteredRows]);
-  const byState = useMemo(() => groupBy(filteredRows, "state"), [filteredRows]);
-  const byCity = useMemo(() => groupBy(filteredRows, "city"), [filteredRows]);
-  const byDesignation = useMemo(() => groupBy(filteredRows, "designation"), [filteredRows]);
-  const byEmployeeSize = useMemo(() => groupBy(filteredRows, "employee_size"), [filteredRows]);
-  const byCompany = useMemo(() => groupBy(filteredRows, "company_name"), [filteredRows]);
+  type Grouped = { name: string; value: number }[];
+  const byIndustry = useMemo<Grouped>(() => (showCache && cache ? cache.by_industry : groupBy(filteredRows, "industry")), [filteredRows, showCache, cache]);
+  const byDesignationLevel = useMemo<Grouped>(() => (showCache && cache ? cache.by_designation_level : groupBy(filteredRows, "designation_level")), [filteredRows, showCache, cache]);
+  const byStatus = useMemo<Grouped>(() => (showCache && cache ? cache.by_status : groupBy(filteredRows, "ucdb_status")), [filteredRows, showCache, cache]);
+  const byState = useMemo<Grouped>(() => (showCache && cache ? cache.by_state : groupBy(filteredRows, "state")), [filteredRows, showCache, cache]);
+  const byCity = useMemo<Grouped>(() => (showCache && cache ? cache.by_city : groupBy(filteredRows, "city")), [filteredRows, showCache, cache]);
+  const byDesignation = useMemo<Grouped>(() => (showCache && cache ? cache.by_designation : groupBy(filteredRows, "designation")), [filteredRows, showCache, cache]);
+  const byEmployeeSize = useMemo<Grouped>(() => (showCache && cache ? cache.by_employee_size : groupBy(filteredRows, "employee_size")), [filteredRows, showCache, cache]);
+  const byCompany = useMemo<Grouped>(() => (showCache && cache ? cache.by_company : groupBy(filteredRows, "company_name")), [filteredRows, showCache, cache]);
 
-  // City -> map bubble. Rows whose city has no known coordinates (or is
-  // blank/"online") don't get a bubble but still count everywhere else.
+  // City -> map bubble, derived from the (cache-or-live) grouped city counts
+  // rather than raw rows, so it works identically from either source. Cities
+  // with no known coordinates (or blank/"online") don't get a bubble but
+  // still count everywhere else.
   const { cityMapPoints, unmappedCityCount } = useMemo(() => {
     const counts = new Map<string, number>();
     let unmapped = 0;
-    filteredRows.forEach((r) => {
-      const key = canonicalCity(r.city);
-      if (!key || !CITY_COORDS[key]) { unmapped++; return; }
-      counts.set(key, (counts.get(key) || 0) + 1);
+    byCity.forEach(({ name, value }) => {
+      const key = canonicalCity(name);
+      if (!key || !CITY_COORDS[key]) { unmapped += value; return; }
+      counts.set(key, (counts.get(key) || 0) + value);
     });
     const points = Array.from(counts.entries()).map(([key, count]) => ({
       name: key.replace(/\b\w/g, (c) => c.toUpperCase()),
@@ -215,7 +268,7 @@ export default function FerventDashboard() {
       count,
     }));
     return { cityMapPoints: points, unmappedCityCount: unmapped };
-  }, [filteredRows]);
+  }, [byCity]);
 
   const missingBuckets = useMemo(() => {
     const both = filteredRows.filter((r) => !hasEmail(r) && !hasMobile(r));
@@ -233,13 +286,14 @@ export default function FerventDashboard() {
   // platform doesn't render as a run of empty columns. Derived from the
   // unfiltered rows so the axis doesn't shift around as filters are applied.
   const dataStartMonth = useMemo(() => {
+    if (showCache && cache?.data_start_month) return startOfMonth(new Date(cache.data_start_month));
     let earliest: number | null = null;
     for (const r of rows) {
       const t = new Date(r.created_at).getTime();
       if (!Number.isNaN(t) && (earliest === null || t < earliest)) earliest = t;
     }
     return startOfMonth(earliest === null ? new Date() : new Date(earliest));
-  }, [rows]);
+  }, [rows, showCache, cache]);
 
   const monthlyTrend = useMemo(() => {
     const months: { key: string; label: string; count: number }[] = [];
@@ -253,13 +307,21 @@ export default function FerventDashboard() {
       months.push({ key: format(d, "yyyy-MM"), label: format(d, "MMM"), count: 0 });
     }
     const map = new Map(months.map((m) => [m.key, m]));
-    filteredRows.forEach((r) => {
-      const key = format(new Date(r.created_at), "yyyy-MM");
-      const bucket = map.get(key);
-      if (bucket) bucket.count++;
-    });
+    if (showCache && cache?.monthly_counts) {
+      const counts = cache.monthly_counts as Record<string, number>;
+      Object.entries(counts).forEach(([key, count]) => {
+        const bucket = map.get(key);
+        if (bucket) bucket.count = count;
+      });
+    } else {
+      filteredRows.forEach((r) => {
+        const key = format(new Date(r.created_at), "yyyy-MM");
+        const bucket = map.get(key);
+        if (bucket) bucket.count++;
+      });
+    }
     return months;
-  }, [filteredRows, dataStartMonth]);
+  }, [filteredRows, dataStartMonth, showCache, cache]);
 
   const monthKeyMap = useMemo(() => {
     const m: Record<string, string> = {};
@@ -277,13 +339,17 @@ export default function FerventDashboard() {
   }, [dataStartMonth]);
 
   const dailyActivity = useMemo(() => {
+    if (showCache && cache?.daily_counts) {
+      const counts = cache.daily_counts as Record<string, number>;
+      return Object.entries(counts).map(([date, count]) => ({ date, count }));
+    }
     const m = new Map<string, number>();
     filteredRows.forEach((r) => {
       const key = format(new Date(r.created_at), "yyyy-MM-dd");
       m.set(key, (m.get(key) || 0) + 1);
     });
     return Array.from(m.entries()).map(([date, count]) => ({ date, count }));
-  }, [filteredRows]);
+  }, [filteredRows, showCache, cache]);
 
   const trendOption = useMemo(() => buildTrendOption(monthlyTrend, theme), [monthlyTrend, theme]);
   const industryOption = useMemo(() => buildIndustryTreemapOption(byIndustry, theme), [byIndustry, theme]);
@@ -403,7 +469,10 @@ export default function FerventDashboard() {
     );
   };
 
-  if (orgLoading || isLoading) {
+  // Block only until SOMETHING is ready to show — the cache (fast, near-
+  // instant) in the common case, or the full row set if cache isn't ready
+  // yet (e.g. a brand-new org with no cache row written yet).
+  if (orgLoading || (isLoading && cacheLoading)) {
     return (
       <DashboardLayout>
         <div className="p-6 text-sm text-muted-foreground">Loading dashboard…</div>
@@ -417,7 +486,10 @@ export default function FerventDashboard() {
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Fervent Dashboard</h1>
-            <p className="text-sm text-muted-foreground">An overview of your vendor/lead database.</p>
+            <p className="text-sm text-muted-foreground">
+              An overview of your vendor/lead database.
+              {isLoading && <span className="ml-1 text-xs">(refreshing live data — filtering and drilldown will be ready shortly)</span>}
+            </p>
           </div>
           <div className="flex items-center gap-2">
             {stats.total > 0 && (
