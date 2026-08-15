@@ -20,7 +20,7 @@ export default function ProtectedRoute({ children, requiredRole }: ProtectedRout
 
       const { data, error } = await supabase
         .from("profiles")
-        .select("onboarding_completed, is_platform_admin")
+        .select("onboarding_completed, is_platform_admin, org_id")
         .eq("id", user.id)
         .single();
 
@@ -92,8 +92,11 @@ export default function ProtectedRoute({ children, requiredRole }: ProtectedRout
     return <Navigate to="/login" replace />;
   }
 
-  // Platform admin: only allow access to /platform-admin
-  if (profileData?.is_platform_admin) {
+  // Platform admin with no organisation is a console-only account: pin them
+  // there. One who is also a member of an organisation gets the normal app —
+  // arriving from another tool should land you in the workspace you came for,
+  // and /platform-admin stays reachable from the organisation switcher.
+  if (profileData?.is_platform_admin && !profileData?.org_id) {
     if (location.pathname !== "/platform-admin") {
       return <Navigate to="/platform-admin" replace />;
     }
