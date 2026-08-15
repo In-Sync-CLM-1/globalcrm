@@ -49,6 +49,7 @@ import SubscriptionStatusBanner from "@/components/Subscription/SubscriptionStat
 import { useModuleTracking } from "@/hooks/useModuleTracking";
 import { useTopModules } from "@/hooks/useTopModules";
 import { NotificationBell } from "./NotificationBell";
+import { OrgSwitcher } from "@/components/OrgSwitcher";
 import { QuickDial } from "@/components/Contact/QuickDial";
 import { CallbackReminderAlert } from "@/components/Contact/CallbackReminderAlert";
 import { useAuth } from "@/contexts/AuthProvider";
@@ -760,9 +761,10 @@ function DashboardLayout({ children }: DashboardLayoutProps) {
 
         {/* Main content - Compact */}
         <main className="flex-1 min-w-0 flex flex-col overflow-hidden">
-          {/* Desktop header with notifications */}
+          {/* Desktop header: organisation switcher on the left, alerts right */}
           {!isPlatformAdmin && (
-            <div className="hidden lg:flex items-center justify-end gap-2 px-4 py-2 border-b border-border bg-card shrink-0">
+            <div className="hidden lg:flex items-center justify-between gap-2 px-4 py-2 border-b border-border bg-card shrink-0">
+              <OrgSwitcher />
               <NotificationBell />
             </div>
           )}
