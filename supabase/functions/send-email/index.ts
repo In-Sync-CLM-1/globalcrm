@@ -12,7 +12,7 @@ const corsHeaders = {
 
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
 
-const sendEmail = async (to: string, subject: string, html: string, fromEmail: string, fromName: string, replyToEmail?: string, unsubscribeUrl?: string) => {
+const sendEmail = async (to: string, subject: string, html: string, fromEmail: string, fromName: string, replyToEmail?: string, unsubscribeUrl?: string, inReplyTo?: string) => {
   const emailPayload: any = {
     from: `${fromName} <${fromEmail}>`,
     to: [to],
@@ -30,6 +30,18 @@ const sendEmail = async (to: string, subject: string, html: string, fromEmail: s
     emailPayload.headers = {
       'List-Unsubscribe': `<${unsubscribeUrl}>`,
       'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click'
+    };
+  }
+
+  // Thread this send onto an earlier message. inReplyTo is the RFC 5322
+  // Message-ID of the parent (angle brackets included) -- Resend returns it
+  // as `message_id` on GET /emails/:id. Both headers are needed: Gmail keys
+  // off References, Outlook off In-Reply-To.
+  if (inReplyTo) {
+    emailPayload.headers = {
+      ...(emailPayload.headers || {}),
+      'In-Reply-To': inReplyTo,
+      'References': inReplyTo,
     };
   }
 
@@ -61,6 +73,7 @@ interface SendEmailRequest {
   unsubscribeToken?: string;
   fromName?: string;
   bareEmail?: boolean;
+  inReplyTo?: string;
 }
 
 // Decodes a JWT payload without verifying the signature (the gateway already
@@ -125,7 +138,8 @@ serve(async (req) => {
       trackingPixelId,
       unsubscribeToken,
       fromName: fromNameOverride,
-      bareEmail
+      bareEmail,
+      inReplyTo
     }: SendEmailRequest = await req.json();
 
     const emailHtml = htmlContent || html || '';
@@ -338,7 +352,7 @@ serve(async (req) => {
     // note, not a newsletter -- the List-Unsubscribe header is what makes
     // Gmail/Outlook show an "Unsubscribe" chip next to the sender even with
     // no visible footer, so skip it for those.
-    const emailData = await sendEmail(to, subject, finalHtml, fromEmail, fromName, replyToEmail, bareEmail ? undefined : unsubscribeUrl);
+    const emailData = await sendEmail(to, subject, finalHtml, fromEmail, fromName, replyToEmail, bareEmail ? undefined : unsubscribeUrl, inReplyTo);
 
     console.log("Email sent successfully:", emailData);
 

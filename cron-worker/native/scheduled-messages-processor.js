@@ -30,9 +30,17 @@ async function tick(env) {
     emailConversations = await pgSelect(env, "email_conversations", `status=eq.scheduled&scheduled_at=lte.${nowIso}&limit=50&select=*`);
     for (const email of emailConversations || []) {
       await pgPatch(env, "email_conversations", `id=eq.${email.id}`, { status: "pending" });
-      const { error } = await invokeFunction(env, "send-email", {
+      // Carry the row's send options through. Without these a queued personal
+      // send would go out with the platform unsubscribe footer, and a queued
+      // follow-up would start a fresh thread instead of replying into the
+      // existing one.
+      const payload = {
         to: email.to_email, subject: email.subject, htmlContent: email.html_content || email.email_content, contactId: email.contact_id,
-      });
+      };
+      if (email.from_name) payload.fromName = email.from_name;
+      if (email.bare_email) payload.bareEmail = true;
+      if (email.in_reply_to) payload.inReplyTo = email.in_reply_to;
+      const { error } = await invokeFunction(env, "send-email", payload);
       if (error) {
         console.error(`Error sending scheduled email ${email.id}:`, String(error.message || error));
         await pgPatch(env, "email_conversations", `id=eq.${email.id}`, { status: "failed" });
