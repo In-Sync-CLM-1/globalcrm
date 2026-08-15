@@ -121,7 +121,12 @@ function DashboardLayout({ children }: DashboardLayoutProps) {
   const userName = userData?.profile
     ? `${userData.profile.first_name} ${userData.profile.last_name}`
     : "";
-  const isPlatformAdmin = userData?.profile?.is_platform_admin || false;
+  // "Platform admin" here means the console-only experience: no organisation
+  // navigation, no notifications, no dialer. Someone who holds the platform
+  // role AND works inside an organisation should get the normal app, with the
+  // console reachable from the organisation switcher.
+  const hasPlatformRole = userData?.profile?.is_platform_admin || false;
+  const isPlatformAdmin = hasPlatformRole && !userData?.profile?.org_id;
   const orgLogo = userData?.org?.logo_url || "";
   const orgName = userData?.org?.name || "";
   const onboardingCompleted = userData?.profile?.onboarding_completed || false;
