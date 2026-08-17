@@ -316,8 +316,15 @@ export function buildWorldHeatmapOption(
       map: "World",
       roam: true,
       scaleLimit: { min: 1, max: 6 },
-      layoutCenter: ["50%", "52%"],
-      layoutSize: "100%",
+      // No layoutCenter/layoutSize: that percentage form scales to the
+      // SMALLER of the container's width/height — in a wide map card that
+      // left huge unused margins on the left/right. left/right/top/bottom
+      // let echarts fit the map to the full box while keeping its aspect
+      // ratio, instead of shrinking to the shorter dimension.
+      left: 0,
+      right: 0,
+      top: 8,
+      bottom: 8,
       itemStyle: { areaColor: theme.grid, borderColor: theme.surface, borderWidth: 0.6 },
       emphasis: { itemStyle: { areaColor: theme.sequential[2] }, label: { show: false } },
       // India's polygon is 36 concatenated state shapes (see worldMap.json's
