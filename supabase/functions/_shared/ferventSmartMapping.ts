@@ -264,6 +264,32 @@ function headerIndex(rawHeaders: string[], normHeaders: string[], wanted: string
   return normHeaders.indexOf(wn);
 }
 
+// A real-world file (43,427-row incident, 2026-08-14) had non-blank header
+// text for its first 4 columns ("Sr.No.", "Year", "DB Source", "Region") but
+// every single data row's first 4 cells were blank — the row data was
+// physically written 4 columns to the right of where its own header row
+// claimed it would be. Both the deterministic and AI mapping trust
+// header-to-column POSITION, so every field silently read the wrong column:
+// company_name got a bare numeric ID, designation got a data-source label,
+// country got a company name, and so on — all internally consistent-looking
+// values, just each one column-shifted, so nothing downstream caught it.
+// Detected and rejected here (not auto-corrected): this codebase's standing
+// rule is "leave uncertain fields out rather than guessing" — silently
+// shifting could just as easily corrupt a file where the first columns are
+// legitimately unused, so a human needs to confirm and re-export instead.
+const LEADING_BLANK_REJECT_THRESHOLD = 2;
+
+function detectLeadingBlankColumnBug(rawHeaders: string[], sampleRows: string[][]): number {
+  if (sampleRows.length < 3) return 0; // too little evidence to trust
+  let k = 0;
+  while (k < rawHeaders.length && rawHeaders[k] && rawHeaders[k].trim() !== '') {
+    const allBlank = sampleRows.every((row) => !row[k] || row[k].trim() === '');
+    if (!allBlank) break;
+    k++;
+  }
+  return k;
+}
+
 // Build the full mapping for a file: deterministic synonyms first, AI to
 // refine leftovers and settle ambiguity, then the structural accept/reject
 // decision. Fails open to the deterministic map if AI is unavailable.
@@ -280,6 +306,17 @@ async function buildSmartMapping(
   systemPrompt: string,
   noIdentityMessage: string,
 ): Promise<FerventMappingResult> {
+  const leadingBlankCols = detectLeadingBlankColumnBug(rawHeaders, sampleRows);
+  if (leadingBlankCols >= LEADING_BLANK_REJECT_THRESHOLD) {
+    return {
+      reject: true,
+      rejectReason:
+        `The first ${leadingBlankCols} columns (${rawHeaders.slice(0, leadingBlankCols).join(', ')}) have header names but every sampled row's value for them is blank — ` +
+        `this usually means the data got shifted out of alignment with its own header row during export. Please re-export the file so each column's header sits directly above its own data, then upload again.`,
+      usedAi: false,
+    };
+  }
+
   const normHeaders = rawHeaders.map(normalizeHeader);
   const fieldToIndex = deterministicMap(synonyms, normHeaders);
 
