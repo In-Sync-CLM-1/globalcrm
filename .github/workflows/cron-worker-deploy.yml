@@ -52,7 +52,10 @@ jobs:
           : "${SUPABASE_SERVICE_ROLE_KEY:?missing}"
           ok=0; fail=0
           while IFS='|' read -r suffix fn body sched; do
-            [ -z "$suffix" ] && continue
+            # Skip blanks and comments — a "#" line is documentation, not a job.
+            # Without this, commenting a job out makes wrangler try to deploy a
+            # worker literally named after the comment text.
+            case "${suffix## }" in ''|'#'*) continue ;; esac
             name="globalcrm-cron-$suffix"
             if [ -n "$body" ]; then
               esc=${body//\"/\\\"}
@@ -90,7 +93,7 @@ jobs:
           if [ ! -f native-jobs.txt ]; then echo "no native-jobs.txt"; exit 0; fi
           ok=0; fail=0
           while IFS='|' read -r name sched secrets; do
-            [ -z "$name" ] && continue
+            case "${name## }" in ''|'#'*) continue ;; esac
             workername="globalcrm-cron-$name"
             cat > .tmp-native.toml <<EOF
           name = "$workername"
