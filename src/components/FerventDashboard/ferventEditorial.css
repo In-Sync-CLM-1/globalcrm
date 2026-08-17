@@ -1,0 +1,112 @@
+/* Fervent Dashboard — editorial design system.
+ *
+ * Scoped entirely under .fervent-editorial so it never leaks into the rest
+ * of the app (every other org keeps the shared In-Sync teal/coral theme).
+ * Redefines the SAME token names the shared shadcn components already read
+ * (--card, --border, --foreground, etc.) so Card/Button/Badge pick up the
+ * new palette with zero changes to those shared components — only the
+ * scope changes what they resolve to.
+ *
+ * Palette + type pairing is deliberate, not the generic "AI dashboard"
+ * default: a warm paper ground and a single clay/terracotta accent (used
+ * sparingly, on the one number that matters most) instead of a saturated
+ * multi-color SaaS palette; a text serif for headline numbers and section
+ * titles instead of the sans-only hierarchy every dashboard defaults to.
+ */
+
+@import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600;8..60,700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+
+.fervent-editorial {
+  --font-display: 'Source Serif 4', Georgia, 'Times New Roman', serif;
+  --font-body: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+  --background: 40 45% 94%;
+  --foreground: 36 15% 13%;
+
+  --card: 42 56% 96%;
+  --card-foreground: 36 15% 13%;
+
+  --popover: 42 56% 96%;
+  --popover-foreground: 36 15% 13%;
+
+  --primary: 16 53% 50%;
+  --primary-foreground: 42 56% 97%;
+
+  --secondary: 40 30% 90%;
+  --secondary-foreground: 36 15% 13%;
+
+  --muted: 40 30% 90%;
+  --muted-foreground: 41 12% 42%;
+
+  --accent: 40 35% 88%;
+  --accent-foreground: 36 15% 13%;
+
+  --border: 40 37% 84%;
+  --input: 40 37% 84%;
+  --ring: 16 53% 50%;
+
+  --radius: 0.625rem;
+
+  background: hsl(var(--background));
+  font-family: var(--font-body);
+  color: hsl(var(--foreground));
+}
+
+.dark .fervent-editorial {
+  --background: 30 17% 9%;
+  --foreground: 40 43% 92%;
+
+  --card: 33 18% 12%;
+  --card-foreground: 40 43% 92%;
+
+  --popover: 33 18% 12%;
+  --popover-foreground: 40 43% 92%;
+
+  --primary: 14 64% 59%;
+  --primary-foreground: 30 17% 9%;
+
+  --secondary: 34 16% 18%;
+  --secondary-foreground: 40 43% 92%;
+
+  --muted: 34 16% 18%;
+  --muted-foreground: 42 19% 64%;
+
+  --accent: 34 16% 20%;
+  --accent-foreground: 40 43% 92%;
+
+  --border: 34 16% 20%;
+  --input: 34 16% 20%;
+  --ring: 14 64% 59%;
+}
+
+.fervent-editorial .editorial-eyebrow {
+  font-family: var(--font-body);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: hsl(var(--muted-foreground));
+}
+
+.fervent-editorial .editorial-display {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+
+.fervent-editorial .editorial-figure {
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
+}
+
+.fervent-editorial .editorial-card {
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  box-shadow: 0 1px 2px hsl(36 15% 13% / 0.04), 0 8px 20px -12px hsl(36 15% 13% / 0.14);
+}
+
+.dark .fervent-editorial .editorial-card {
+  box-shadow: 0 1px 2px hsl(0 0% 0% / 0.2), 0 10px 24px -14px hsl(0 0% 0% / 0.5);
+}

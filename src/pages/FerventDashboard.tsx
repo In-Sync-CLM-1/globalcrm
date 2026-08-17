@@ -3,7 +3,6 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import DashboardLayout from "@/components/Layout/DashboardLayout";
-import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,7 +19,6 @@ import * as echarts from "echarts";
 import { useIsFervent, FERVENT_ORG_ID } from "@/hooks/useIsFervent";
 import { EChart } from "@/components/charts/EChart";
 import { getFerventChartTheme } from "@/components/FerventDashboard/ferventChartTheme";
-import { Card3D } from "@/components/FerventDashboard/Card3D";
 import { exportToCSV } from "@/utils/exportUtils";
 import worldGeo from "@/assets/worldMap.json";
 import { canonicalCountry, SMALL_NATION_COORDS } from "@/components/FerventDashboard/countryData";
@@ -35,12 +33,9 @@ import {
   buildGeoSplitDonutOption,
   UNSPECIFIED,
 } from "@/components/FerventDashboard/ferventChartOptions";
+import "@/components/FerventDashboard/ferventEditorial.css";
 
 echarts.registerMap("World", worldGeo as any);
-
-// Cards that host a live ECharts canvas: elevated depth, no tilt (rotating a
-// canvas mid-render reads as broken, not "3D" — see Card3D's own note).
-const chartCardClass = "shadow-[0_1px_2px_rgba(0,0,0,0.05),0_10px_24px_-14px_rgba(0,0,0,0.28)] border-border/70";
 
 interface RepoRow {
   id: string;
@@ -108,8 +103,8 @@ const DESIGNATION_SOURCE_LABELS = new Set(["Vendor DB", "Fervent DB", "Lusha"]);
 // chart when this is true.
 // threshold defaults to "entirely untagged" (designation_level: 100% blank);
 // Top States passes a looser bar since its untagged share isn't literally
-// 100% — see foldPlaceLabels below, "IND" folds into Unspecified too and the
-// combined share clears 90%+, which is just as uninformative as pure blank.
+// 100% — see foldPlaceholders below, "IND" folds into Unspecified too and
+// the combined share clears 90%+, which is just as uninformative as blank.
 function isUntagged(grouped: { name: string; value: number }[], threshold = 1): boolean {
   const total = grouped.reduce((s, d) => s + d.value, 0) || 1;
   const unspecified = grouped.find((d) => d.name === UNSPECIFIED)?.value || 0;
@@ -345,9 +340,9 @@ export default function FerventDashboard() {
     const emailOnly = filteredRows.filter((r) => !hasEmail(r) && hasMobile(r));
     const mobileOnly = filteredRows.filter((r) => hasEmail(r) && !hasMobile(r));
     return [
-      { label: "Missing mobile & email", rows: both, dot: "bg-red-600", border: "border-red-200", bg: "bg-red-50", text: "text-red-700", pill: "border-red-200 text-red-800 hover:bg-red-100" },
-      { label: "Missing email only", rows: emailOnly, dot: "bg-amber-400", border: "border-amber-200", bg: "bg-amber-50", text: "text-amber-700", pill: "border-amber-200 text-amber-800 hover:bg-amber-100" },
-      { label: "Missing mobile only", rows: mobileOnly, dot: "bg-blue-400", border: "border-blue-200", bg: "bg-blue-50", text: "text-blue-700", pill: "border-blue-200 text-blue-800 hover:bg-blue-100" },
+      { label: "Missing mobile & email", rows: both, severity: "critical" as const },
+      { label: "Missing email only", rows: emailOnly, severity: "warning" as const },
+      { label: "Missing mobile only", rows: mobileOnly, severity: "info" as const },
     ].filter((b) => b.rows.length > 0);
   }, [filteredRows]);
 
@@ -558,375 +553,355 @@ export default function FerventDashboard() {
   if (orgLoading || (isLoading && cacheLoading)) {
     return (
       <DashboardLayout>
-        <div className="p-6 text-sm text-muted-foreground">Loading dashboard…</div>
+        <div className="fervent-editorial -m-3 sm:-m-4 lg:-m-6 p-8 min-h-[calc(100vh-3rem)]">
+          <p className="editorial-eyebrow">Fervent Database</p>
+          <p className="mt-3 text-sm" style={{ color: "hsl(var(--muted-foreground))" }}>Loading dashboard…</p>
+        </div>
       </DashboardLayout>
     );
   }
 
   return (
     <DashboardLayout>
-      <div className="space-y-3">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Fervent Dashboard</h1>
-            <p className="text-sm text-muted-foreground">
-              An overview of your vendor/lead database.
-              {isLoading && <span className="ml-1 text-xs">(refreshing live data — filtering and drilldown will be ready shortly)</span>}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            {stats.total > 0 && (
-              <>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button variant="outline" size="sm">
-                      <SlidersHorizontal className="mr-2 h-4 w-4" /> Filters
-                      {activeFilters > 0 && <Badge className="ml-2" variant="secondary">{activeFilters}</Badge>}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent align="end" className="w-80 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <Label className="text-xs">Match mode</Label>
-                      <ToggleGroup
-                        type="single"
-                        size="sm"
-                        value={matchMode}
-                        onValueChange={(v) => v && setMatchMode(v as "exact" | "contains")}
-                      >
-                        <ToggleGroupItem value="exact" className="text-xs px-2.5 h-7">Exact</ToggleGroupItem>
-                        <ToggleGroupItem value="contains" className="text-xs px-2.5 h-7">Contains</ToggleGroupItem>
-                      </ToggleGroup>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="space-y-1">
-                        <Label className="text-xs">Added from</Label>
-                        <Input type="date" value={filters.dateFrom} onChange={(e) => setFilters((f) => ({ ...f, dateFrom: e.target.value }))} />
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">Added to</Label>
-                        <Input type="date" value={filters.dateTo} onChange={(e) => setFilters((f) => ({ ...f, dateTo: e.target.value }))} />
-                      </div>
-                    </div>
-                    {([
-                      ["industry", "Industry"],
-                      ["designationLevel", "Designation Level"],
-                      ["designation", "Designation"],
-                      ["country", "Country"],
-                      ["state", "State"],
-                      ["city", "City"],
-                      ["source", "Data Source"],
-                    ] as const).map(([key, label]) => (
-                      <div key={key} className="space-y-1">
-                        <Label className="text-xs">{label}</Label>
-                        <Select value={filters[key]} onValueChange={(v) => setFilters((f) => ({ ...f, [key]: v }))}>
-                          <SelectTrigger><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="all">All</SelectItem>
-                            {filterOptions[key].map((opt) => (
-                              <SelectItem key={opt} value={opt}>{opt}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    ))}
-                    {activeFilters > 0 && (
-                      <Button variant="ghost" size="sm" className="w-full" onClick={resetFilters}>
-                        <X className="mr-1.5 h-3.5 w-3.5" /> Reset filters
+      <div className="fervent-editorial -m-3 sm:-m-4 lg:-m-6 p-3 sm:p-4 lg:p-6 min-h-[calc(100vh-3rem)]">
+        <div className="space-y-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="editorial-eyebrow">Fervent Communication · Data Repository</p>
+              <h1 className="editorial-display text-[1.75rem] sm:text-[2.1rem] leading-none mt-1.5" style={{ textWrap: "balance" }}>
+                Vendor &amp; lead database
+              </h1>
+              <p className="mt-1.5 text-sm" style={{ color: "hsl(var(--muted-foreground))" }}>
+                {stats.total.toLocaleString()} records, tracked across {mapCountries.length + smallNationData.length + 1} countries.
+                {isLoading && <span className="ml-1 text-xs italic">Refreshing live data — filtering and drilldown ready shortly.</span>}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              {stats.total > 0 && (
+                <>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button variant="outline" size="sm">
+                        <SlidersHorizontal className="mr-2 h-4 w-4" /> Filters
+                        {activeFilters > 0 && <Badge className="ml-2" variant="secondary">{activeFilters}</Badge>}
                       </Button>
-                    )}
-                  </PopoverContent>
-                </Popover>
-                <Button variant="outline" size="sm" onClick={exportSummaryCsv}>
-                  <Download className="mr-2 h-4 w-4" /> Export
-                </Button>
-              </>
-            )}
-            <Button variant="outline" size="sm" asChild>
-              <Link to="/data-repository" className="gap-1.5">
-                Open Fervent Database <ArrowRight className="h-4 w-4" />
-              </Link>
-            </Button>
+                    </PopoverTrigger>
+                    <PopoverContent align="end" className="w-80 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs">Match mode</Label>
+                        <ToggleGroup
+                          type="single"
+                          size="sm"
+                          value={matchMode}
+                          onValueChange={(v) => v && setMatchMode(v as "exact" | "contains")}
+                        >
+                          <ToggleGroupItem value="exact" className="text-xs px-2.5 h-7">Exact</ToggleGroupItem>
+                          <ToggleGroupItem value="contains" className="text-xs px-2.5 h-7">Contains</ToggleGroupItem>
+                        </ToggleGroup>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="space-y-1">
+                          <Label className="text-xs">Added from</Label>
+                          <Input type="date" value={filters.dateFrom} onChange={(e) => setFilters((f) => ({ ...f, dateFrom: e.target.value }))} />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">Added to</Label>
+                          <Input type="date" value={filters.dateTo} onChange={(e) => setFilters((f) => ({ ...f, dateTo: e.target.value }))} />
+                        </div>
+                      </div>
+                      {([
+                        ["industry", "Industry"],
+                        ["designationLevel", "Designation Level"],
+                        ["designation", "Designation"],
+                        ["country", "Country"],
+                        ["state", "State"],
+                        ["city", "City"],
+                        ["source", "Data Source"],
+                      ] as const).map(([key, label]) => (
+                        <div key={key} className="space-y-1">
+                          <Label className="text-xs">{label}</Label>
+                          <Select value={filters[key]} onValueChange={(v) => setFilters((f) => ({ ...f, [key]: v }))}>
+                            <SelectTrigger><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All</SelectItem>
+                              {filterOptions[key].map((opt) => (
+                                <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      ))}
+                      {activeFilters > 0 && (
+                        <Button variant="ghost" size="sm" className="w-full" onClick={resetFilters}>
+                          <X className="mr-1.5 h-3.5 w-3.5" /> Reset filters
+                        </Button>
+                      )}
+                    </PopoverContent>
+                  </Popover>
+                  <Button variant="outline" size="sm" onClick={exportSummaryCsv}>
+                    <Download className="mr-2 h-4 w-4" /> Export
+                  </Button>
+                </>
+              )}
+              <Button size="sm" asChild>
+                <Link to="/data-repository" className="gap-1.5">
+                  Open Database <ArrowRight className="h-4 w-4" />
+                </Link>
+              </Button>
+            </div>
           </div>
-        </div>
 
-        {stats.total === 0 ? (
-          <Card>
-            <CardContent className="py-16 text-center space-y-3">
-              <Database className="h-10 w-10 mx-auto text-muted-foreground" />
-              <p className="text-muted-foreground">
+          {stats.total === 0 ? (
+            <div className="editorial-card py-20 text-center space-y-3">
+              <Database className="h-10 w-10 mx-auto" style={{ color: "hsl(var(--muted-foreground))" }} />
+              <p style={{ color: "hsl(var(--muted-foreground))" }}>
                 {activeFilters > 0 ? "No records match the current filters." : "No records yet. Import your database to see insights here."}
               </p>
               <Button asChild>
                 <Link to="/data-repository">Go to Fervent Database</Link>
               </Button>
-            </CardContent>
-          </Card>
-        ) : (
-          <>
-            {/* Hero — global heatmap is the centerpiece, domestic/international split and
-                top international markets fill the rest of the row so nothing sits empty */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-              <Card className={`lg:col-span-2 lg:row-span-2 ${chartCardClass}`}>
-                <ChartHeader
-                  icon={<Globe2 className="h-4 w-4 text-muted-foreground" />}
-                  title="Global Footprint"
-                  subtitle="Every country with records, colored by volume — click a country to drill down"
-                />
-                <CardContent className="p-1 h-[440px]">
-                  <EChart option={worldHeatmapOption} eventHandlers={worldMapClickEvents} />
-                </CardContent>
-              </Card>
-              <Card className={chartCardClass}>
-                <ChartHeader title="Domestic vs International" subtitle="India vs. rest of world" />
-                <CardContent className="p-1 h-[210px]">
-                  <EChart option={geoSplitOption} />
-                </CardContent>
-              </Card>
-              <Card className={chartCardClass}>
-                <ChartHeader title="Top International Markets" subtitle="Click a bar to drill down" />
-                <CardContent className="p-1 h-[210px]">
-                  <EChart option={topInternationalOption} eventHandlers={fieldClickEvents("country", topInternational, "Country")} />
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* KPI strip — data completeness at a glance */}
-            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
-              <KpiCard icon={<Database size={16} />} label="Total Records" value={stats.total} accent={theme.categorical[0]} />
-              <KpiCard icon={<Building2 size={16} />} label="Companies" value={stats.companies} accent={theme.categorical[2]} />
-              <KpiCard icon={<TrendingUp size={16} />} label="Added This Month" value={stats.addedThisMonth} accent={theme.categorical[1]} />
-              <KpiCard icon={<Mail size={16} />} label="Email Coverage" value={`${stats.emailCoverage}%`} accent={theme.categorical[4]} />
-              <KpiCard icon={<Phone size={16} />} label="Mobile Coverage" value={`${stats.mobileCoverage}%`} accent={theme.categorical[6]} />
-              <KpiCard
-                icon={<UserX size={16} />}
-                label="Missing Both"
-                value={stats.missingBoth}
-                accent="#ef4444"
-                onClick={stats.missingBoth > 0 ? () => drill("Missing mobile & email", (r) => !hasEmail(r) && !hasMobile(r)) : undefined}
-              />
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-              <Card className={chartCardClass}>
-                <ChartHeader title="Records Added" subtitle="Last 6 months — click a bar to drill down" />
-                <CardContent className="p-1 h-[200px]">
-                  <EChart option={trendOption} eventHandlers={trendClickEvents} />
-                </CardContent>
-              </Card>
-              <Card className={chartCardClass}>
-                <ChartHeader title="By Data Source" subtitle="Click a segment to drill down" />
-                <CardContent className="p-1 h-[200px]">
-                  <EChart option={statusOption} eventHandlers={fieldClickEvents("ucdb_status", byStatus, "Source")} />
-                </CardContent>
-              </Card>
-              <Card className={chartCardClass}>
-                <ChartHeader title="Daily Activity" subtitle="Last 3 months — click a day to drill down" />
-                <CardContent className="p-1 h-[200px]">
-                  <EChart option={activityOption} eventHandlers={activityClickEvents} />
-                </CardContent>
-              </Card>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-              <Card className={chartCardClass}>
-                <ChartHeader title="By Designation" subtitle="Top job titles — click to drill down" />
-                <CardContent className="p-1 h-[230px]">
-                  <EChart option={designationOption} eventHandlers={fieldClickEvents("designation", byDesignation, "Designation")} />
-                </CardContent>
-              </Card>
-              <Card className={chartCardClass}>
-                <ChartHeader title="By Industry" subtitle="Click a tile to drill down" />
-                <CardContent className="p-1 h-[230px]">
-                  <EChart option={industryOption} eventHandlers={fieldClickEvents("industry", byIndustry, "Industry")} />
-                </CardContent>
-              </Card>
-              <Card className={chartCardClass}>
-                <ChartHeader title="By Designation Level" subtitle="Seniority mix — click to drill down" />
-                <CardContent className="p-1 h-[230px]">
-                  {isUntagged(byDesignationLevel) ? (
-                    <EmptyChartState label="designation level" />
-                  ) : (
-                    <EChart option={designationLevelOption} eventHandlers={fieldClickEvents("designation_level", byDesignationLevel, "Designation level")} />
-                  )}
-                </CardContent>
-              </Card>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-              <Card className={chartCardClass}>
-                <ChartHeader title="Top Cities (India)" subtitle="Click a bar to drill down" />
-                <CardContent className="p-1 h-[230px]">
-                  <EChart option={citiesOption} eventHandlers={fieldClickEvents("city", byCity, "City")} />
-                </CardContent>
-              </Card>
-              <Card className={chartCardClass}>
-                <ChartHeader title="Top States (India)" subtitle="Click a bar to drill down" />
-                <CardContent className="p-1 h-[230px]">
-                  {isUntagged(byState, 0.9) ? (
-                    <EmptyChartState label="state" />
-                  ) : (
-                    <EChart option={statesOption} eventHandlers={fieldClickEvents("state", byState, "State")} />
-                  )}
-                </CardContent>
-              </Card>
-              <Card className={chartCardClass}>
-                <ChartHeader title="By Company Size" subtitle="Employees — click to drill down" />
-                <CardContent className="p-1 h-[230px]">
-                  <EChart option={employeeSizeOption} eventHandlers={fieldClickEvents("employee_size", byEmployeeSize, "Company size")} />
-                </CardContent>
-              </Card>
-            </div>
-
-            <Card className={chartCardClass}>
-              <ChartHeader
-                title="Top Companies"
-                subtitle="By number of contacts — click a bar to drill down"
-                extra={<Badge variant="secondary">{byCompany.length}</Badge>}
-              />
-              <CardContent className="p-1 h-[280px]">
-                <EChart option={companyOption} eventHandlers={fieldClickEvents("company_name", byCompany, "Company")} />
-              </CardContent>
-            </Card>
-
-            {/* Missing contact info */}
-            {missingBuckets.length > 0 && (
-              <Card className={chartCardClass}>
-                <ChartHeader
-                  title="Missing Contact Info"
-                  subtitle="Records that can't currently be called or emailed"
-                  extra={<Badge variant="secondary">{missingBuckets.reduce((s, b) => s + b.rows.length, 0)}</Badge>}
-                />
-                <CardContent className="p-3">
-                  <TooltipProvider delayDuration={200}>
-                    <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${Math.min(missingBuckets.length, 3)}, minmax(0, 1fr))` }}>
-                      {missingBuckets.map((b) => (
-                        <div key={b.label} className={`rounded-lg border ${b.border} ${b.bg} p-2.5`}>
-                          <div className={`text-[11px] font-semibold ${b.text} mb-2 flex items-center gap-1.5`}>
-                            <span className={`inline-block w-2 h-2 rounded-full ${b.dot}`} />
-                            {b.label}
-                            <span className="ml-auto font-normal opacity-60">{b.rows.length}</span>
-                          </div>
-                          <div className="flex flex-wrap gap-1.5">
-                            {b.rows.slice(0, 24).map((r) => (
-                              <Tooltip key={r.id}>
-                                <TooltipTrigger asChild>
-                                  <button className={`text-[11px] px-2 py-0.5 rounded border bg-white ${b.pill} font-medium transition-colors cursor-default`}>
-                                    {displayName(r) || r.company_name || "—"}
-                                  </button>
-                                </TooltipTrigger>
-                                <TooltipContent side="top" className="text-xs">
-                                  <p className="font-semibold mb-0.5">{displayName(r) || "—"}</p>
-                                  <p>{r.company_name || "—"}</p>
-                                  <p>{r.designation || "—"}</p>
-                                </TooltipContent>
-                              </Tooltip>
-                            ))}
-                          </div>
-                          {b.rows.length > 24 && (
-                            <button
-                              className="mt-2 text-[11px] text-muted-foreground underline underline-offset-2"
-                              onClick={() => setDrilldown({ label: b.label, rows: b.rows })}
-                            >
-                              +{b.rows.length - 24} more — view all
-                            </button>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </TooltipProvider>
-                </CardContent>
-              </Card>
-            )}
-          </>
-        )}
-      </div>
-
-      {/* Drill-down dialog */}
-      <Dialog open={!!drilldown} onOpenChange={(open) => { if (!open) setDrilldown(null); }}>
-        <DialogContent className="max-w-5xl max-h-[85vh] overflow-y-auto">
-          <DialogHeader>
-            <div className="flex items-center justify-between gap-2 pr-6">
-              <DialogTitle className="flex items-center gap-2">
-                <Users className="h-4 w-4" />
-                Records — {drilldown?.label}
-                <Badge variant="secondary">{drilldown?.rows.length ?? 0}</Badge>
-              </DialogTitle>
-              {drilldown && drilldown.rows.length > 0 && (
-                <Button variant="outline" size="sm" onClick={exportDrilldownCsv}>
-                  <Download className="mr-2 h-3.5 w-3.5" /> Export
-                </Button>
-              )}
-            </div>
-          </DialogHeader>
-          {drilldown && drilldown.rows.length > 0 ? (
-            <div className="border rounded-lg overflow-hidden">
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-muted/50">
-                    <TableHead className="text-xs">Company</TableHead>
-                    <TableHead className="text-xs">Name</TableHead>
-                    <TableHead className="text-xs">Designation</TableHead>
-                    <TableHead className="text-xs">City / State</TableHead>
-                    <TableHead className="text-xs">Country</TableHead>
-                    <TableHead className="text-xs">Mobile</TableHead>
-                    <TableHead className="text-xs">Email</TableHead>
-                    <TableHead className="text-xs whitespace-nowrap">Added On</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {drilldown.rows.slice(0, 500).map((r) => (
-                    <TableRow key={r.id} className="hover:bg-muted/30">
-                      <TableCell className="text-xs max-w-[160px] truncate" title={r.company_name || ""}>{r.company_name || "—"}</TableCell>
-                      <TableCell className="text-xs max-w-[150px] truncate" title={displayName(r)}>{displayName(r) || "—"}</TableCell>
-                      <TableCell className="text-xs max-w-[140px] truncate" title={r.designation || ""}>{r.designation || "—"}</TableCell>
-                      <TableCell className="text-xs whitespace-nowrap">{[r.city, r.state].filter(Boolean).join(", ") || "—"}</TableCell>
-                      <TableCell className="text-xs whitespace-nowrap">{r.country || "—"}</TableCell>
-                      <TableCell className="text-xs whitespace-nowrap">{r.mobile_number_1 || "—"}</TableCell>
-                      <TableCell className="text-xs max-w-[170px] truncate" title={r.official_email || ""}>{r.official_email || r.personal_email_1 || r.personal_email_2 || "—"}</TableCell>
-                      <TableCell className="text-xs whitespace-nowrap">{format(new Date(r.created_at), "dd MMM ''yy")}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-              {drilldown.rows.length > 500 && (
-                <p className="text-center text-[11px] text-muted-foreground py-2 border-t bg-muted/30">
-                  Showing first 500 of {drilldown.rows.length} — export CSV for the full list.
-                </p>
-              )}
             </div>
           ) : (
-            <p className="text-center text-muted-foreground text-sm py-10">No records found for this slice.</p>
+            <>
+              {/* Hero — global heatmap is the centerpiece, domestic/international split and
+                  top international markets fill the rest of the row so nothing sits empty */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <div className="editorial-card lg:col-span-2 lg:row-span-2 overflow-hidden">
+                  <ChartHeader
+                    icon={<Globe2 className="h-4 w-4" style={{ color: "hsl(var(--primary))" }} />}
+                    title="Global footprint"
+                    subtitle="Every country with records, colored by volume — click a country to drill down"
+                  />
+                  <div className="p-1 h-[440px]">
+                    <EChart option={worldHeatmapOption} eventHandlers={worldMapClickEvents} />
+                  </div>
+                </div>
+                <div className="editorial-card overflow-hidden">
+                  <ChartHeader title="Domestic vs. international" subtitle="India vs. rest of world" />
+                  <div className="p-1 h-[210px]">
+                    <EChart option={geoSplitOption} />
+                  </div>
+                </div>
+                <div className="editorial-card overflow-hidden">
+                  <ChartHeader title="Top international markets" subtitle="Click a bar to drill down" />
+                  <div className="p-1 h-[210px]">
+                    <EChart option={topInternationalOption} eventHandlers={fieldClickEvents("country", topInternational, "Country")} />
+                  </div>
+                </div>
+              </div>
+
+              {/* Stat rail — data completeness at a glance, editorial numerals in a single divided row */}
+              <div className="editorial-card">
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 divide-y sm:divide-y-0 sm:divide-x" style={{ borderColor: "hsl(var(--border))" }}>
+                  <StatCell icon={<Database size={14} />} label="Total records" value={stats.total.toLocaleString()} />
+                  <StatCell icon={<Building2 size={14} />} label="Companies" value={stats.companies.toLocaleString()} />
+                  <StatCell icon={<TrendingUp size={14} />} label="Added this month" value={stats.addedThisMonth.toLocaleString()} />
+                  <StatCell icon={<Mail size={14} />} label="Email coverage" value={`${stats.emailCoverage}%`} />
+                  <StatCell icon={<Phone size={14} />} label="Mobile coverage" value={`${stats.mobileCoverage}%`} />
+                  <StatCell
+                    icon={<UserX size={14} />}
+                    label="Missing both"
+                    value={stats.missingBoth.toLocaleString()}
+                    tone="critical"
+                    onClick={stats.missingBoth > 0 ? () => drill("Missing mobile & email", (r) => !hasEmail(r) && !hasMobile(r)) : undefined}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <div className="editorial-card overflow-hidden">
+                  <ChartHeader title="Records added" subtitle="Last 6 months — click a bar to drill down" />
+                  <div className="p-1 h-[200px]">
+                    <EChart option={trendOption} eventHandlers={trendClickEvents} />
+                  </div>
+                </div>
+                <div className="editorial-card overflow-hidden">
+                  <ChartHeader title="By data source" subtitle="Click a segment to drill down" />
+                  <div className="p-1 h-[200px]">
+                    <EChart option={statusOption} eventHandlers={fieldClickEvents("ucdb_status", byStatus, "Source")} />
+                  </div>
+                </div>
+                <div className="editorial-card overflow-hidden">
+                  <ChartHeader title="Daily activity" subtitle="Last 3 months — click a day to drill down" />
+                  <div className="p-1 h-[200px]">
+                    <EChart option={activityOption} eventHandlers={activityClickEvents} />
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <div className="editorial-card overflow-hidden">
+                  <ChartHeader title="By designation" subtitle="Top job titles — click to drill down" />
+                  <div className="p-1 h-[230px]">
+                    <EChart option={designationOption} eventHandlers={fieldClickEvents("designation", byDesignation, "Designation")} />
+                  </div>
+                </div>
+                <div className="editorial-card overflow-hidden">
+                  <ChartHeader title="By industry" subtitle="Click a tile to drill down" />
+                  <div className="p-1 h-[230px]">
+                    <EChart option={industryOption} eventHandlers={fieldClickEvents("industry", byIndustry, "Industry")} />
+                  </div>
+                </div>
+                <div className="editorial-card overflow-hidden">
+                  <ChartHeader title="By designation level" subtitle="Seniority mix — click to drill down" />
+                  <div className="p-1 h-[230px]">
+                    {isUntagged(byDesignationLevel) ? (
+                      <EmptyChartState label="designation level" />
+                    ) : (
+                      <EChart option={designationLevelOption} eventHandlers={fieldClickEvents("designation_level", byDesignationLevel, "Designation level")} />
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <div className="editorial-card overflow-hidden">
+                  <ChartHeader title="Top cities (India)" subtitle="Click a bar to drill down" />
+                  <div className="p-1 h-[230px]">
+                    <EChart option={citiesOption} eventHandlers={fieldClickEvents("city", byCity, "City")} />
+                  </div>
+                </div>
+                <div className="editorial-card overflow-hidden">
+                  <ChartHeader title="Top states (India)" subtitle="Click a bar to drill down" />
+                  <div className="p-1 h-[230px]">
+                    {isUntagged(byState, 0.9) ? (
+                      <EmptyChartState label="state" />
+                    ) : (
+                      <EChart option={statesOption} eventHandlers={fieldClickEvents("state", byState, "State")} />
+                    )}
+                  </div>
+                </div>
+                <div className="editorial-card overflow-hidden">
+                  <ChartHeader title="By company size" subtitle="Employees — click to drill down" />
+                  <div className="p-1 h-[230px]">
+                    <EChart option={employeeSizeOption} eventHandlers={fieldClickEvents("employee_size", byEmployeeSize, "Company size")} />
+                  </div>
+                </div>
+              </div>
+
+              <div className="editorial-card overflow-hidden">
+                <ChartHeader
+                  title="Top companies"
+                  subtitle="By number of contacts — click a bar to drill down"
+                  extra={<Badge variant="secondary">{byCompany.length}</Badge>}
+                />
+                <div className="p-1 h-[280px]">
+                  <EChart option={companyOption} eventHandlers={fieldClickEvents("company_name", byCompany, "Company")} />
+                </div>
+              </div>
+
+              {/* Missing contact info */}
+              {missingBuckets.length > 0 && (
+                <div className="editorial-card">
+                  <ChartHeader
+                    title="Missing contact info"
+                    subtitle="Records that can't currently be called or emailed"
+                    extra={<Badge variant="secondary">{missingBuckets.reduce((s, b) => s + b.rows.length, 0)}</Badge>}
+                  />
+                  <div className="p-3">
+                    <TooltipProvider delayDuration={200}>
+                      <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${Math.min(missingBuckets.length, 3)}, minmax(0, 1fr))` }}>
+                        {missingBuckets.map((b) => (
+                          <MissingBucket key={b.label} label={b.label} rows={b.rows} severity={b.severity} onViewAll={() => setDrilldown({ label: b.label, rows: b.rows })} />
+                        ))}
+                      </div>
+                    </TooltipProvider>
+                  </div>
+                </div>
+              )}
+            </>
           )}
-        </DialogContent>
-      </Dialog>
+        </div>
+
+        {/* Drill-down dialog */}
+        <Dialog open={!!drilldown} onOpenChange={(open) => { if (!open) setDrilldown(null); }}>
+          <DialogContent className="max-w-5xl max-h-[85vh] overflow-y-auto">
+            <DialogHeader>
+              <div className="flex items-center justify-between gap-2 pr-6">
+                <DialogTitle className="flex items-center gap-2 editorial-display font-semibold">
+                  <Users className="h-4 w-4" />
+                  Records — {drilldown?.label}
+                  <Badge variant="secondary">{drilldown?.rows.length ?? 0}</Badge>
+                </DialogTitle>
+                {drilldown && drilldown.rows.length > 0 && (
+                  <Button variant="outline" size="sm" onClick={exportDrilldownCsv}>
+                    <Download className="mr-2 h-3.5 w-3.5" /> Export
+                  </Button>
+                )}
+              </div>
+            </DialogHeader>
+            {drilldown && drilldown.rows.length > 0 ? (
+              <div className="border rounded-lg overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-muted/50">
+                      <TableHead className="text-xs">Company</TableHead>
+                      <TableHead className="text-xs">Name</TableHead>
+                      <TableHead className="text-xs">Designation</TableHead>
+                      <TableHead className="text-xs">City / State</TableHead>
+                      <TableHead className="text-xs">Country</TableHead>
+                      <TableHead className="text-xs">Mobile</TableHead>
+                      <TableHead className="text-xs">Email</TableHead>
+                      <TableHead className="text-xs whitespace-nowrap">Added On</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {drilldown.rows.slice(0, 500).map((r) => (
+                      <TableRow key={r.id} className="hover:bg-muted/30">
+                        <TableCell className="text-xs max-w-[160px] truncate" title={r.company_name || ""}>{r.company_name || "—"}</TableCell>
+                        <TableCell className="text-xs max-w-[150px] truncate" title={displayName(r)}>{displayName(r) || "—"}</TableCell>
+                        <TableCell className="text-xs max-w-[140px] truncate" title={r.designation || ""}>{r.designation || "—"}</TableCell>
+                        <TableCell className="text-xs whitespace-nowrap">{[r.city, r.state].filter(Boolean).join(", ") || "—"}</TableCell>
+                        <TableCell className="text-xs whitespace-nowrap">{r.country || "—"}</TableCell>
+                        <TableCell className="text-xs whitespace-nowrap">{r.mobile_number_1 || "—"}</TableCell>
+                        <TableCell className="text-xs max-w-[170px] truncate" title={r.official_email || ""}>{r.official_email || r.personal_email_1 || r.personal_email_2 || "—"}</TableCell>
+                        <TableCell className="text-xs whitespace-nowrap">{format(new Date(r.created_at), "dd MMM ''yy")}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+                {drilldown.rows.length > 500 && (
+                  <p className="text-center text-[11px] py-2 border-t bg-muted/30" style={{ color: "hsl(var(--muted-foreground))" }}>
+                    Showing first 500 of {drilldown.rows.length} — export CSV for the full list.
+                  </p>
+                )}
+              </div>
+            ) : (
+              <p className="text-center text-sm py-10" style={{ color: "hsl(var(--muted-foreground))" }}>No records found for this slice.</p>
+            )}
+          </DialogContent>
+        </Dialog>
+      </div>
     </DashboardLayout>
   );
 }
 
-function KpiCard({ icon, label, value, accent, onClick }: { icon: React.ReactNode; label: string; value: React.ReactNode; accent: string; onClick?: () => void }) {
+function StatCell({
+  icon, label, value, tone, onClick,
+}: { icon: React.ReactNode; label: string; value: React.ReactNode; tone?: "critical"; onClick?: () => void }) {
+  const valueColor = tone === "critical" ? "hsl(var(--primary))" : "hsl(var(--foreground))";
   return (
-    <Card3D accent={accent} className={onClick ? "cursor-pointer" : undefined}>
-      <div className="flex items-center gap-2.5 p-3" onClick={onClick}>
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" style={{ backgroundColor: `${accent}1A`, color: accent }}>
-          {icon}
-        </div>
-        <div className="min-w-0">
-          <p className="truncate text-[11px] text-muted-foreground leading-tight">{label}</p>
-          <p className="text-lg font-semibold leading-tight">{value}</p>
-        </div>
+    <div
+      className={`flex flex-col gap-1 p-4 ${onClick ? "cursor-pointer transition-colors hover:bg-[hsl(var(--accent))]" : ""}`}
+      onClick={onClick}
+    >
+      <div className="flex items-center gap-1.5" style={{ color: "hsl(var(--muted-foreground))" }}>
+        {icon}
+        <span className="editorial-eyebrow">{label}</span>
       </div>
-    </Card3D>
+      <span className="editorial-figure text-2xl font-semibold leading-none" style={{ color: valueColor }}>{value}</span>
+    </div>
   );
 }
 
 function ChartHeader({ title, subtitle, extra, icon }: { title: string; subtitle?: string; extra?: React.ReactNode; icon?: React.ReactNode }) {
   return (
-    <div className="flex items-start justify-between gap-2 p-3 pb-1">
+    <div className="flex items-start justify-between gap-2 p-4 pb-2">
       <div className="flex items-start gap-1.5">
         {icon && <span className="mt-0.5">{icon}</span>}
         <div>
-          <h3 className="text-sm font-semibold leading-tight">{title}</h3>
-          {subtitle && <p className="text-[11px] text-muted-foreground leading-tight">{subtitle}</p>}
+          <h3 className="editorial-display text-[0.95rem] font-semibold leading-tight" style={{ textWrap: "balance" }}>{title}</h3>
+          {subtitle && <p className="text-[11px] leading-tight mt-0.5" style={{ color: "hsl(var(--muted-foreground))" }}>{subtitle}</p>}
         </div>
       </div>
       {extra}
@@ -937,7 +912,62 @@ function ChartHeader({ title, subtitle, extra, icon }: { title: string; subtitle
 function EmptyChartState({ label }: { label: string }) {
   return (
     <div className="flex h-full items-center justify-center px-6 text-center">
-      <p className="text-xs text-muted-foreground">No {label} has been tagged on these records yet.</p>
+      <p className="text-xs" style={{ color: "hsl(var(--muted-foreground))" }}>No {label} has been tagged on these records yet.</p>
+    </div>
+  );
+}
+
+// Severity stripe on the left edge (not color-alone) + a small caption noting
+// what the missing info actually blocks — matches the dataviz skill's rule
+// that state gets encoded in form as well as color.
+const SEVERITY_STYLES: Record<"critical" | "warning" | "info", { stripe: string; dot: string; note: string }> = {
+  critical: { stripe: "hsl(var(--primary))", dot: "hsl(var(--primary))", note: "Can't be reached at all" },
+  warning: { stripe: "38 70% 48%", dot: "38 70% 48%", note: "Can be called, not emailed" },
+  info: { stripe: "205 45% 46%", dot: "205 45% 46%", note: "Can be emailed, not called" },
+};
+
+function MissingBucket({
+  label, rows, severity, onViewAll,
+}: { label: string; rows: RepoRow[]; severity: "critical" | "warning" | "info"; onViewAll: () => void }) {
+  const s = SEVERITY_STYLES[severity];
+  const stripeColor = severity === "critical" ? s.stripe : `hsl(${s.stripe})`;
+  const dotColor = severity === "critical" ? s.dot : `hsl(${s.dot})`;
+  return (
+    <div className="rounded-md border overflow-hidden" style={{ borderColor: "hsl(var(--border))" }}>
+      <div className="flex items-center gap-2 px-3 py-2" style={{ borderLeft: `3px solid ${stripeColor}`, background: "hsl(var(--accent) / 0.5)" }}>
+        <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: dotColor }} />
+        <span className="text-[11px] font-semibold">{label}</span>
+        <span className="text-[10px]" style={{ color: "hsl(var(--muted-foreground))" }}>· {s.note}</span>
+        <span className="ml-auto editorial-figure text-[11px] font-semibold" style={{ color: "hsl(var(--muted-foreground))" }}>{rows.length}</span>
+      </div>
+      <div className="p-2.5 flex flex-wrap gap-1.5">
+        {rows.slice(0, 24).map((r) => (
+          <Tooltip key={r.id}>
+            <TooltipTrigger asChild>
+              <button
+                className="text-[11px] px-2 py-0.5 rounded border font-medium transition-colors cursor-default"
+                style={{ background: "hsl(var(--card))", borderColor: "hsl(var(--border))" }}
+              >
+                {displayName(r) || r.company_name || "—"}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="text-xs">
+              <p className="font-semibold mb-0.5">{displayName(r) || "—"}</p>
+              <p>{r.company_name || "—"}</p>
+              <p>{r.designation || "—"}</p>
+            </TooltipContent>
+          </Tooltip>
+        ))}
+        {rows.length > 24 && (
+          <button
+            className="text-[11px] underline underline-offset-2 self-center"
+            style={{ color: "hsl(var(--muted-foreground))" }}
+            onClick={onViewAll}
+          >
+            +{rows.length - 24} more — view all
+          </button>
+        )}
+      </div>
     </div>
   );
 }
