@@ -271,6 +271,122 @@ export interface CityMapPoint {
   count: number;
 }
 
+export interface CountryDatum {
+  name: string;
+  value: number;
+}
+
+// World choropleth — every country is colored by record count on the same
+// sequential ramp as the ranked bars elsewhere (magnitude, no identity), so
+// this genuinely reads as a heatmap rather than a set of categorical blobs.
+// Countries with zero records stay a flat neutral gray rather than the ramp's
+// lightest step, so "no data" and "a little data" stay visually distinct.
+// Small nations not present in the underlying map polygons (Singapore, Hong
+// Kong) are layered on top as scatter points instead — see SMALL_NATION_COORDS.
+export function buildWorldHeatmapOption(
+  countries: CountryDatum[],
+  smallNations: CountryDatum[],
+  theme: FerventChartTheme,
+  smallNationCoords: Record<string, [number, number]>
+): EChartsOption {
+  const max = Math.max(1, ...countries.map((c) => c.value), ...smallNations.map((c) => c.value));
+  return {
+    tooltip: {
+      ...tooltipBase(theme),
+      formatter: (p: any) => {
+        const v = Array.isArray(p.value) ? p.value[2] : p.value;
+        return `${p.name}<br/><b>${v || 0}</b> record(s)`;
+      },
+    },
+    visualMap: {
+      min: 0,
+      max,
+      show: false,
+      inRange: { color: theme.sequential },
+    },
+    geo: {
+      map: "World",
+      roam: true,
+      scaleLimit: { min: 1, max: 6 },
+      layoutCenter: ["50%", "52%"],
+      layoutSize: "100%",
+      itemStyle: { areaColor: theme.grid, borderColor: theme.surface, borderWidth: 0.6 },
+      emphasis: { itemStyle: { areaColor: theme.sequential[2] }, label: { show: false } },
+    },
+    series: [
+      {
+        type: "map",
+        map: "World",
+        geoIndex: 0,
+        data: countries,
+      },
+      {
+        type: "effectScatter",
+        coordinateSystem: "geo",
+        data: smallNations
+          .filter((n) => smallNationCoords[n.name])
+          .map((n) => ({ name: n.name, value: [...smallNationCoords[n.name], n.value] })),
+        showEffectOn: "render",
+        rippleEffect: { scale: 2, brushType: "stroke" },
+        zlevel: 1,
+        symbolSize: (val: number[]) => 8 + 20 * Math.sqrt((val[2] || 0) / max),
+        itemStyle: { color: theme.categorical[2], shadowBlur: 6, shadowColor: `${theme.categorical[2]}66` },
+        label: { show: true, formatter: (p: any) => p.name, position: "top", color: theme.text, fontSize: 10, distance: 6 },
+      },
+    ],
+  };
+}
+
+// Domestic vs international vs unclassified split — a fixed, semantic three-
+// way donut (never categorical-cycled) so the color always means the same
+// thing: teal is India, blue is international, gray is "country field
+// couldn't be classified" (never silently folded into either real bucket).
+export function buildGeoSplitDonutOption(
+  domestic: number,
+  international: number,
+  unclassified: number,
+  theme: FerventChartTheme
+): EChartsOption {
+  const total = domestic + international + unclassified || 1;
+  const data = [
+    { name: "Domestic (India)", value: domestic, itemStyle: { color: theme.categorical[0] } },
+    { name: "International", value: international, itemStyle: { color: theme.categorical[2] } },
+    { name: "Unclassified", value: unclassified, itemStyle: { color: theme.otherGray } },
+  ].filter((d) => d.value > 0);
+
+  return {
+    tooltip: { trigger: "item", ...tooltipBase(theme), formatter: (p: any) => `${p.name}: ${p.value} (${p.percent}%)` },
+    legend: { bottom: 0, left: "center", textStyle: { color: theme.mutedText, fontSize: 11 }, itemWidth: 10, itemHeight: 10 },
+    series: [
+      {
+        type: "pie",
+        radius: ["58%", "82%"],
+        center: ["50%", "42%"],
+        avoidLabelOverlap: true,
+        itemStyle: { borderColor: theme.surface, borderWidth: 2, borderRadius: 4 },
+        label: { show: false },
+        data,
+      },
+      {
+        type: "pie",
+        radius: ["0%", "0%"],
+        center: ["50%", "42%"],
+        silent: true,
+        label: {
+          show: true,
+          position: "center",
+          formatter: () => `${Math.round((domestic / total) * 100)}%\n{sub|Domestic}`,
+          fontSize: 22,
+          fontWeight: 700,
+          color: theme.text,
+          rich: { sub: { fontSize: 11, fontWeight: 400, color: theme.mutedText } },
+        },
+        data: [{ value: 1 }],
+      },
+    ],
+  };
+}
+
 // India geo bubble map of where records are physically located. Bubble size
 // is the only encoding that matters here (place identity comes from the
 // label/tooltip), so — like the sequential ramp elsewhere — it's blue, not

@@ -15,14 +15,15 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { addMonths, differenceInCalendarMonths, format, startOfMonth, subMonths } from "date-fns";
-import { Database, Building2, Mail, Phone, TrendingUp, ArrowRight, SlidersHorizontal, Download, X, UserX, Users } from "lucide-react";
+import { Database, Building2, Mail, Phone, TrendingUp, ArrowRight, SlidersHorizontal, Download, X, UserX, Users, Globe2 } from "lucide-react";
 import * as echarts from "echarts";
 import { useIsFervent, FERVENT_ORG_ID } from "@/hooks/useIsFervent";
 import { EChart } from "@/components/charts/EChart";
 import { getFerventChartTheme } from "@/components/FerventDashboard/ferventChartTheme";
+import { Card3D } from "@/components/FerventDashboard/Card3D";
 import { exportToCSV } from "@/utils/exportUtils";
-import indiaGeo from "@/assets/indiaMap.json";
-import { CITY_COORDS, canonicalCity } from "@/components/FerventDashboard/indiaCityCoords";
+import worldGeo from "@/assets/worldMap.json";
+import { canonicalCountry, SMALL_NATION_COORDS } from "@/components/FerventDashboard/countryData";
 import {
   buildTrendOption,
   buildIndustryTreemapOption,
@@ -30,11 +31,16 @@ import {
   buildRankedBarOption,
   buildStatusSegmentOption,
   buildDailyActivityHeatmapOption,
-  buildCityGeoMapOption,
+  buildWorldHeatmapOption,
+  buildGeoSplitDonutOption,
   UNSPECIFIED,
 } from "@/components/FerventDashboard/ferventChartOptions";
 
-echarts.registerMap("India", indiaGeo as any);
+echarts.registerMap("World", worldGeo as any);
+
+// Cards that host a live ECharts canvas: elevated depth, no tilt (rotating a
+// canvas mid-render reads as broken, not "3D" — see Card3D's own note).
+const chartCardClass = "shadow-[0_1px_2px_rgba(0,0,0,0.05),0_10px_24px_-14px_rgba(0,0,0,0.28)] border-border/70";
 
 interface RepoRow {
   id: string;
@@ -49,6 +55,7 @@ interface RepoRow {
   ucdb_status: string | null;
   city: string | null;
   state: string | null;
+  country: string | null;
   official_email: string | null;
   personal_email_1: string | null;
   personal_email_2: string | null;
@@ -64,12 +71,13 @@ interface FilterState {
   designation: string;
   city: string;
   state: string;
+  country: string;
   source: string;
 }
 
 const emptyFilters: FilterState = {
   dateFrom: "", dateTo: "", industry: "all", designationLevel: "all",
-  designation: "all", city: "all", state: "all", source: "all",
+  designation: "all", city: "all", state: "all", country: "all", source: "all",
 };
 
 function normalizeKey(raw: string | null): string {
@@ -135,7 +143,7 @@ export default function FerventDashboard() {
         const { data, error } = await supabase
           .from("fervent_data_repository")
           .select(
-            "id, company_name, first_name, last_name, designation, designation_level, department, industry, employee_size, ucdb_status, city, state, official_email, personal_email_1, personal_email_2, mobile_number_1, created_at"
+            "id, company_name, first_name, last_name, designation, designation_level, department, industry, employee_size, ucdb_status, city, state, country, official_email, personal_email_1, personal_email_2, mobile_number_1, created_at"
           )
           .eq("org_id", FERVENT_ORG_ID)
           .range(from, from + pageSize - 1);
@@ -169,7 +177,7 @@ export default function FerventDashboard() {
     (filters.dateFrom ? 1 : 0) + (filters.dateTo ? 1 : 0) +
     (filters.industry !== "all" ? 1 : 0) + (filters.designationLevel !== "all" ? 1 : 0) +
     (filters.designation !== "all" ? 1 : 0) + (filters.city !== "all" ? 1 : 0) +
-    (filters.state !== "all" ? 1 : 0) + (filters.source !== "all" ? 1 : 0);
+    (filters.state !== "all" ? 1 : 0) + (filters.country !== "all" ? 1 : 0) + (filters.source !== "all" ? 1 : 0);
 
   // Use the cache while the full row set is still loading and no filter is
   // applied (filters need real rows to answer). Once `rows` lands, or a
@@ -187,6 +195,7 @@ export default function FerventDashboard() {
         designation: fo.designation || [],
         city: fo.city || [],
         state: fo.state || [],
+        country: fo.country || [],
         source: fo.source || [],
       };
     }
@@ -196,9 +205,10 @@ export default function FerventDashboard() {
       designation: distinctOptions(rows, "designation"),
       city: distinctOptions(rows, "city"),
       state: distinctOptions(rows, "state"),
+      country: distinctOptions(rows, "country"),
       source: distinctOptions(rows, "ucdb_status"),
     };
-  }, [rows, cache]);
+  }, [rows, cache, showCache]);
 
   const filteredRows = useMemo(() => {
     return rows.filter((r) => {
@@ -209,6 +219,7 @@ export default function FerventDashboard() {
       if (filters.designation !== "all" && !fieldMatches(r.designation, filters.designation, matchMode)) return false;
       if (filters.city !== "all" && !fieldMatches(r.city, filters.city, matchMode)) return false;
       if (filters.state !== "all" && !fieldMatches(r.state, filters.state, matchMode)) return false;
+      if (filters.country !== "all" && !fieldMatches(r.country, filters.country, matchMode)) return false;
       if (filters.source !== "all" && !fieldMatches(r.ucdb_status, filters.source, matchMode)) return false;
       return true;
     });
@@ -249,26 +260,38 @@ export default function FerventDashboard() {
   const byDesignation = useMemo<Grouped>(() => (showCache && cache ? cache.by_designation : groupBy(filteredRows, "designation")), [filteredRows, showCache, cache]);
   const byEmployeeSize = useMemo<Grouped>(() => (showCache && cache ? cache.by_employee_size : groupBy(filteredRows, "employee_size")), [filteredRows, showCache, cache]);
   const byCompany = useMemo<Grouped>(() => (showCache && cache ? cache.by_company : groupBy(filteredRows, "company_name")), [filteredRows, showCache, cache]);
+  const byCountry = useMemo<Grouped>(() => (showCache && cache?.by_country ? cache.by_country : groupBy(filteredRows, "country")), [filteredRows, showCache, cache]);
 
-  // City -> map bubble, derived from the (cache-or-live) grouped city counts
-  // rather than raw rows, so it works identically from either source. Cities
-  // with no known coordinates (or blank/"online") don't get a bubble but
-  // still count everywhere else.
-  const { cityMapPoints, unmappedCityCount } = useMemo(() => {
-    const counts = new Map<string, number>();
-    let unmapped = 0;
-    byCity.forEach(({ name, value }) => {
-      const key = canonicalCity(name);
-      if (!key || !CITY_COORDS[key]) { unmapped += value; return; }
-      counts.set(key, (counts.get(key) || 0) + value);
+  // Classify the raw country breakdown into the world map's polygon data
+  // (mapCountries), point-marker small nations (Singapore/Hong Kong — too
+  // small to render as filled regions), and the domestic/international/
+  // unclassified split. A raw country value that doesn't match a real
+  // country (the import-mapping bug that left company names in this field
+  // for a chunk of records — see countryData.ts) lands in "unclassified",
+  // never silently counted as India or folded into another country.
+  const { mapCountries, smallNationData, geoSplit } = useMemo(() => {
+    const polyMap = new Map<string, number>();
+    const smallMap = new Map<string, number>();
+    let domestic = 0, international = 0, unclassified = 0;
+    byCountry.forEach(({ name, value }) => {
+      const canon = canonicalCountry(name);
+      if (!canon) { unclassified += value; return; }
+      if (canon === "India") domestic += value;
+      else international += value;
+      if (SMALL_NATION_COORDS[canon]) smallMap.set(canon, (smallMap.get(canon) || 0) + value);
+      else polyMap.set(canon, (polyMap.get(canon) || 0) + value);
     });
-    const points = Array.from(counts.entries()).map(([key, count]) => ({
-      name: key.replace(/\b\w/g, (c) => c.toUpperCase()),
-      coords: CITY_COORDS[key],
-      count,
-    }));
-    return { cityMapPoints: points, unmappedCityCount: unmapped };
-  }, [byCity]);
+    return {
+      mapCountries: Array.from(polyMap.entries()).map(([name, value]) => ({ name, value })),
+      smallNationData: Array.from(smallMap.entries()).map(([name, value]) => ({ name, value })),
+      geoSplit: { domestic, international, unclassified },
+    };
+  }, [byCountry]);
+
+  const topInternational = useMemo(
+    () => [...mapCountries, ...smallNationData].filter((c) => c.name !== "India").sort((a, b) => b.value - a.value),
+    [mapCountries, smallNationData]
+  );
 
   const missingBuckets = useMemo(() => {
     const both = filteredRows.filter((r) => !hasEmail(r) && !hasMobile(r));
@@ -355,7 +378,19 @@ export default function FerventDashboard() {
   const industryOption = useMemo(() => buildIndustryTreemapOption(byIndustry, theme), [byIndustry, theme]);
   const designationLevelOption = useMemo(() => buildDesignationDonutOption(byDesignationLevel, theme), [byDesignationLevel, theme]);
   const statesOption = useMemo(() => buildRankedBarOption(byState, theme, { topN: 8, color: theme.categorical[4] }), [byState, theme]);
-  const mapOption = useMemo(() => buildCityGeoMapOption(cityMapPoints, theme), [cityMapPoints, theme]);
+  const citiesOption = useMemo(() => buildRankedBarOption(byCity, theme, { topN: 8, color: theme.categorical[5] }), [byCity, theme]);
+  const worldHeatmapOption = useMemo(
+    () => buildWorldHeatmapOption(mapCountries, smallNationData, theme, SMALL_NATION_COORDS),
+    [mapCountries, smallNationData, theme]
+  );
+  const geoSplitOption = useMemo(
+    () => buildGeoSplitDonutOption(geoSplit.domestic, geoSplit.international, geoSplit.unclassified, theme),
+    [geoSplit, theme]
+  );
+  const topInternationalOption = useMemo(
+    () => buildRankedBarOption(topInternational, theme, { topN: 8, color: theme.categorical[2], labelWidth: 110 }),
+    [topInternational, theme]
+  );
   const designationOption = useMemo(
     () => buildRankedBarOption(byDesignation, theme, { topN: 10, color: theme.categorical[6], labelWidth: 120 }),
     [byDesignation, theme]
@@ -403,11 +438,10 @@ export default function FerventDashboard() {
     },
   };
 
-  const mapClickEvents = {
+  const worldMapClickEvents = {
     click: (p: any) => {
       if (!p.name) return;
-      const key = p.name.toLowerCase();
-      drill(`City: ${p.name}`, (r) => canonicalCity(r.city) === key);
+      drill(`Country: ${p.name}`, (r) => canonicalCountry(r.country) === p.name);
     },
   };
 
@@ -423,6 +457,7 @@ export default function FerventDashboard() {
     push("Designation Level", byDesignationLevel);
     push("Designation", byDesignation);
     push("Data Source", byStatus);
+    push("Country", byCountry);
     push("State", byState);
     push("City", byCity);
     push("Employee Size", byEmployeeSize);
@@ -461,6 +496,7 @@ export default function FerventDashboard() {
         { key: "department", label: "Department" },
         { key: "city", label: "City" },
         { key: "state", label: "State" },
+        { key: "country", label: "Country" },
         { key: "mobile_number_1", label: "Phone 1" },
         { key: "official_email", label: "Official Email" },
         { key: "created_at", label: "Added On", format: (v: string) => format(new Date(v), "yyyy-MM-dd") },
@@ -528,6 +564,7 @@ export default function FerventDashboard() {
                       ["industry", "Industry"],
                       ["designationLevel", "Designation Level"],
                       ["designation", "Designation"],
+                      ["country", "Country"],
                       ["state", "State"],
                       ["city", "City"],
                       ["source", "Data Source"],
@@ -579,12 +616,38 @@ export default function FerventDashboard() {
           </Card>
         ) : (
           <>
-            {/* KPI strip */}
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
+            {/* Hero — global heatmap is the centerpiece, domestic/international split and
+                top international markets fill the rest of the row so nothing sits empty */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+              <Card className={`lg:col-span-2 lg:row-span-2 ${chartCardClass}`}>
+                <ChartHeader
+                  icon={<Globe2 className="h-4 w-4 text-muted-foreground" />}
+                  title="Global Footprint"
+                  subtitle="Every country with records, colored by volume — click a country to drill down"
+                />
+                <CardContent className="p-1 h-[440px]">
+                  <EChart option={worldHeatmapOption} eventHandlers={worldMapClickEvents} />
+                </CardContent>
+              </Card>
+              <Card className={chartCardClass}>
+                <ChartHeader title="Domestic vs International" subtitle="India vs. rest of world" />
+                <CardContent className="p-1 h-[210px]">
+                  <EChart option={geoSplitOption} />
+                </CardContent>
+              </Card>
+              <Card className={chartCardClass}>
+                <ChartHeader title="Top International Markets" subtitle="Click a bar to drill down" />
+                <CardContent className="p-1 h-[210px]">
+                  <EChart option={topInternationalOption} eventHandlers={fieldClickEvents("country", topInternational, "Country")} />
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* KPI strip — data completeness at a glance */}
+            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
               <KpiCard icon={<Database size={16} />} label="Total Records" value={stats.total} accent={theme.categorical[0]} />
               <KpiCard icon={<Building2 size={16} />} label="Companies" value={stats.companies} accent={theme.categorical[2]} />
-              <KpiCard icon={<TrendingUp size={16} />} label="Industries Tagged" value={stats.industries} accent={theme.categorical[3]} />
-              <KpiCard icon={<Database size={16} />} label="Added This Month" value={stats.addedThisMonth} accent={theme.categorical[1]} />
+              <KpiCard icon={<TrendingUp size={16} />} label="Added This Month" value={stats.addedThisMonth} accent={theme.categorical[1]} />
               <KpiCard icon={<Mail size={16} />} label="Email Coverage" value={`${stats.emailCoverage}%`} accent={theme.categorical[4]} />
               <KpiCard icon={<Phone size={16} />} label="Mobile Coverage" value={`${stats.mobileCoverage}%`} accent={theme.categorical[6]} />
               <KpiCard
@@ -596,56 +659,41 @@ export default function FerventDashboard() {
               />
             </div>
 
-            {/* Bento grid — the map is the centerpiece, same hero treatment RMPL gives its geo chart */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-              <Card className="lg:col-span-2 lg:row-span-2">
-                <ChartHeader
-                  title="Where Your Data Is From"
-                  subtitle={
-                    unmappedCityCount > 0
-                      ? `Click a city to drill down — ${unmappedCityCount} record(s) with an unrecognized/blank city aren't plotted`
-                      : "Click a city to drill down"
-                  }
-                />
-                <CardContent className="p-1 h-[420px]">
-                  <EChart option={mapOption} eventHandlers={mapClickEvents} />
-                </CardContent>
-              </Card>
-              <Card>
+              <Card className={chartCardClass}>
                 <ChartHeader title="Records Added" subtitle="Last 6 months — click a bar to drill down" />
-                <CardContent className="p-1 h-[190px]">
+                <CardContent className="p-1 h-[200px]">
                   <EChart option={trendOption} eventHandlers={trendClickEvents} />
                 </CardContent>
               </Card>
-              <Card>
+              <Card className={chartCardClass}>
                 <ChartHeader title="By Data Source" subtitle="Click a segment to drill down" />
-                <CardContent className="p-1 h-[190px]">
+                <CardContent className="p-1 h-[200px]">
                   <EChart option={statusOption} eventHandlers={fieldClickEvents("ucdb_status", byStatus, "Source")} />
+                </CardContent>
+              </Card>
+              <Card className={chartCardClass}>
+                <ChartHeader title="Daily Activity" subtitle="Last 3 months — click a day to drill down" />
+                <CardContent className="p-1 h-[200px]">
+                  <EChart option={activityOption} eventHandlers={activityClickEvents} />
                 </CardContent>
               </Card>
             </div>
 
-            <Card>
-              <ChartHeader title="Daily Activity" subtitle="Last 3 months — click a day to drill down" />
-              <CardContent className="p-1 h-[190px]">
-                <EChart option={activityOption} eventHandlers={activityClickEvents} />
-              </CardContent>
-            </Card>
-
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-              <Card>
+              <Card className={chartCardClass}>
                 <ChartHeader title="By Designation" subtitle="Top job titles — click to drill down" />
                 <CardContent className="p-1 h-[230px]">
                   <EChart option={designationOption} eventHandlers={fieldClickEvents("designation", byDesignation, "Designation")} />
                 </CardContent>
               </Card>
-              <Card>
+              <Card className={chartCardClass}>
                 <ChartHeader title="By Industry" subtitle="Click a tile to drill down" />
                 <CardContent className="p-1 h-[230px]">
                   <EChart option={industryOption} eventHandlers={fieldClickEvents("industry", byIndustry, "Industry")} />
                 </CardContent>
               </Card>
-              <Card>
+              <Card className={chartCardClass}>
                 <ChartHeader title="By Designation Level" subtitle="Seniority mix — click to drill down" />
                 <CardContent className="p-1 h-[230px]">
                   <EChart option={designationLevelOption} eventHandlers={fieldClickEvents("designation_level", byDesignationLevel, "Designation level")} />
@@ -653,14 +701,20 @@ export default function FerventDashboard() {
               </Card>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-              <Card>
-                <ChartHeader title="Top States" subtitle="Click a bar to drill down" />
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+              <Card className={chartCardClass}>
+                <ChartHeader title="Top Cities (India)" subtitle="Click a bar to drill down" />
+                <CardContent className="p-1 h-[230px]">
+                  <EChart option={citiesOption} eventHandlers={fieldClickEvents("city", byCity, "City")} />
+                </CardContent>
+              </Card>
+              <Card className={chartCardClass}>
+                <ChartHeader title="Top States (India)" subtitle="Click a bar to drill down" />
                 <CardContent className="p-1 h-[230px]">
                   <EChart option={statesOption} eventHandlers={fieldClickEvents("state", byState, "State")} />
                 </CardContent>
               </Card>
-              <Card>
+              <Card className={chartCardClass}>
                 <ChartHeader title="By Company Size" subtitle="Employees — click to drill down" />
                 <CardContent className="p-1 h-[230px]">
                   <EChart option={employeeSizeOption} eventHandlers={fieldClickEvents("employee_size", byEmployeeSize, "Company size")} />
@@ -668,7 +722,7 @@ export default function FerventDashboard() {
               </Card>
             </div>
 
-            <Card>
+            <Card className={chartCardClass}>
               <ChartHeader
                 title="Top Companies"
                 subtitle="By number of contacts — click a bar to drill down"
@@ -681,7 +735,7 @@ export default function FerventDashboard() {
 
             {/* Missing contact info */}
             {missingBuckets.length > 0 && (
-              <Card>
+              <Card className={chartCardClass}>
                 <ChartHeader
                   title="Missing Contact Info"
                   subtitle="Records that can't currently be called or emailed"
@@ -758,6 +812,7 @@ export default function FerventDashboard() {
                     <TableHead className="text-xs">Name</TableHead>
                     <TableHead className="text-xs">Designation</TableHead>
                     <TableHead className="text-xs">City / State</TableHead>
+                    <TableHead className="text-xs">Country</TableHead>
                     <TableHead className="text-xs">Mobile</TableHead>
                     <TableHead className="text-xs">Email</TableHead>
                     <TableHead className="text-xs whitespace-nowrap">Added On</TableHead>
@@ -770,6 +825,7 @@ export default function FerventDashboard() {
                       <TableCell className="text-xs max-w-[150px] truncate" title={displayName(r)}>{displayName(r) || "—"}</TableCell>
                       <TableCell className="text-xs max-w-[140px] truncate" title={r.designation || ""}>{r.designation || "—"}</TableCell>
                       <TableCell className="text-xs whitespace-nowrap">{[r.city, r.state].filter(Boolean).join(", ") || "—"}</TableCell>
+                      <TableCell className="text-xs whitespace-nowrap">{r.country || "—"}</TableCell>
                       <TableCell className="text-xs whitespace-nowrap">{r.mobile_number_1 || "—"}</TableCell>
                       <TableCell className="text-xs max-w-[170px] truncate" title={r.official_email || ""}>{r.official_email || r.personal_email_1 || r.personal_email_2 || "—"}</TableCell>
                       <TableCell className="text-xs whitespace-nowrap">{format(new Date(r.created_at), "dd MMM ''yy")}</TableCell>
@@ -794,26 +850,29 @@ export default function FerventDashboard() {
 
 function KpiCard({ icon, label, value, accent, onClick }: { icon: React.ReactNode; label: string; value: React.ReactNode; accent: string; onClick?: () => void }) {
   return (
-    <Card className={`overflow-hidden transition-shadow hover:shadow-md ${onClick ? "cursor-pointer" : ""}`} onClick={onClick}>
-      <CardContent className="flex items-center gap-2.5 p-2.5" style={{ borderLeft: `3px solid ${accent}` }}>
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg" style={{ backgroundColor: `${accent}1A`, color: accent }}>
+    <Card3D accent={accent} className={onClick ? "cursor-pointer" : undefined}>
+      <div className="flex items-center gap-2.5 p-3" onClick={onClick}>
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" style={{ backgroundColor: `${accent}1A`, color: accent }}>
           {icon}
         </div>
         <div className="min-w-0">
           <p className="truncate text-[11px] text-muted-foreground leading-tight">{label}</p>
           <p className="text-lg font-semibold leading-tight">{value}</p>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </Card3D>
   );
 }
 
-function ChartHeader({ title, subtitle, extra }: { title: string; subtitle?: string; extra?: React.ReactNode }) {
+function ChartHeader({ title, subtitle, extra, icon }: { title: string; subtitle?: string; extra?: React.ReactNode; icon?: React.ReactNode }) {
   return (
     <div className="flex items-start justify-between gap-2 p-3 pb-1">
-      <div>
-        <h3 className="text-sm font-semibold leading-tight">{title}</h3>
-        {subtitle && <p className="text-[11px] text-muted-foreground leading-tight">{subtitle}</p>}
+      <div className="flex items-start gap-1.5">
+        {icon && <span className="mt-0.5">{icon}</span>}
+        <div>
+          <h3 className="text-sm font-semibold leading-tight">{title}</h3>
+          {subtitle && <p className="text-[11px] text-muted-foreground leading-tight">{subtitle}</p>}
+        </div>
       </div>
       {extra}
     </div>
