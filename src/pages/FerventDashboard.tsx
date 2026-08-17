@@ -21,9 +21,8 @@ import { EChart } from "@/components/charts/EChart";
 import { getFerventChartTheme } from "@/components/FerventDashboard/ferventChartTheme";
 import { exportToCSV } from "@/utils/exportUtils";
 import worldGeo from "@/assets/worldMap.json";
-import indiaStatesGeo from "@/assets/indiaMap.json";
 import { canonicalCountry, SMALL_NATION_COORDS } from "@/components/FerventDashboard/countryData";
-import { canonicalState, canonicalCity, CITY_COORDS } from "@/components/FerventDashboard/indiaGeoData";
+import { canonicalState, canonicalCity } from "@/components/FerventDashboard/indiaGeoData";
 import {
   buildTrendOption,
   buildIndustryTreemapOption,
@@ -33,14 +32,12 @@ import {
   buildDailyActivityHeatmapOption,
   buildWorldHeatmapOption,
   buildGeoSplitDonutOption,
-  buildIndiaDetailMapOption,
   buildOrdinalColumnOption,
   UNSPECIFIED,
 } from "@/components/FerventDashboard/ferventChartOptions";
 import "@/components/FerventDashboard/ferventEditorial.css";
 
 echarts.registerMap("World", worldGeo as any);
-echarts.registerMap("IndiaStates", indiaStatesGeo as any);
 
 // Same canonical ascending order as ferventFieldNormalization.ts's
 // EMPLOYEE_SIZE_BUCKETS (Deno copy, can't import cross-runtime) — the
@@ -346,27 +343,26 @@ export default function FerventDashboard() {
     [mapCountries, smallNationData]
   );
 
-  // India detail map: state choropleth data (canonicalized state names,
-  // diacritics + aliases folded — see indiaGeoData.ts) and city bubble
-  // points (parsed out of the raw, often-compound `city` strings). Both
-  // derived from the raw byState/byCity groupings so CSV export still sees
-  // the original uncanonicalized breakdown.
-  const stateGeoData = useMemo(() => {
+  // Canonicalized state/city breakdowns (diacritics + aliases folded, non-
+  // Indian region codes excluded — see indiaGeoData.ts) feeding the states
+  // treemap and cities leaderboard. Derived from the raw byState/byCity
+  // groupings so CSV export still sees the original uncanonicalized values.
+  const stateData = useMemo(() => {
     const m = new Map<string, number>();
     byState.forEach(({ name, value }) => {
       const canon = canonicalState(name);
       if (canon) m.set(canon, (m.get(canon) || 0) + value);
     });
-    return Array.from(m.entries()).map(([name, value]) => ({ name, value }));
+    return Array.from(m.entries()).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
   }, [byState]);
 
-  const cityBubblePoints = useMemo(() => {
+  const cityData = useMemo(() => {
     const m = new Map<string, number>();
     byCity.forEach(({ name, value }) => {
       const key = canonicalCity(name);
       if (key) m.set(key, (m.get(key) || 0) + value);
     });
-    return Array.from(m.entries()).map(([key, count]) => ({ key, coords: CITY_COORDS[key], count }));
+    return Array.from(m.entries()).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
   }, [byCity]);
 
   // Employee-size bands rendered in their fixed natural order (see
@@ -464,10 +460,7 @@ export default function FerventDashboard() {
   const trendOption = useMemo(() => buildTrendOption(monthlyTrend, theme), [monthlyTrend, theme]);
   const industryOption = useMemo(() => buildIndustryTreemapOption(byIndustry, theme), [byIndustry, theme]);
   const designationLevelOption = useMemo(() => buildDesignationDonutOption(byDesignationLevel, theme), [byDesignationLevel, theme]);
-  const indiaDetailMapOption = useMemo(
-    () => buildIndiaDetailMapOption(stateGeoData, cityBubblePoints, theme),
-    [stateGeoData, cityBubblePoints, theme]
-  );
+  const stateTreemapOption = useMemo(() => buildIndustryTreemapOption(stateData, theme), [stateData, theme]);
   const worldHeatmapOption = useMemo(
     () => buildWorldHeatmapOption(mapCountries, smallNationData, theme, SMALL_NATION_COORDS),
     [mapCountries, smallNationData, theme]
@@ -481,7 +474,6 @@ export default function FerventDashboard() {
     [topInternational, theme]
   );
   const employeeSizeOption = useMemo(() => buildOrdinalColumnOption(employeeSizeOrdered, theme), [employeeSizeOrdered, theme]);
-  const companyTreemapOption = useMemo(() => buildIndustryTreemapOption(byCompany.slice(0, 30), theme), [byCompany, theme]);
   const statusOption = useMemo(() => buildStatusSegmentOption(byStatus, theme), [byStatus, theme]);
   const activityOption = useMemo(
     () => buildDailyActivityHeatmapOption(dailyActivity, theme, activityRange),
@@ -795,13 +787,33 @@ export default function FerventDashboard() {
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                <div className="editorial-card lg:col-span-2 overflow-hidden">
-                  <ChartHeader title="Where in India" subtitle="State fill + city markers, sized by records — click a state to drill down" />
-                  <div className="p-1 h-[320px]">
-                    {stateGeoData.length === 0 ? (
+                <div className="editorial-card overflow-hidden">
+                  <ChartHeader title="Top states (India)" subtitle="Click a tile to drill down" />
+                  <div className="p-1 h-[230px]">
+                    {stateData.length === 0 ? (
                       <EmptyChartState label="state" />
                     ) : (
-                      <EChart option={indiaDetailMapOption} eventHandlers={{ click: (p: any) => { if (p.name) drill(`State: ${p.name}`, (r) => canonicalState(r.state) === p.name); } }} />
+                      <EChart
+                        option={stateTreemapOption}
+                        eventHandlers={{
+                          click: (p: any) => {
+                            if (!p.name) return;
+                            const topStates = stateData.slice(0, 7).map((d) => d.name);
+                            if (p.name === "Other") drill("State: Other", (r) => { const c = canonicalState(r.state); return !!c && !topStates.includes(c); });
+                            else drill(`State: ${p.name}`, (r) => canonicalState(r.state) === p.name);
+                          },
+                        }}
+                      />
+                    )}
+                  </div>
+                </div>
+                <div className="editorial-card overflow-hidden">
+                  <ChartHeader title="Top cities (India)" subtitle="Click a row to drill down" />
+                  <div className="px-4 pb-4 h-[230px] overflow-y-auto">
+                    {cityData.length === 0 ? (
+                      <EmptyChartState label="city" />
+                    ) : (
+                      <Leaderboard items={cityData} topN={9} onSelect={(name) => drill(`City: ${name}`, (r) => canonicalCity(r.city) === name)} />
                     )}
                   </div>
                 </div>
@@ -811,7 +823,7 @@ export default function FerventDashboard() {
                     subtitle="Employees, in natural scale order"
                     extra={employeeSizeUnspecified > 0 ? <span className="text-[10px]" style={{ color: "hsl(var(--muted-foreground))" }}>{employeeSizeUnspecified.toLocaleString()} unspecified</span> : undefined}
                   />
-                  <div className="p-1 h-[320px]">
+                  <div className="p-1 h-[230px]">
                     <EChart option={employeeSizeOption} eventHandlers={fieldClickEvents("employee_size", byEmployeeSize, "Company size")} />
                   </div>
                 </div>
@@ -820,11 +832,11 @@ export default function FerventDashboard() {
               <div className="editorial-card overflow-hidden">
                 <ChartHeader
                   title="Top companies"
-                  subtitle="By number of contacts — click a tile to drill down"
+                  subtitle="By number of contacts — click a row to drill down"
                   extra={<Badge variant="secondary">{byCompany.length}</Badge>}
                 />
-                <div className="p-1 h-[280px]">
-                  <EChart option={companyTreemapOption} eventHandlers={fieldClickEvents("company_name", byCompany, "Company")} />
+                <div className="px-4 pb-4">
+                  <Leaderboard items={byCompany} topN={10} onSelect={(name) => drill(`Company: ${name}`, (r) => normalizeKey(r.company_name) === name)} />
                 </div>
               </div>
 
