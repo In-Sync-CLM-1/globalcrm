@@ -1,5 +1,9 @@
 dispatcher|pipeline-action-dispatcher||* * * * *
-dialer|ai-bulk-call||* * * * *
+# Dialer stopped 2026-08-17 — Amit: "switch off Bolna completely". The
+# function still exists, but every path to Bolna refuses via
+# _shared/aiCallingSwitch.ts, so this cron only burned an invocation a minute.
+# To restore: set AI_CALLING_ENABLED = true and uncomment the line below.
+#dialer|ai-bulk-call||* * * * *
 translit|transliterate-pending||* * * * *
 ai-bolna-reconcile|ai-bolna-reconcile||*/30 * * * *
 ai-script-propose|ai-script-propose||15 12 * * *
