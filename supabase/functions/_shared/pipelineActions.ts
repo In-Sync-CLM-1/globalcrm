@@ -4,6 +4,7 @@
 // proven implementation of sending + wallet billing instead of drifting apart.
 import { replaceVariables } from "./templateVariables.ts";
 import { resolveWhatsAppFieldMappings } from "./whatsappFieldMappings.ts";
+import { AI_CALLING_ENABLED, AI_CALLING_DISABLED_REASON, logBlockedCall } from "./aiCallingSwitch.ts";
 
 // Per-org Exotel WhatsApp sender (WABA from-number).
 export const WA_SENDER_BY_ORG: Record<string, string> = {
@@ -360,6 +361,13 @@ export async function triggerCall(
     fromNumber?: string | null; dispositionId: string | null; contact: any; phone: string;
   },
 ): Promise<{ ok: boolean; error?: string }> {
+  // Master switch — see _shared/aiCallingSwitch.ts. Checked before anything
+  // else: refusing further down would still have reserved wallet funds and
+  // written a call_logs row for a call that never happens.
+  if (!AI_CALLING_ENABLED) {
+    logBlockedCall("pipelineActions.triggerCall", args.phone);
+    return { ok: false, error: AI_CALLING_DISABLED_REASON };
+  }
   const { orgId, bolnaKey, agentId, scriptId, dispositionId, contact, phone } = args;
   const fromNumber = args.fromNumber || "+911169323462";
 

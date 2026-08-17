@@ -72,6 +72,88 @@ export interface CallClassification {
   summary: string;           // <=240 chars, neutral, for the reminder-call context
 }
 
+/**
+ * Deterministic guards on what a call may be classified as.
+ *
+ * Added 2026-08-17 after a real failure: Riya called Mohit Chelani (Torchit) on
+ * 13 Aug, reached an answering machine whose only words were "when you have
+ * finished recording you may hang up", and the model returned demo_agreed. The
+ * pipeline then created a meeting for 16 Aug 3pm, emailed the prospect a
+ * confirmation he had never asked for, alerted the owner, and spent a second
+ * call reminding him about it.
+ *
+ * The model is not asked to be more careful — it is not allowed to decide this.
+ * A positive outcome now requires evidence that a human actually spoke, and any
+ * transcript carrying voicemail wording is forced to a no-contact outcome.
+ */
+
+// Phrases that only appear when a machine answered.
+const VOICEMAIL_MARKERS = [
+  /when you have finished recording/i,
+  /(leave|record) (a|your) (message|voicemail)/i,
+  /after the (beep|tone)/i,
+  /is (not available|unavailable|switched off|busy) (right now|at the moment)?/i,
+  /please try (again )?later/i,
+  /the number you (have )?(dialled|dialed|called)/i,
+  /call has been forwarded/i,
+  /voice ?mail/i,
+];
+
+// Outcomes that assert the prospect engaged. None may be returned without a
+// human turn in the transcript.
+const POSITIVE_OUTCOMES = new Set(["demo_agreed", "interested", "callback", "decision_maker"]);
+
+/** The prospect's own turns, i.e. everything the far end actually said. */
+export function customerTurns(transcript: string): string[] {
+  return (transcript || "")
+    .split(/\r?\n+/)
+    .filter((l) => /^\s*(user|customer|prospect|human)\s*:/i.test(l))
+    .map((l) => l.replace(/^\s*\w+\s*:/, "").trim())
+    .filter((l) => l.length > 0);
+}
+
+export function looksLikeVoicemail(transcript: string): boolean {
+  const said = customerTurns(transcript).join(" ");
+  return VOICEMAIL_MARKERS.some((re) => re.test(said));
+}
+
+/**
+ * Apply the guards to a model classification. Returns the classification it is
+ * allowed to be, plus a reason when it was overridden.
+ */
+export function guardClassification(
+  c: CallClassification,
+  transcript: string,
+  outcomeKeys: string[],
+): { result: CallClassification; overridden: string | null } {
+  const turns = customerTurns(transcript);
+  const meaningful = turns.filter((t) => t.split(/\s+/).length >= 2);
+  const fallback = outcomeKeys.includes("no_answer")
+    ? "no_answer"
+    : outcomeKeys.includes("not_connected") ? "not_connected" : null;
+
+  const demote = (why: string) => {
+    if (!fallback) {
+      // Nothing safe to fall back to — refuse rather than assert a positive.
+      return { result: { ...c, outcome_key: c.outcome_key, demo_date: null, demo_time: null }, overridden: why };
+    }
+    return {
+      result: { ...c, outcome_key: fallback, demo_date: null, demo_time: null, opt_out: false },
+      overridden: why,
+    };
+  };
+
+  if (looksLikeVoicemail(transcript)) return demote("voicemail greeting detected");
+  if (POSITIVE_OUTCOMES.has(c.outcome_key) && meaningful.length === 0) {
+    return demote("no customer speech in transcript");
+  }
+  // A demo slot may only survive if the prospect actually spoke.
+  if ((c.demo_date || c.demo_time) && meaningful.length === 0) {
+    return { result: { ...c, demo_date: null, demo_time: null }, overridden: "demo slot without customer speech" };
+  }
+  return { result: c, overridden: null };
+}
+
 export async function classifyCall(
   args: { transcript: string; productLabel: string; outcomeKeys: string[]; todayIso?: string },
 ): Promise<CallClassification | null> {
@@ -101,13 +183,19 @@ export async function classifyCall(
   try {
     const o = JSON.parse(m[0]);
     if (!o.outcome_key || !args.outcomeKeys.includes(o.outcome_key)) return null;
-    return {
+    const classified: CallClassification = {
       outcome_key: o.outcome_key,
       demo_date: o.demo_date || null,
       demo_time: o.demo_time || null,
       opt_out: !!o.opt_out,
       summary: String(o.summary || "").slice(0, 240),
     };
+    // The model proposes; the guards decide. See guardClassification above.
+    const { result, overridden } = guardClassification(classified, transcript, args.outcomeKeys);
+    if (overridden) {
+      console.log(`[dispositionClassifier] "${classified.outcome_key}" -> "${result.outcome_key}": ${overridden}`);
+    }
+    return result;
   } catch {
     return null;
   }
