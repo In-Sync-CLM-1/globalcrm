@@ -422,3 +422,123 @@ export function buildGeoSplitDonutOption(
     ],
   };
 }
+
+export interface CityBubblePoint {
+  key: string;
+  coords: [number, number];
+  count: number;
+}
+
+// India detail map: state choropleth (magnitude by state, same sequential
+// clay ramp as the world map above it, so the two read as one system) with
+// city bubbles layered on top — the same composite pattern the world map
+// uses for small nations, applied here to give a finer-grained view than
+// state alone. Replaces what used to be two separate ranked-bar cards (Top
+// States, Top Cities): a real geographic entity is better shown on a map
+// than a leaderboard, and combining them into one card also means a state's
+// color and its cities' bubles read together at a glance.
+export function buildIndiaDetailMapOption(
+  stateData: { name: string; value: number }[],
+  cityPoints: CityBubblePoint[],
+  theme: FerventChartTheme
+): EChartsOption {
+  const stateMax = Math.max(1, ...stateData.map((s) => s.value));
+  const cityMax = Math.max(1, ...cityPoints.map((c) => c.count));
+  const scale = (v: number) => Math.sqrt(v);
+  return {
+    ...baseTextStyle(theme),
+    tooltip: {
+      ...tooltipBase(theme),
+      formatter: (p: any) => {
+        if (p.seriesType === "effectScatter") return `${p.name}<br/><b>${p.value?.[2] ?? 0}</b> record(s)`;
+        const raw = typeof p.data?.rawValue === "number" ? p.data.rawValue : 0;
+        return `${p.name}<br/><b>${raw}</b> record(s)`;
+      },
+    },
+    visualMap: {
+      min: 0,
+      max: scale(stateMax),
+      show: false,
+      inRange: { color: theme.sequential },
+    },
+    geo: {
+      map: "IndiaStates",
+      roam: true,
+      scaleLimit: { min: 1, max: 8 },
+      left: 8,
+      right: 8,
+      top: 8,
+      bottom: 8,
+      itemStyle: { areaColor: theme.grid, borderColor: theme.surface, borderWidth: 1 },
+      emphasis: { itemStyle: { areaColor: theme.sequential[2] }, label: { show: false } },
+    },
+    series: [
+      {
+        type: "map",
+        map: "IndiaStates",
+        geoIndex: 0,
+        data: stateData.map((s) => ({ name: s.name, value: scale(s.value), rawValue: s.value })),
+      },
+      {
+        type: "effectScatter",
+        coordinateSystem: "geo",
+        data: cityPoints.map((c) => ({ name: c.key.replace(/\b\w/g, (ch) => ch.toUpperCase()), value: [...c.coords, c.count] })),
+        showEffectOn: "render",
+        rippleEffect: { scale: 2, brushType: "stroke" },
+        zlevel: 1,
+        symbolSize: (val: number[]) => 6 + 18 * Math.sqrt((val[2] || 0) / cityMax),
+        itemStyle: { color: theme.categorical[6], shadowBlur: 5, shadowColor: `${theme.categorical[6]}66` },
+        label: {
+          show: true,
+          formatter: (p: any) => p.name,
+          position: "top",
+          color: theme.text,
+          fontFamily: theme.fontBody,
+          fontSize: 10,
+          distance: 5,
+        },
+      },
+    ],
+  };
+}
+
+// Vertical column chart in FIXED natural order (never sorted by value) —
+// for a genuinely ordinal dimension like employee-size bands, sorting by
+// frequency (what buildRankedBarOption does) scrambles the size scale into
+// a meaningless order; the actual story is the shape of the distribution
+// across the ordered bands, which only reads correctly left-to-right in
+// their natural sequence. "Unspecified" is excluded from the sequence
+// (it's not a band on the scale) and reported separately by the caller.
+export function buildOrdinalColumnOption(
+  orderedItems: { name: string; value: number }[],
+  theme: FerventChartTheme,
+  color?: string
+): EChartsOption {
+  const hue = color ?? theme.categorical[3];
+  return {
+    ...baseTextStyle(theme),
+    grid: { left: 44, right: 12, top: 16, bottom: 46 },
+    tooltip: { trigger: "axis", axisPointer: { type: "shadow" }, ...tooltipBase(theme) },
+    xAxis: {
+      type: "category",
+      data: orderedItems.map((d) => d.name),
+      axisLine: { lineStyle: { color: theme.grid } },
+      axisTick: { show: false },
+      axisLabel: { color: theme.mutedText, fontSize: 10, rotate: 32, interval: 0 },
+    },
+    yAxis: {
+      type: "value",
+      splitLine: { lineStyle: { color: theme.grid, type: "dashed" } },
+      axisLabel: { color: theme.mutedText, fontSize: 11 },
+    },
+    series: [
+      {
+        type: "bar",
+        name: "Companies",
+        data: orderedItems.map((d) => d.value),
+        barMaxWidth: 40,
+        itemStyle: { color: hue, borderRadius: [4, 4, 0, 0] },
+      },
+    ],
+  };
+}
