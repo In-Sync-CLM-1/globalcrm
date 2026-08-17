@@ -21,7 +21,9 @@ import { EChart } from "@/components/charts/EChart";
 import { getFerventChartTheme } from "@/components/FerventDashboard/ferventChartTheme";
 import { exportToCSV } from "@/utils/exportUtils";
 import worldGeo from "@/assets/worldMap.json";
+import indiaStatesGeo from "@/assets/indiaMap.json";
 import { canonicalCountry, SMALL_NATION_COORDS } from "@/components/FerventDashboard/countryData";
+import { canonicalState, canonicalCity, CITY_COORDS } from "@/components/FerventDashboard/indiaGeoData";
 import {
   buildTrendOption,
   buildIndustryTreemapOption,
@@ -31,11 +33,20 @@ import {
   buildDailyActivityHeatmapOption,
   buildWorldHeatmapOption,
   buildGeoSplitDonutOption,
+  buildIndiaDetailMapOption,
+  buildOrdinalColumnOption,
   UNSPECIFIED,
 } from "@/components/FerventDashboard/ferventChartOptions";
 import "@/components/FerventDashboard/ferventEditorial.css";
 
 echarts.registerMap("World", worldGeo as any);
+echarts.registerMap("IndiaStates", indiaStatesGeo as any);
+
+// Same canonical ascending order as ferventFieldNormalization.ts's
+// EMPLOYEE_SIZE_BUCKETS (Deno copy, can't import cross-runtime) — the
+// company-size chart renders in this fixed natural order, never sorted by
+// frequency, since it's a genuinely ordinal scale.
+const EMPLOYEE_SIZE_ORDER = ["1-10", "11-50", "51-200", "201-500", "501-1000", "1001-5000", "5001-10000", "10001-100000", "100001+"];
 
 interface RepoRow {
   id: string;
@@ -335,6 +346,40 @@ export default function FerventDashboard() {
     [mapCountries, smallNationData]
   );
 
+  // India detail map: state choropleth data (canonicalized state names,
+  // diacritics + aliases folded — see indiaGeoData.ts) and city bubble
+  // points (parsed out of the raw, often-compound `city` strings). Both
+  // derived from the raw byState/byCity groupings so CSV export still sees
+  // the original uncanonicalized breakdown.
+  const stateGeoData = useMemo(() => {
+    const m = new Map<string, number>();
+    byState.forEach(({ name, value }) => {
+      const canon = canonicalState(name);
+      if (canon) m.set(canon, (m.get(canon) || 0) + value);
+    });
+    return Array.from(m.entries()).map(([name, value]) => ({ name, value }));
+  }, [byState]);
+
+  const cityBubblePoints = useMemo(() => {
+    const m = new Map<string, number>();
+    byCity.forEach(({ name, value }) => {
+      const key = canonicalCity(name);
+      if (key) m.set(key, (m.get(key) || 0) + value);
+    });
+    return Array.from(m.entries()).map(([key, count]) => ({ key, coords: CITY_COORDS[key], count }));
+  }, [byCity]);
+
+  // Employee-size bands rendered in their fixed natural order (see
+  // EMPLOYEE_SIZE_ORDER) rather than sorted by frequency — an ordinal scale
+  // should read left-to-right as a distribution shape, not a leaderboard.
+  // "Unspecified" isn't a band on the scale, so it's reported as a separate
+  // count rather than appended to (or breaking) the ordered axis.
+  const { employeeSizeOrdered, employeeSizeUnspecified } = useMemo(() => {
+    const m = new Map(byEmployeeSize.map((d) => [d.name, d.value]));
+    const ordered = EMPLOYEE_SIZE_ORDER.map((name) => ({ name, value: m.get(name) || 0 }));
+    return { employeeSizeOrdered: ordered, employeeSizeUnspecified: m.get(UNSPECIFIED) || 0 };
+  }, [byEmployeeSize]);
+
   const missingBuckets = useMemo(() => {
     const both = filteredRows.filter((r) => !hasEmail(r) && !hasMobile(r));
     const emailOnly = filteredRows.filter((r) => !hasEmail(r) && hasMobile(r));
@@ -419,8 +464,10 @@ export default function FerventDashboard() {
   const trendOption = useMemo(() => buildTrendOption(monthlyTrend, theme), [monthlyTrend, theme]);
   const industryOption = useMemo(() => buildIndustryTreemapOption(byIndustry, theme), [byIndustry, theme]);
   const designationLevelOption = useMemo(() => buildDesignationDonutOption(byDesignationLevel, theme), [byDesignationLevel, theme]);
-  const statesOption = useMemo(() => buildRankedBarOption(byState, theme, { topN: 8, color: theme.categorical[4] }), [byState, theme]);
-  const citiesOption = useMemo(() => buildRankedBarOption(byCity, theme, { topN: 8, color: theme.categorical[5] }), [byCity, theme]);
+  const indiaDetailMapOption = useMemo(
+    () => buildIndiaDetailMapOption(stateGeoData, cityBubblePoints, theme),
+    [stateGeoData, cityBubblePoints, theme]
+  );
   const worldHeatmapOption = useMemo(
     () => buildWorldHeatmapOption(mapCountries, smallNationData, theme, SMALL_NATION_COORDS),
     [mapCountries, smallNationData, theme]
@@ -433,15 +480,8 @@ export default function FerventDashboard() {
     () => buildRankedBarOption(topInternational, theme, { topN: 8, color: theme.categorical[2], labelWidth: 110 }),
     [topInternational, theme]
   );
-  const designationOption = useMemo(
-    () => buildRankedBarOption(byDesignation, theme, { topN: 10, color: theme.categorical[6], labelWidth: 120 }),
-    [byDesignation, theme]
-  );
-  const employeeSizeOption = useMemo(() => buildRankedBarOption(byEmployeeSize, theme, { topN: 8, color: theme.categorical[3] }), [byEmployeeSize, theme]);
-  const companyOption = useMemo(
-    () => buildRankedBarOption(byCompany, theme, { topN: 12, color: theme.categorical[2], labelWidth: 130 }),
-    [byCompany, theme]
-  );
+  const employeeSizeOption = useMemo(() => buildOrdinalColumnOption(employeeSizeOrdered, theme), [employeeSizeOrdered, theme]);
+  const companyTreemapOption = useMemo(() => buildIndustryTreemapOption(byCompany.slice(0, 30), theme), [byCompany, theme]);
   const statusOption = useMemo(() => buildStatusSegmentOption(byStatus, theme), [byStatus, theme]);
   const activityOption = useMemo(
     () => buildDailyActivityHeatmapOption(dailyActivity, theme, activityRange),
@@ -731,9 +771,9 @@ export default function FerventDashboard() {
 
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                 <div className="editorial-card overflow-hidden">
-                  <ChartHeader title="By designation" subtitle="Top job titles — click to drill down" />
-                  <div className="p-1 h-[230px]">
-                    <EChart option={designationOption} eventHandlers={fieldClickEvents("designation", byDesignation, "Designation")} />
+                  <ChartHeader title="By designation" subtitle="Top job titles — click a row to drill down" />
+                  <div className="px-4 pb-4 h-[230px] overflow-y-auto">
+                    <Leaderboard items={byDesignation} topN={9} onSelect={(name) => drill(`Designation: ${name}`, (r) => normalizeKey(r.designation) === name)} />
                   </div>
                 </div>
                 <div className="editorial-card overflow-hidden">
@@ -755,25 +795,23 @@ export default function FerventDashboard() {
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                <div className="editorial-card overflow-hidden">
-                  <ChartHeader title="Top cities (India)" subtitle="Click a bar to drill down" />
-                  <div className="p-1 h-[230px]">
-                    <EChart option={citiesOption} eventHandlers={fieldClickEvents("city", byCity, "City")} />
-                  </div>
-                </div>
-                <div className="editorial-card overflow-hidden">
-                  <ChartHeader title="Top states (India)" subtitle="Click a bar to drill down" />
-                  <div className="p-1 h-[230px]">
-                    {isUntagged(byState, 0.9) ? (
+                <div className="editorial-card lg:col-span-2 overflow-hidden">
+                  <ChartHeader title="Where in India" subtitle="State fill + city markers, sized by records — click a state to drill down" />
+                  <div className="p-1 h-[320px]">
+                    {stateGeoData.length === 0 ? (
                       <EmptyChartState label="state" />
                     ) : (
-                      <EChart option={statesOption} eventHandlers={fieldClickEvents("state", byState, "State")} />
+                      <EChart option={indiaDetailMapOption} eventHandlers={{ click: (p: any) => { if (p.name) drill(`State: ${p.name}`, (r) => canonicalState(r.state) === p.name); } }} />
                     )}
                   </div>
                 </div>
                 <div className="editorial-card overflow-hidden">
-                  <ChartHeader title="By company size" subtitle="Employees — click to drill down" />
-                  <div className="p-1 h-[230px]">
+                  <ChartHeader
+                    title="By company size"
+                    subtitle="Employees, in natural scale order"
+                    extra={employeeSizeUnspecified > 0 ? <span className="text-[10px]" style={{ color: "hsl(var(--muted-foreground))" }}>{employeeSizeUnspecified.toLocaleString()} unspecified</span> : undefined}
+                  />
+                  <div className="p-1 h-[320px]">
                     <EChart option={employeeSizeOption} eventHandlers={fieldClickEvents("employee_size", byEmployeeSize, "Company size")} />
                   </div>
                 </div>
@@ -782,11 +820,11 @@ export default function FerventDashboard() {
               <div className="editorial-card overflow-hidden">
                 <ChartHeader
                   title="Top companies"
-                  subtitle="By number of contacts — click a bar to drill down"
+                  subtitle="By number of contacts — click a tile to drill down"
                   extra={<Badge variant="secondary">{byCompany.length}</Badge>}
                 />
                 <div className="p-1 h-[280px]">
-                  <EChart option={companyOption} eventHandlers={fieldClickEvents("company_name", byCompany, "Company")} />
+                  <EChart option={companyTreemapOption} eventHandlers={fieldClickEvents("company_name", byCompany, "Company")} />
                 </div>
               </div>
 
@@ -914,6 +952,46 @@ function EmptyChartState({ label }: { label: string }) {
     <div className="flex h-full items-center justify-center px-6 text-center">
       <p className="text-xs" style={{ color: "hsl(var(--muted-foreground))" }}>No {label} has been tagged on these records yet.</p>
     </div>
+  );
+}
+
+// Editorial ranked list — a real leaderboard component (rank numeral + name
+// + inline magnitude bar), not an axis chart. For a small set of long,
+// precisely-named categories (job titles) this reads faster than a bar
+// chart's separate axis+labels, and the ordinal rank number is genuinely
+// meaningful here (this list IS a ranking) rather than a decorative marker.
+function Leaderboard({
+  items, topN = 9, onSelect,
+}: { items: { name: string; value: number }[]; topN?: number; onSelect: (name: string) => void }) {
+  const top = items.slice(0, topN);
+  const max = Math.max(1, ...top.map((d) => d.value));
+  return (
+    <ol className="space-y-2">
+      {top.map((d, i) => (
+        <li key={d.name}>
+          <button
+            className="w-full flex items-center gap-2.5 text-left group"
+            onClick={() => onSelect(d.name)}
+          >
+            <span className="editorial-figure text-[11px] w-4 text-right shrink-0" style={{ color: "hsl(var(--muted-foreground))" }}>
+              {i + 1}
+            </span>
+            <span className="flex-1 min-w-0">
+              <span className="flex items-baseline justify-between gap-2">
+                <span className="text-[12.5px] font-medium truncate group-hover:underline" title={d.name}>{d.name}</span>
+                <span className="editorial-figure text-[11px] shrink-0" style={{ color: "hsl(var(--muted-foreground))" }}>{d.value.toLocaleString()}</span>
+              </span>
+              <span className="block h-1 mt-1 rounded-full overflow-hidden" style={{ background: "hsl(var(--accent))" }}>
+                <span
+                  className="block h-full rounded-full"
+                  style={{ width: `${Math.max(4, (d.value / max) * 100)}%`, background: "hsl(var(--primary))" }}
+                />
+              </span>
+            </span>
+          </button>
+        </li>
+      ))}
+    </ol>
   );
 }
 
