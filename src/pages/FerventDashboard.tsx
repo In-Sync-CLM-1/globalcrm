@@ -94,6 +94,43 @@ function displayName(r: Pick<RepoRow, "first_name" | "last_name">): string {
   return [r.first_name, r.last_name].filter((v) => v && v.trim()).join(" ").trim();
 }
 
+// A pre-existing import-mapping bug left these exact data-source labels
+// (identical to the values ucdb_status uses) sitting in `designation` for
+// ~31% of records, dominating the "By Designation" ranking over every real
+// job title. Excluded from that chart only — the underlying rows aren't
+// touched, and the same exclusion is applied in the SQL cache function.
+const DESIGNATION_SOURCE_LABELS = new Set(["Vendor DB", "Fervent DB", "Lusha"]);
+
+// A grouped dimension where the only real bucket is "Unspecified" carries
+// zero information (this dataset's designation_level is 100% untagged) — an
+// all-gray donut/bar for that is exactly the "meaningless information" a
+// redesign should remove, so callers render an empty state instead of the
+// chart when this is true.
+// threshold defaults to "entirely untagged" (designation_level: 100% blank);
+// Top States passes a looser bar since its untagged share isn't literally
+// 100% — see foldPlaceLabels below, "IND" folds into Unspecified too and the
+// combined share clears 90%+, which is just as uninformative as pure blank.
+function isUntagged(grouped: { name: string; value: number }[], threshold = 1): boolean {
+  const total = grouped.reduce((s, d) => s + d.value, 0) || 1;
+  const unspecified = grouped.find((d) => d.name === UNSPECIFIED)?.value || 0;
+  return unspecified / total >= threshold;
+}
+
+// `state`/`city` both carry a literal "IND"/"India" placeholder for a large
+// slice of records instead of an actual state/city (found live while
+// checking this redesign) — not a real place, so it folds into the same
+// "Unspecified" bucket rather than showing up as if it were a real state
+// named "IND" outranking every real state in the leaderboard.
+const PLACE_PLACEHOLDER_LABELS = new Set(["ind", "india"]);
+function foldPlaceholders(grouped: { name: string; value: number }[]): { name: string; value: number }[] {
+  const m = new Map<string, number>();
+  grouped.forEach(({ name, value }) => {
+    const key = PLACE_PLACEHOLDER_LABELS.has(name.trim().toLowerCase()) ? UNSPECIFIED : name;
+    m.set(key, (m.get(key) || 0) + value);
+  });
+  return Array.from(m.entries()).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
+}
+
 function hasEmail(r: RepoRow): boolean {
   return !!(r.official_email?.trim() || r.personal_email_1?.trim() || r.personal_email_2?.trim());
 }
@@ -202,7 +239,7 @@ export default function FerventDashboard() {
     return {
       industry: distinctOptions(rows, "industry"),
       designationLevel: distinctOptions(rows, "designation_level"),
-      designation: distinctOptions(rows, "designation"),
+      designation: distinctOptions(rows.filter((r) => !DESIGNATION_SOURCE_LABELS.has((r.designation || "").trim())), "designation"),
       city: distinctOptions(rows, "city"),
       state: distinctOptions(rows, "state"),
       country: distinctOptions(rows, "country"),
@@ -239,7 +276,9 @@ export default function FerventDashboard() {
       };
     }
     const total = filteredRows.length;
-    const companies = new Set(filteredRows.map((r) => r.company_name).filter(Boolean)).size;
+    const companies = new Set(
+      filteredRows.map((r) => r.company_name?.trim()).filter((v): v is string => !!v && !/^\d+$/.test(v))
+    ).size;
     const withEmail = filteredRows.filter(hasEmail).length;
     const withMobile = filteredRows.filter(hasMobile).length;
     const industries = new Set(filteredRows.map((r) => r.industry).filter(Boolean)).size;
@@ -255,11 +294,19 @@ export default function FerventDashboard() {
   const byIndustry = useMemo<Grouped>(() => (showCache && cache ? cache.by_industry : groupBy(filteredRows, "industry")), [filteredRows, showCache, cache]);
   const byDesignationLevel = useMemo<Grouped>(() => (showCache && cache ? cache.by_designation_level : groupBy(filteredRows, "designation_level")), [filteredRows, showCache, cache]);
   const byStatus = useMemo<Grouped>(() => (showCache && cache ? cache.by_status : groupBy(filteredRows, "ucdb_status")), [filteredRows, showCache, cache]);
-  const byState = useMemo<Grouped>(() => (showCache && cache ? cache.by_state : groupBy(filteredRows, "state")), [filteredRows, showCache, cache]);
-  const byCity = useMemo<Grouped>(() => (showCache && cache ? cache.by_city : groupBy(filteredRows, "city")), [filteredRows, showCache, cache]);
-  const byDesignation = useMemo<Grouped>(() => (showCache && cache ? cache.by_designation : groupBy(filteredRows, "designation")), [filteredRows, showCache, cache]);
+  const byState = useMemo<Grouped>(() => foldPlaceholders(showCache && cache ? cache.by_state : groupBy(filteredRows, "state")), [filteredRows, showCache, cache]);
+  const byCity = useMemo<Grouped>(() => foldPlaceholders(showCache && cache ? cache.by_city : groupBy(filteredRows, "city")), [filteredRows, showCache, cache]);
+  const byDesignation = useMemo<Grouped>(() => {
+    if (showCache && cache) return cache.by_designation;
+    const realDesignationRows = filteredRows.filter((r) => !DESIGNATION_SOURCE_LABELS.has((r.designation || "").trim()));
+    return groupBy(realDesignationRows, "designation");
+  }, [filteredRows, showCache, cache]);
   const byEmployeeSize = useMemo<Grouped>(() => (showCache && cache ? cache.by_employee_size : groupBy(filteredRows, "employee_size")), [filteredRows, showCache, cache]);
-  const byCompany = useMemo<Grouped>(() => (showCache && cache ? cache.by_company : groupBy(filteredRows, "company_name")), [filteredRows, showCache, cache]);
+  const byCompany = useMemo<Grouped>(() => {
+    if (showCache && cache) return cache.by_company;
+    const realCompanyRows = filteredRows.filter((r) => !/^\d+$/.test((r.company_name || "").trim()));
+    return groupBy(realCompanyRows, "company_name");
+  }, [filteredRows, showCache, cache]);
   const byCountry = useMemo<Grouped>(() => (showCache && cache?.by_country ? cache.by_country : groupBy(filteredRows, "country")), [filteredRows, showCache, cache]);
 
   // Classify the raw country breakdown into the world map's polygon data
@@ -696,7 +743,11 @@ export default function FerventDashboard() {
               <Card className={chartCardClass}>
                 <ChartHeader title="By Designation Level" subtitle="Seniority mix — click to drill down" />
                 <CardContent className="p-1 h-[230px]">
-                  <EChart option={designationLevelOption} eventHandlers={fieldClickEvents("designation_level", byDesignationLevel, "Designation level")} />
+                  {isUntagged(byDesignationLevel) ? (
+                    <EmptyChartState label="designation level" />
+                  ) : (
+                    <EChart option={designationLevelOption} eventHandlers={fieldClickEvents("designation_level", byDesignationLevel, "Designation level")} />
+                  )}
                 </CardContent>
               </Card>
             </div>
@@ -711,7 +762,11 @@ export default function FerventDashboard() {
               <Card className={chartCardClass}>
                 <ChartHeader title="Top States (India)" subtitle="Click a bar to drill down" />
                 <CardContent className="p-1 h-[230px]">
-                  <EChart option={statesOption} eventHandlers={fieldClickEvents("state", byState, "State")} />
+                  {isUntagged(byState, 0.9) ? (
+                    <EmptyChartState label="state" />
+                  ) : (
+                    <EChart option={statesOption} eventHandlers={fieldClickEvents("state", byState, "State")} />
+                  )}
                 </CardContent>
               </Card>
               <Card className={chartCardClass}>
@@ -875,6 +930,14 @@ function ChartHeader({ title, subtitle, extra, icon }: { title: string; subtitle
         </div>
       </div>
       {extra}
+    </div>
+  );
+}
+
+function EmptyChartState({ label }: { label: string }) {
+  return (
+    <div className="flex h-full items-center justify-center px-6 text-center">
+      <p className="text-xs text-muted-foreground">No {label} has been tagged on these records yet.</p>
     </div>
   );
 }

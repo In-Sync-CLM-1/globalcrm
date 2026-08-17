@@ -283,24 +283,32 @@ export interface CountryDatum {
 // lightest step, so "no data" and "a little data" stay visually distinct.
 // Small nations not present in the underlying map polygons (Singapore, Hong
 // Kong) are layered on top as scatter points instead — see SMALL_NATION_COORDS.
+//
+// India outweighs every other country in this dataset by ~35x (domestic
+// vendor list vs. a handful of international contacts), so a linear color
+// scale crushes every other country to the same near-white pixel — exactly
+// the "distinction" this map exists to show would disappear. Coloring is
+// done on sqrt(count) instead; tooltips still show the real count via
+// `rawValue`, only the fill intensity is compressed.
 export function buildWorldHeatmapOption(
   countries: CountryDatum[],
   smallNations: CountryDatum[],
   theme: FerventChartTheme,
   smallNationCoords: Record<string, [number, number]>
 ): EChartsOption {
-  const max = Math.max(1, ...countries.map((c) => c.value), ...smallNations.map((c) => c.value));
+  const rawMax = Math.max(1, ...countries.map((c) => c.value), ...smallNations.map((c) => c.value));
+  const scale = (v: number) => Math.sqrt(v);
   return {
     tooltip: {
       ...tooltipBase(theme),
       formatter: (p: any) => {
-        const v = Array.isArray(p.value) ? p.value[2] : p.value;
-        return `${p.name}<br/><b>${v || 0}</b> record(s)`;
+        const raw = typeof p.data?.rawValue === "number" ? p.data.rawValue : Array.isArray(p.value) ? p.value[2] : p.value;
+        return `${p.name}<br/><b>${raw || 0}</b> record(s)`;
       },
     },
     visualMap: {
       min: 0,
-      max,
+      max: scale(rawMax),
       show: false,
       inRange: { color: theme.sequential },
     },
@@ -312,13 +320,19 @@ export function buildWorldHeatmapOption(
       layoutSize: "100%",
       itemStyle: { areaColor: theme.grid, borderColor: theme.surface, borderWidth: 0.6 },
       emphasis: { itemStyle: { areaColor: theme.sequential[2] }, label: { show: false } },
+      // India's polygon is 36 concatenated state shapes (see worldMap.json's
+      // build note) rather than one dissolved outline — at this render scale
+      // the internal state-border strokes stack into a dark, jagged smear.
+      // Zeroing India's own border width keeps the (correct) fill shape
+      // clean without touching every other country's outline.
+      regions: [{ name: "India", itemStyle: { borderWidth: 0 } }],
     },
     series: [
       {
         type: "map",
         map: "World",
         geoIndex: 0,
-        data: countries,
+        data: countries.map((c) => ({ name: c.name, value: scale(c.value), rawValue: c.value })),
       },
       {
         type: "effectScatter",
@@ -329,7 +343,7 @@ export function buildWorldHeatmapOption(
         showEffectOn: "render",
         rippleEffect: { scale: 2, brushType: "stroke" },
         zlevel: 1,
-        symbolSize: (val: number[]) => 8 + 20 * Math.sqrt((val[2] || 0) / max),
+        symbolSize: (val: number[]) => 8 + 20 * Math.sqrt((val[2] || 0) / rawMax),
         itemStyle: { color: theme.categorical[2], shadowBlur: 6, shadowColor: `${theme.categorical[2]}66` },
         label: { show: true, formatter: (p: any) => p.name, position: "top", color: theme.text, fontSize: 10, distance: 6 },
       },
