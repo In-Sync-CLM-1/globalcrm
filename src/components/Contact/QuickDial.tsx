@@ -81,6 +81,7 @@ export const QuickDial = () => {
             phone: cleanedPhone,
             status: 'new',
             created_by: user.id,
+            assigned_to: user.id,
           })
           .select()
           .single();
