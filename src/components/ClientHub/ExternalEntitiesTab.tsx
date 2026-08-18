@@ -163,7 +163,6 @@ export function ExternalEntitiesTab() {
           source: "External Entity",
           notes: entity.notes,
           created_by: user?.id ?? null,
-          assigned_to: user?.id ?? null,
         })
         .select()
         .single();
