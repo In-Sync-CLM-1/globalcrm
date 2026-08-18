@@ -148,6 +148,8 @@ export function ExternalEntitiesTab() {
 
   const convertToContactMutation = useMutation({
     mutationFn: async (entity: any) => {
+      const { data: { user } } = await supabase.auth.getUser();
+
       // Create a contact (lead) from external entity
       const { data: contact, error: contactError } = await supabase
         .from("contacts")
@@ -160,6 +162,7 @@ export function ExternalEntitiesTab() {
           address: entity.address,
           source: "External Entity",
           notes: entity.notes,
+          created_by: user?.id ?? null,
         })
         .select()
         .single();
