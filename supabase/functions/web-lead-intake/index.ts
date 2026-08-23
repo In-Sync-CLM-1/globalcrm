@@ -58,6 +58,17 @@ const json = (body: unknown, status = 200) =>
 const clean = (v: unknown) =>
   typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined;
 
+const FREE_EMAIL_DOMAINS = new Set([
+  'gmail.com', 'googlemail.com', 'yahoo.com', 'yahoo.co.in', 'ymail.com',
+  'hotmail.com', 'outlook.com', 'live.com', 'msn.com', 'icloud.com', 'me.com',
+  'rediffmail.com', 'aol.com', 'protonmail.com', 'proton.me', 'gmx.com', 'yandex.com', 'mail.com',
+]);
+const isValidPhone = (v: string) => /^[6-9]\d{9}$/.test(v.replace(/\D/g, ''));
+const isWorkEmail = (v: string) => {
+  const domain = v.toLowerCase().split('@')[1];
+  return !!domain && !FREE_EMAIL_DOMAINS.has(domain);
+};
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
@@ -74,11 +85,14 @@ Deno.serve(async (req) => {
     if (clean(payload._hp)) return json({ success: true, contact_id: null });
 
     const product = clean(payload.product);
-    const phone = clean(payload.phone);
+    const rawPhone = clean(payload.phone);
+    const phone = rawPhone ? rawPhone.replace(/\D/g, '') : undefined;
     const email = clean(payload.email);
 
     if (!product) return json({ error: 'product is required' }, 400);
     if (!phone && !email) return json({ error: 'A phone or email is required' }, 400);
+    if (phone && !isValidPhone(phone)) return json({ error: 'Please enter a valid 10-digit mobile number' }, 400);
+    if (email && !isWorkEmail(email)) return json({ error: 'Please use a work email address, not a personal Gmail/Yahoo one' }, 400);
 
     // Split a full name if first/last not given explicitly.
     let firstName = clean(payload.first_name);
