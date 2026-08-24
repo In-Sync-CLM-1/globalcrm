@@ -65,8 +65,16 @@ const FREE_EMAIL_DOMAINS = new Set([
 ]);
 const isValidPhone = (v: string) => /^[6-9]\d{9}$/.test(v.replace(/\D/g, ''));
 const isWorkEmail = (v: string) => {
-  const domain = v.toLowerCase().split('@')[1];
-  return !!domain && !FREE_EMAIL_DOMAINS.has(domain);
+  const parts = v.toLowerCase().split('@');
+  if (parts.length !== 2) return false;
+  const domain = parts[1];
+  if (!/^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/.test(domain)) return false;
+  // startsWith catches garbage appended straight after a real free-mail domain
+  // (e.g. "gmail.comcg"); endsWith catches a subdomain of one (e.g. "mail.gmail.com").
+  for (const free of FREE_EMAIL_DOMAINS) {
+    if (domain.startsWith(free) || domain.endsWith('.' + free)) return false;
+  }
+  return true;
 };
 
 Deno.serve(async (req) => {
