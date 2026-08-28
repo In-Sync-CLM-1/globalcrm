@@ -86,6 +86,15 @@ async function tick(env) {
         if (error) {
           console.error(`Error sending scheduled email ${email.id}:`, String(error.message || error));
           await pgPatch(env, "email_conversations", `id=eq.${email.id}`, { status: "failed" });
+        } else {
+          // The pre-existing bug this whole block fixes: there was no success
+          // path here at all. A successful invoke left this row sitting at
+          // "pending" forever (send-email inserts its OWN separate tracking
+          // row for the actual send, so the outcome existed in the DB but
+          // never reached the row that was actually being watched). Found by
+          // the same 2026-08-28 audit: the queue row for 14 real, successful
+          // Day+4 sends sat "pending" for 9 days for exactly this reason.
+          await pgPatch(env, "email_conversations", `id=eq.${email.id}`, { status: "sent", sent_at: new Date().toISOString() });
         }
       } catch (e) {
         console.error(`Threw while sending scheduled email ${email.id}:`, String(e));
@@ -108,6 +117,9 @@ async function tick(env) {
         if (error) {
           console.error(`Error sending scheduled WhatsApp message ${message.id}:`, String(error.message || error));
           await pgPatch(env, "whatsapp_messages", `id=eq.${message.id}`, { status: "failed" });
+        } else {
+          // Same missing-success-path bug as email_conversations above.
+          await pgPatch(env, "whatsapp_messages", `id=eq.${message.id}`, { status: "sent", sent_at: new Date().toISOString() });
         }
       } catch (e) {
         console.error(`Threw while sending scheduled WhatsApp message ${message.id}:`, String(e));
