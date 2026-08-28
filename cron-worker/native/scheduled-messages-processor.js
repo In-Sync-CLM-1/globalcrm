@@ -4,6 +4,36 @@ import { pgSelect, pgSelectOne, pgPatch, pgRpc, invokeFunction } from "./_lib/po
 async function tick(env) {
   const nowIso = new Date().toISOString();
   let emailCampaigns = [], whatsappCampaigns = [], emailConversations = [], whatsappMessages = [], activities = [];
+  let recovered = { email: 0, whatsapp: 0 };
+
+  // Self-heal rows orphaned by the pre-fix bug (see the per-row try/catch
+  // comment below): "pending" is a transient in-flight state that should
+  // resolve to "sent"/"failed" within seconds, never sit for an hour+. A row
+  // still "pending" after an hour was abandoned mid-send by a crash this
+  // worker can no longer explain, not one still being processed. Mark it
+  // "failed" so it stops silently misrepresenting itself as in-progress —
+  // deliberately NOT auto-retried, since a send that's been stuck for days
+  // may carry stale content (e.g. a "haven't heard back in a few days"
+  // follow-up that's now actually 9+ days late) that needs a human's call,
+  // not a robotic resend.
+  // scheduled_at (not created_at) is the right staleness signal: it's the
+  // moment the row crossed into "should be sending now", and pending→resolved
+  // normally happens within seconds of that. A row can carry an old
+  // created_at yet be legitimately mid-send right now if scheduled_at was
+  // itself recent — created_at would false-positive that case.
+  try {
+    const staleCutoff = new Date(Date.now() - 3600 * 1000).toISOString();
+    const orphanedEmails = await pgSelect(env, "email_conversations", `status=eq.pending&scheduled_at=lt.${staleCutoff}&select=id`);
+    for (const row of orphanedEmails || []) {
+      await pgPatch(env, "email_conversations", `id=eq.${row.id}`, { status: "failed" }).catch(() => {});
+      recovered.email++;
+    }
+    const orphanedWa = await pgSelect(env, "whatsapp_messages", `status=eq.pending&scheduled_at=lt.${staleCutoff}&select=id`);
+    for (const row of orphanedWa || []) {
+      await pgPatch(env, "whatsapp_messages", `id=eq.${row.id}`, { status: "failed" }).catch(() => {});
+      recovered.whatsapp++;
+    }
+  } catch (e) { console.error("Error recovering orphaned pending rows:", String(e)); }
 
   // Due email campaigns.
   try {
@@ -29,21 +59,37 @@ async function tick(env) {
   try {
     emailConversations = await pgSelect(env, "email_conversations", `status=eq.scheduled&scheduled_at=lte.${nowIso}&limit=50&select=*`);
     for (const email of emailConversations || []) {
-      await pgPatch(env, "email_conversations", `id=eq.${email.id}`, { status: "pending" });
-      // Carry the row's send options through. Without these a queued personal
-      // send would go out with the platform unsubscribe footer, and a queued
-      // follow-up would start a fresh thread instead of replying into the
-      // existing one.
-      const payload = {
-        to: email.to_email, subject: email.subject, htmlContent: email.html_content || email.email_content, contactId: email.contact_id,
-      };
-      if (email.from_name) payload.fromName = email.from_name;
-      if (email.bare_email) payload.bareEmail = true;
-      if (email.in_reply_to) payload.inReplyTo = email.in_reply_to;
-      const { error } = await invokeFunction(env, "send-email", payload);
-      if (error) {
-        console.error(`Error sending scheduled email ${email.id}:`, String(error.message || error));
-        await pgPatch(env, "email_conversations", `id=eq.${email.id}`, { status: "failed" });
+      // Each row gets its OWN try/catch: previously the pgPatch-to-"pending"
+      // and the send attempt shared the outer try/catch with the pgSelect, so
+      // a thrown error anywhere in one row's turn (a bad JSON body, a network
+      // blip on the invoke) aborted the whole loop — leaving that row AND
+      // every row after it stuck in "pending" forever (the next run's filter
+      // is status=eq.scheduled, so "pending" is never picked up again). Found
+      // 2026-08-28: 14 Day+4 BD-outreach follow-ups queued 2026-08-15 for
+      // 08-18/19/20 sat in "pending" for 9+ days, completely invisible, until
+      // Health Sentinel's new queue-outcome check caught it. Guarantee here:
+      // whatever happens, the row resolves to "failed" (never orphaned) and
+      // one row's failure can't block the rows after it.
+      try {
+        await pgPatch(env, "email_conversations", `id=eq.${email.id}`, { status: "pending" });
+        // Carry the row's send options through. Without these a queued personal
+        // send would go out with the platform unsubscribe footer, and a queued
+        // follow-up would start a fresh thread instead of replying into the
+        // existing one.
+        const payload = {
+          to: email.to_email, subject: email.subject, htmlContent: email.html_content || email.email_content, contactId: email.contact_id,
+        };
+        if (email.from_name) payload.fromName = email.from_name;
+        if (email.bare_email) payload.bareEmail = true;
+        if (email.in_reply_to) payload.inReplyTo = email.in_reply_to;
+        const { error } = await invokeFunction(env, "send-email", payload);
+        if (error) {
+          console.error(`Error sending scheduled email ${email.id}:`, String(error.message || error));
+          await pgPatch(env, "email_conversations", `id=eq.${email.id}`, { status: "failed" });
+        }
+      } catch (e) {
+        console.error(`Threw while sending scheduled email ${email.id}:`, String(e));
+        await pgPatch(env, "email_conversations", `id=eq.${email.id}`, { status: "failed" }).catch(() => {});
       }
     }
   } catch (e) { console.error("Error fetching email conversations:", String(e)); }
@@ -52,14 +98,20 @@ async function tick(env) {
   try {
     whatsappMessages = await pgSelect(env, "whatsapp_messages", `status=eq.scheduled&scheduled_at=lte.${nowIso}&limit=50&select=*`);
     for (const message of whatsappMessages || []) {
-      await pgPatch(env, "whatsapp_messages", `id=eq.${message.id}`, { status: "pending" });
-      const payload = { contactId: message.contact_id, phoneNumber: message.phone_number.replace(/[^\d]/g, "") };
-      if (message.template_id) { payload.templateId = message.template_id; payload.templateVariables = {}; }
-      else { payload.message = message.message_content; }
-      const { error } = await invokeFunction(env, "send-whatsapp-message", payload);
-      if (error) {
-        console.error(`Error sending scheduled WhatsApp message ${message.id}:`, String(error.message || error));
-        await pgPatch(env, "whatsapp_messages", `id=eq.${message.id}`, { status: "failed" });
+      // Same per-row isolation as email conversations above — see that comment.
+      try {
+        await pgPatch(env, "whatsapp_messages", `id=eq.${message.id}`, { status: "pending" });
+        const payload = { contactId: message.contact_id, phoneNumber: message.phone_number.replace(/[^\d]/g, "") };
+        if (message.template_id) { payload.templateId = message.template_id; payload.templateVariables = {}; }
+        else { payload.message = message.message_content; }
+        const { error } = await invokeFunction(env, "send-whatsapp-message", payload);
+        if (error) {
+          console.error(`Error sending scheduled WhatsApp message ${message.id}:`, String(error.message || error));
+          await pgPatch(env, "whatsapp_messages", `id=eq.${message.id}`, { status: "failed" });
+        }
+      } catch (e) {
+        console.error(`Threw while sending scheduled WhatsApp message ${message.id}:`, String(e));
+        await pgPatch(env, "whatsapp_messages", `id=eq.${message.id}`, { status: "failed" }).catch(() => {});
       }
     }
   } catch (e) { console.error("Error fetching WhatsApp messages:", String(e)); }
@@ -168,6 +220,7 @@ async function tick(env) {
       whatsappMessages: whatsappMessages?.length || 0,
       activityReminders: activities?.length || 0,
     },
+    recoveredOrphanedPending: recovered,
   };
 }
 
