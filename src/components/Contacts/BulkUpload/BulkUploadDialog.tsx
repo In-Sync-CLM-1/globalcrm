@@ -7,6 +7,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useNotification } from "@/hooks/useNotification";
 import { logError } from "@/lib/errorLogger";
 import { IEDUP_ORG_ID } from "@/hooks/useIsIedup";
+import { sanitizeStorageFileName } from "@/lib/utils";
 
 // Imports now process in chained batches on the backend (see
 // process-bulk-import's claimAndProcessStagedBatches), so there's no longer
@@ -200,7 +201,7 @@ export function BulkUploadDialog({ open, onOpenChange, orgId, onUploadStarted }:
       if (!user) throw new Error("User not authenticated");
 
       // Upload file to storage
-      const fileName = `${Date.now()}-${file.name}`;
+      const fileName = `${Date.now()}-${sanitizeStorageFileName(file.name)}`;
       const filePath = `${orgId}/bulk-imports/${fileName}`;
 
       const { error: uploadError } = await supabase.storage

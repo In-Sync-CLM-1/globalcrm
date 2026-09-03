@@ -7,6 +7,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import { useNotification } from "@/hooks/useNotification";
+import { sanitizeStorageFileName } from "@/lib/utils";
 import { convertExcelToCsv, isExcelFile, isLegacyExcelFile, toCsvFileName } from "./ferventExcelToCsv";
 
 type SourceType = "domestic" | "international";
@@ -211,7 +212,7 @@ export function FerventBulkUploadDialog({ open, onOpenChange, orgId, onUploadSta
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("User not authenticated");
 
-      const fileName = `${Date.now()}-${uploadFile.name}`;
+      const fileName = `${Date.now()}-${sanitizeStorageFileName(uploadFile.name)}`;
       const filePath = `${orgId}/bulk-imports/${fileName}`;
 
       const { error: uploadError } = await supabase.storage.from("import-files").upload(filePath, uploadFile);
