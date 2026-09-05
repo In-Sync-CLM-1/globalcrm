@@ -11,9 +11,8 @@ create table if not exists public.web_lead_submissions (
   source_url text,
   ip text,
   user_agent text,
-  recaptcha_score numeric,
   blocked boolean not null default false,
-  block_reason text,           -- 'honeypot' | 'recaptcha_low_score' | 'recaptcha_failed' | null
+  block_reason text,           -- 'honeypot' | 'turnstile_failed' | null
   contact_id uuid references public.contacts(id) on delete set null
 );
 create index if not exists web_lead_submissions_created_at_idx on public.web_lead_submissions(created_at desc);

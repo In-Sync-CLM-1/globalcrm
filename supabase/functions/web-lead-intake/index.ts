@@ -47,29 +47,26 @@ interface LeadPayload {
   preferred_time?: string; // HH:mm
   // Honeypot — real users never fill this; bots do. If set, we 200-OK and drop.
   _hp?: string;
-  // reCAPTCHA v3 token from the form (grecaptcha.execute(...)). Invisible —
-  // no challenge, no user friction — scores 0.0 (bot) to 1.0 (human).
-  recaptcha_token?: string;
+  // Cloudflare Turnstile token from the form (turnstile.render in "invisible"
+  // mode — the site key itself is provisioned invisible, so no challenge, no
+  // checkbox, no user-visible friction at all). Same provider already proven
+  // live on it-helpdesk's signup form (_shared/turnstile.ts there).
+  turnstile_token?: string;
 }
 
-// Below this, treat as a bot. Google's own guidance for a low-friction site.
-const RECAPTCHA_THRESHOLD = 0.5;
-
-async function verifyRecaptcha(token: string, ip: string | null): Promise<{ ok: boolean; score: number | null; reason?: string }> {
-  const secret = Deno.env.get('RECAPTCHA_SECRET_KEY');
-  if (!secret) return { ok: true, score: null }; // not configured yet — don't block real leads on a missing key
+async function verifyTurnstile(token: string, ip: string | null): Promise<{ ok: boolean; reason?: string }> {
+  const secret = Deno.env.get('TURNSTILE_SECRET_KEY');
+  if (!secret) return { ok: true }; // not configured yet — don't block real leads on a missing key
   try {
     const params = new URLSearchParams({ secret, response: token });
     if (ip) params.set('remoteip', ip);
-    const r = await fetch('https://www.google.com/recaptcha/api/siteverify', { method: 'POST', body: params });
+    const r = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', { method: 'POST', body: params });
     const j = await r.json();
-    if (!j.success) return { ok: false, score: null, reason: 'recaptcha_failed' };
-    const score = typeof j.score === 'number' ? j.score : null;
-    if (score !== null && score < RECAPTCHA_THRESHOLD) return { ok: false, score, reason: 'recaptcha_low_score' };
-    return { ok: true, score };
+    if (!j.success) return { ok: false, reason: 'turnstile_failed' };
+    return { ok: true };
   } catch (e) {
-    console.error('recaptcha verify error:', e);
-    return { ok: true, score: null }; // network hiccup — fail open, don't drop a real lead over it
+    console.error('turnstile verify error:', e);
+    return { ok: true }; // network hiccup — fail open, don't drop a real lead over it
   }
 }
 
@@ -127,13 +124,13 @@ Deno.serve(async (req) => {
     // to be able to tell a blocked bot from a real lead that failed for some
     // other reason, so this can't be conditional on how the request turns out.
     const honeypotTriggered = !!clean(payload._hp);
-    const recaptcha = honeypotTriggered
-      ? { ok: true, score: null as number | null } // don't bother calling Google if the honeypot already caught it
-      : payload.recaptcha_token
-      ? await verifyRecaptcha(payload.recaptcha_token, ip)
-      : { ok: true, score: null as number | null };
-    const blocked = honeypotTriggered || !recaptcha.ok;
-    const blockReason = honeypotTriggered ? 'honeypot' : !recaptcha.ok ? recaptcha.reason ?? 'recaptcha_failed' : null;
+    const turnstile = honeypotTriggered
+      ? { ok: true } // don't bother calling Cloudflare if the honeypot already caught it
+      : payload.turnstile_token
+      ? await verifyTurnstile(payload.turnstile_token, ip)
+      : { ok: true };
+    const blocked = honeypotTriggered || !turnstile.ok;
+    const blockReason = honeypotTriggered ? 'honeypot' : !turnstile.ok ? turnstile.reason ?? 'turnstile_failed' : null;
 
     const { data: submissionRow } = await supabase
       .from('web_lead_submissions')
@@ -142,7 +139,6 @@ Deno.serve(async (req) => {
         source_url: clean(payload.source_url) ?? null,
         ip,
         user_agent: userAgent,
-        recaptcha_score: recaptcha.score,
         blocked,
         block_reason: blockReason,
       })
@@ -150,7 +146,7 @@ Deno.serve(async (req) => {
       .single();
     const submissionId = submissionRow?.id as string | undefined;
 
-    // Silently absorb bot submissions (honeypot filled, or reCAPTCHA scored it
+    // Silently absorb bot submissions (honeypot filled, or Turnstile flagged it
     // as automated) — look successful, do nothing. Never tip off a script by
     // returning a different response for a blocked vs. accepted submission.
     if (blocked) return json({ success: true, contact_id: null });
