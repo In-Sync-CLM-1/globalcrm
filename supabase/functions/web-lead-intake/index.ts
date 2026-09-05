@@ -47,6 +47,33 @@ interface LeadPayload {
   preferred_time?: string; // HH:mm
   // Honeypot — real users never fill this; bots do. If set, we 200-OK and drop.
   _hp?: string;
+  // Cloudflare Turnstile token from the form (turnstile.render in "invisible"
+  // mode — the site key itself is provisioned invisible, so no challenge, no
+  // checkbox, no user-visible friction at all). Same provider already proven
+  // live on it-helpdesk's signup form (_shared/turnstile.ts there).
+  turnstile_token?: string;
+}
+
+async function verifyTurnstile(token: string, ip: string | null): Promise<{ ok: boolean; reason?: string }> {
+  const secret = Deno.env.get('TURNSTILE_SECRET_KEY');
+  if (!secret) return { ok: true }; // not configured yet — don't block real leads on a missing key
+  try {
+    const params = new URLSearchParams({ secret, response: token });
+    if (ip) params.set('remoteip', ip);
+    const r = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', { method: 'POST', body: params });
+    const j = await r.json();
+    if (!j.success) return { ok: false, reason: 'turnstile_failed' };
+    return { ok: true };
+  } catch (e) {
+    console.error('turnstile verify error:', e);
+    return { ok: true }; // network hiccup — fail open, don't drop a real lead over it
+  }
+}
+
+function clientIp(req: Request): string | null {
+  const xff = req.headers.get('x-forwarded-for');
+  if (xff) return xff.split(',')[0].trim();
+  return req.headers.get('cf-connecting-ip') || req.headers.get('x-real-ip');
 }
 
 const json = (body: unknown, status = 200) =>
@@ -89,8 +116,40 @@ Deno.serve(async (req) => {
       return json({ error: 'Invalid JSON body' }, 400);
     }
 
-    // Silently absorb bot submissions (honeypot filled) — look successful, do nothing.
-    if (clean(payload._hp)) return json({ success: true, contact_id: null });
+    const supabase = getSupabaseClient();
+    const ip = clientIp(req);
+    const userAgent = req.headers.get('user-agent');
+
+    // Every hit gets logged before any other check runs — the whole point is
+    // to be able to tell a blocked bot from a real lead that failed for some
+    // other reason, so this can't be conditional on how the request turns out.
+    const honeypotTriggered = !!clean(payload._hp);
+    const turnstile = honeypotTriggered
+      ? { ok: true } // don't bother calling Cloudflare if the honeypot already caught it
+      : payload.turnstile_token
+      ? await verifyTurnstile(payload.turnstile_token, ip)
+      : { ok: true };
+    const blocked = honeypotTriggered || !turnstile.ok;
+    const blockReason = honeypotTriggered ? 'honeypot' : !turnstile.ok ? turnstile.reason ?? 'turnstile_failed' : null;
+
+    const { data: submissionRow } = await supabase
+      .from('web_lead_submissions')
+      .insert({
+        product: clean(payload.product) ?? null,
+        source_url: clean(payload.source_url) ?? null,
+        ip,
+        user_agent: userAgent,
+        blocked,
+        block_reason: blockReason,
+      })
+      .select('id')
+      .single();
+    const submissionId = submissionRow?.id as string | undefined;
+
+    // Silently absorb bot submissions (honeypot filled, or Turnstile flagged it
+    // as automated) — look successful, do nothing. Never tip off a script by
+    // returning a different response for a blocked vs. accepted submission.
+    if (blocked) return json({ success: true, contact_id: null });
 
     const product = clean(payload.product);
     const rawPhone = clean(payload.phone);
@@ -110,8 +169,6 @@ Deno.serve(async (req) => {
       firstName = parts[0];
       lastName = lastName || parts.slice(1).join(' ') || '';
     }
-
-    const supabase = getSupabaseClient();
 
     // Resolve product -> org via the same rules that drive owner assignment.
     const { data: rule, error: ruleErr } = await supabase
@@ -201,6 +258,7 @@ Deno.serve(async (req) => {
         description: message || 'Demo requested again via website form.',
         completed_at: new Date().toISOString(),
       });
+      if (submissionId) await supabase.from('web_lead_submissions').update({ contact_id: existingId }).eq('id', submissionId);
       return json({ success: true, contact_id: existingId, deduped: true });
     }
 
@@ -243,6 +301,8 @@ Deno.serve(async (req) => {
       console.error('Contact insert failed:', insertErr);
       return json({ error: 'Failed to create lead', details: insertErr.message }, 500);
     }
+
+    if (submissionId) await supabase.from('web_lead_submissions').update({ contact_id: contact.id }).eq('id', submissionId);
 
     await supabase.from('contact_activities').insert({
       contact_id: contact.id,
