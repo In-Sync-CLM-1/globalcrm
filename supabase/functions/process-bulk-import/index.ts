@@ -785,7 +785,10 @@ async function processBatch(
 // empty cells never blank out data already on the record.
 // =============================================================================
 
-const GROQ_MODEL = 'llama-3.3-70b-versatile';
+// llama-3.3-70b-versatile was retired by Groq (404 model_not_found) -- same
+// deprecation hit Vendor-Sync's PI/document parsing 2026-09-03, fixed there
+// with this model. Cerebras stays as the second-line fallback.
+const GROQ_MODEL = 'openai/gpt-oss-120b';
 const CEREBRAS_MODEL = 'gemma-4-31b';
 
 // Sub-8-digit values (checked live 2026-07-27: 15 of 21,795 rows, mostly bare
