@@ -7,7 +7,7 @@ const corsHeaders = {
 };
 
 const INSYNC_DEMO_ORG_ID = "61f7f96d-e80c-4d9b-a765-8eb32bd3c70d";
-const GROQ_MODEL = "llama-3.3-70b-versatile";
+const GROQ_MODEL = "openai/gpt-oss-120b";
 const CEREBRAS_MODEL = "gemma-4-31b";
 const MIN_CALLS = 5;
 const LOOKBACK_DAYS = 60;

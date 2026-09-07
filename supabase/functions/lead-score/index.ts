@@ -12,7 +12,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const GROQ_MODEL = "llama-3.3-70b-versatile";
+const GROQ_MODEL = "openai/gpt-oss-120b";
 const CEREBRAS_MODEL = "gemma-4-31b";
 
 const SYSTEM_PROMPT = `You are a B2B lead-scoring AI. Score lead quality 0-100, weighting pipeline stage most heavily, then engagement, then business profile and data quality.

@@ -6,7 +6,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const GROQ_MODEL = 'llama-3.3-70b-versatile';
+const GROQ_MODEL = 'openai/gpt-oss-120b';
 const CEREBRAS_MODEL = 'gemma-4-31b';
 
 // Text-only tier: Groq first, Cerebras as the fallback if Groq is

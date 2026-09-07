@@ -149,7 +149,7 @@ function detectFullNameIndex(normHeaders: string[], fieldToIndex: Record<string,
 }
 
 // --- AI refinement ---------------------------------------------------------
-const GROQ_MODEL = 'llama-3.3-70b-versatile';
+const GROQ_MODEL = 'openai/gpt-oss-120b';
 const CEREBRAS_MODEL = 'gemma-4-31b';
 
 const MAPPING_SYSTEM_PROMPT =
