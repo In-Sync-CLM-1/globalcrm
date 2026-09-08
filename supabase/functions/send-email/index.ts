@@ -12,13 +12,19 @@ const corsHeaders = {
 
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
 
-const sendEmail = async (to: string, subject: string, html: string, fromEmail: string, fromName: string, replyToEmail?: string, unsubscribeUrl?: string, inReplyTo?: string) => {
+interface Attachment { filename: string; content: string }
+
+const sendEmail = async (to: string, subject: string, html: string, fromEmail: string, fromName: string, replyToEmail?: string, unsubscribeUrl?: string, inReplyTo?: string, attachments?: Attachment[]) => {
   const emailPayload: any = {
     from: `${fromName} <${fromEmail}>`,
     to: [to],
     subject: subject,
     html: html,
   };
+
+  if (attachments?.length) {
+    emailPayload.attachments = attachments;
+  }
 
   // Add reply_to if provided and different from sender
   if (replyToEmail && replyToEmail !== fromEmail) {
@@ -74,6 +80,23 @@ interface SendEmailRequest {
   fromName?: string;
   bareEmail?: boolean;
   inReplyTo?: string;
+  attachmentUrl?: string;
+  attachmentFilename?: string;
+}
+
+/** Fetch a file (e.g. from R2) and base64-encode it for Resend's attachments param. */
+async function fetchAttachment(url: string, filename: string): Promise<Attachment> {
+  const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+  if (!res.ok) throw new Error(`Failed to fetch attachment ${url}: ${res.status}`);
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  // btoa needs a binary string; chunk to avoid a call-stack blowout on a
+  // large file (String.fromCharCode(...bytes) with 100k+ args throws).
+  let binary = '';
+  const CHUNK = 8192;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return { filename, content: btoa(binary) };
 }
 
 // Decodes a JWT payload without verifying the signature (the gateway already
@@ -139,7 +162,9 @@ serve(async (req) => {
       unsubscribeToken,
       fromName: fromNameOverride,
       bareEmail,
-      inReplyTo
+      inReplyTo,
+      attachmentUrl,
+      attachmentFilename
     }: SendEmailRequest = await req.json();
 
     const emailHtml = htmlContent || html || '';
@@ -348,11 +373,18 @@ serve(async (req) => {
           ? emailHtml.replace('</body>', `${unsubscribeFooter}</body>`)
           : emailHtml + unsubscribeFooter);
 
+    // Attachment is fetched server-side (never trust a client-supplied
+    // base64 blob) -- a failure here fails the whole send rather than
+    // silently going out without the file it was supposed to carry.
+    const attachments = attachmentUrl
+      ? [await fetchAttachment(attachmentUrl, attachmentFilename || 'attachment.pdf')]
+      : undefined;
+
     // Send email via Resend. bareEmail sends look like a personal one-on-one
     // note, not a newsletter -- the List-Unsubscribe header is what makes
     // Gmail/Outlook show an "Unsubscribe" chip next to the sender even with
     // no visible footer, so skip it for those.
-    const emailData = await sendEmail(to, subject, finalHtml, fromEmail, fromName, replyToEmail, bareEmail ? undefined : unsubscribeUrl, inReplyTo);
+    const emailData = await sendEmail(to, subject, finalHtml, fromEmail, fromName, replyToEmail, bareEmail ? undefined : unsubscribeUrl, inReplyTo, attachments);
 
     console.log("Email sent successfully:", emailData);
 
