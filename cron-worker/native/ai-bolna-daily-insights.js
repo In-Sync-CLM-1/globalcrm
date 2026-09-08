@@ -48,7 +48,10 @@ Max 4 items per array. Be specific (cite Bolna's extraction or transcript snippe
     const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: { Authorization: `Bearer ${groqKey}`, "content-type": "application/json" },
-      body: JSON.stringify({ model: "llama-3.3-70b-versatile", max_tokens: 2000, messages: [{ role: "user", content: promptText }] }),
+      // llama-3.3-70b-versatile was retired by Groq (2026-09, confirmed
+      // live: 404 model_not_found). Replaced with openai/gpt-oss-120b, same
+      // fix already proven live fleet-wide this session.
+      body: JSON.stringify({ model: "openai/gpt-oss-120b", max_tokens: 2000, messages: [{ role: "user", content: promptText }] }),
     });
     if (res.ok) json = await res.json();
     else console.error(`groq ${label}:`, (await res.text()).slice(0, 300));

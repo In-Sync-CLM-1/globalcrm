@@ -3,7 +3,10 @@ import { pgSelect, pgPatch } from "./_lib/postgrest.js";
 
 const INSYNC_DEMO_ORG_ID = "61f7f96d-e80c-4d9b-a765-8eb32bd3c70d";
 const BATCH_LIMIT = 10;
-const GROQ_MODEL = "llama-3.3-70b-versatile";
+// llama-3.3-70b-versatile was retired by Groq (2026-09, confirmed live: 404
+// model_not_found). Replaced with openai/gpt-oss-120b, same fix already
+// proven live fleet-wide this session.
+const GROQ_MODEL = "openai/gpt-oss-120b";
 const CEREBRAS_MODEL = "gemma-4-31b";
 const WHISPER_MODEL = "whisper-large-v3";
 
