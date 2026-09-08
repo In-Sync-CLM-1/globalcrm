@@ -80,11 +80,64 @@ Example: {"document_name": "Service Agreement 2025", "document_type": "agreement
     // Build the content block based on mime type (document for PDFs, image for images)
     const isPdf = mimeType === 'application/pdf';
 
-    // Groq previously handled image-only uploads here as a cheap 1st choice
-    // (it never accepted PDF), but Groq has retired every vision-capable
-    // model from this account -- the call always 404s now. Removed rather
-    // than left to fail-and-fallback on every image upload; Claude Haiku
-    // below handles both images and PDFs natively.
+    // 1st choice: Groq (qwen/qwen3.6-27b). It only accepts image formats --
+    // not PDF -- so for PDF input we skip straight to Claude Haiku below,
+    // which is the only provider here that reads real PDF documents
+    // natively. Since almost all documents here are PDFs, Haiku still does
+    // most of the real work; Groq picks up the rare image-only upload,
+    // cheaply (image tokens are $0 on this model) and fast. The prior model
+    // here (llama-4-scout) was retired by Groq 2026-09; confirmed live that
+    // qwen/qwen3.6-27b is vision-capable and active on this account before
+    // switching. It's a reasoning model -- response_format json_object keeps
+    // its <think> reasoning out of `content` so content IS the JSON directly,
+    // no regex-hunting needed. max_tokens stays under this account's 1,000
+    // output-tokens-per-minute Groq tier limit; also confirmed it can 503
+    // "over capacity" under load -- either way this falls through to the
+    // Claude path below, not a hard dependency.
+    if (!isPdf) {
+      const groqKey = Deno.env.get('GROQ_API_KEY');
+      if (groqKey) {
+        try {
+          const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${groqKey}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model: 'qwen/qwen3.6-27b',
+              max_tokens: 900,
+              response_format: { type: 'json_object' },
+              messages: [
+                { role: 'system', content: systemPrompt },
+                {
+                  role: 'user',
+                  content: [
+                    { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64}` } },
+                    { type: 'text', text: 'Please extract the data from this document.' },
+                  ],
+                },
+              ],
+            }),
+          });
+          if (groqRes.ok) {
+            const groqData = await groqRes.json();
+            const content = groqData.choices?.[0]?.message?.content || '';
+            try {
+              const extractedData = JSON.parse(content);
+              console.log('Extracted data (Groq):', extractedData);
+              return new Response(JSON.stringify({ success: true, extractedData }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+              });
+            } catch (parseError) {
+              console.error('Groq returned non-JSON content, falling back to Haiku:', parseError);
+            }
+          } else {
+            console.error('Groq extraction failed, falling back to Haiku:', groqRes.status, await groqRes.text());
+          }
+        } catch (groqError) {
+          console.error('Groq extraction failed, falling back to Haiku:', groqError);
+        }
+      }
+    }
+
     const documentContent = isPdf
       ? { type: 'document' as const, source: { type: 'base64' as const, media_type: 'application/pdf' as const, data: base64 } }
       : { type: 'image' as const, source: { type: 'base64' as const, media_type: mimeType, data: base64 } };
