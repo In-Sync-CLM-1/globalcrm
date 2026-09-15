@@ -82,6 +82,7 @@ async function tick(env) {
         if (email.from_name) payload.fromName = email.from_name;
         if (email.bare_email) payload.bareEmail = true;
         if (email.in_reply_to) payload.inReplyTo = email.in_reply_to;
+        if (email.attachment_url) { payload.attachmentUrl = email.attachment_url; payload.attachmentFilename = email.attachment_filename || "attachment.pdf"; }
         const { error } = await invokeFunction(env, "send-email", payload);
         if (error) {
           console.error(`Error sending scheduled email ${email.id}:`, String(error.message || error));
