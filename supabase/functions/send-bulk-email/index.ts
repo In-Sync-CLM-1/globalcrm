@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { getSupabaseClient } from "../_shared/supabaseClient.ts";
 import { replaceVariables } from "../_shared/templateVariables.ts";
 import { orgServiceGate } from "../_shared/billingGate.ts";
+import { resolveResendApiKey } from "../_shared/orgEmailIdentity.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -9,17 +10,16 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
-const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
 const BATCH_SIZE = 50; // Process 50 emails per batch
 const RATE_LIMIT_DELAY = 600; // 0.6 seconds between emails (100 emails per minute, safely under Resend's 120/min limit)
 const MAX_EMAILS_PER_INVOCATION = 150; // Maximum emails to process per function invocation (prevents timeout)
 
-const sendEmail = async (to: string, subject: string, html: string, fromEmail: string, fromName: string, unsubscribeUrl: string) => {
+const sendEmail = async (apiKey: string | undefined, to: string, subject: string, html: string, fromEmail: string, fromName: string, unsubscribeUrl: string) => {
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${RESEND_API_KEY}`,
+      Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
       from: `${fromName} <${fromEmail}>`,
@@ -146,6 +146,7 @@ serve(async (req) => {
 
     const fromEmail = `noreply@${emailSettings.sending_domain}`;
     const fromName = org?.name || "Your Organization";
+    const resendApiKey = resolveResendApiKey(campaign.org_id);
 
     console.log('[send-bulk-email] From:', fromEmail);
     console.log('[send-bulk-email] From Name:', fromName);
@@ -310,6 +311,7 @@ serve(async (req) => {
           );
 
           const emailResult = await sendEmail(
+            resendApiKey,
             recipient.email,
             personalizedSubject,
             personalizedHtml,
