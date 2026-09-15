@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getSupabaseClient } from '../_shared/supabaseClient.ts';
 import { orgServiceGate } from '../_shared/billingGate.ts';
-import { ORG_EMAIL_IDENTITY_OVERRIDE } from '../_shared/orgEmailIdentity.ts';
+import { ORG_EMAIL_IDENTITY_OVERRIDE, resolveResendApiKey } from '../_shared/orgEmailIdentity.ts';
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -10,11 +10,9 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
-const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
-
 interface Attachment { filename: string; content: string }
 
-const sendEmail = async (to: string, subject: string, html: string, fromEmail: string, fromName: string, replyToEmail?: string, unsubscribeUrl?: string, inReplyTo?: string, attachments?: Attachment[]) => {
+const sendEmail = async (apiKey: string | undefined, to: string, subject: string, html: string, fromEmail: string, fromName: string, replyToEmail?: string, unsubscribeUrl?: string, inReplyTo?: string, attachments?: Attachment[]) => {
   const emailPayload: any = {
     from: `${fromName} <${fromEmail}>`,
     to: [to],
@@ -55,7 +53,7 @@ const sendEmail = async (to: string, subject: string, html: string, fromEmail: s
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${RESEND_API_KEY}`,
+      Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify(emailPayload),
   });
@@ -318,13 +316,19 @@ serve(async (req) => {
       throw new Error("Email domain verification pending. Please go to Email Settings and click 'Verify Domain' to complete verification.");
     }
 
+    // Some orgs' sending domains are verified on a different Resend account
+    // than the shared default (e.g. RMPL's redefine.in) -- resolve the right
+    // key before checking or sending, or a 404/400 masks a domain that's
+    // actually fine.
+    const resendApiKey = resolveResendApiKey(orgId);
+
     // Double-check domain status with Resend API to avoid stale data issues
     console.log('Checking domain status with Resend API...');
     const domainCheckResponse = await fetch(
       `https://api.resend.com/domains/${emailSettings.resend_domain_id}`,
       {
         headers: {
-          'Authorization': `Bearer ${RESEND_API_KEY}`,
+          'Authorization': `Bearer ${resendApiKey}`,
         },
       }
     );
@@ -384,7 +388,7 @@ serve(async (req) => {
     // note, not a newsletter -- the List-Unsubscribe header is what makes
     // Gmail/Outlook show an "Unsubscribe" chip next to the sender even with
     // no visible footer, so skip it for those.
-    const emailData = await sendEmail(to, subject, finalHtml, fromEmail, fromName, replyToEmail, bareEmail ? undefined : unsubscribeUrl, inReplyTo, attachments);
+    const emailData = await sendEmail(resendApiKey, to, subject, finalHtml, fromEmail, fromName, replyToEmail, bareEmail ? undefined : unsubscribeUrl, inReplyTo, attachments);
 
     console.log("Email sent successfully:", emailData);
 
