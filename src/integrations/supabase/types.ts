@@ -3168,6 +3168,7 @@ export type Database = {
           apollo_person_id: string | null
           assigned_team_id: string | null
           assigned_to: string | null
+          category: string | null
           city: string | null
           company: string | null
           country: string | null
@@ -3240,6 +3241,7 @@ export type Database = {
           apollo_person_id?: string | null
           assigned_team_id?: string | null
           assigned_to?: string | null
+          category?: string | null
           city?: string | null
           company?: string | null
           country?: string | null
@@ -3312,6 +3314,7 @@ export type Database = {
           apollo_person_id?: string | null
           assigned_team_id?: string | null
           assigned_to?: string | null
+          category?: string | null
           city?: string | null
           company?: string | null
           country?: string | null
@@ -9734,6 +9737,10 @@ export type Database = {
           id: string
           name_en: string
         }[]
+      }
+      get_contacts_by_category: {
+        Args: { p_org_id: string }
+        Returns: { category: string; contact_count: number }[]
       }
       get_dashboard_stats: { Args: { p_org_id: string }; Returns: Json }
       get_demo_stats_this_month: {
