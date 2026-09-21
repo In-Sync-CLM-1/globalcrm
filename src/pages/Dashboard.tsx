@@ -18,6 +18,7 @@ import { SalesActivityTrend } from "@/components/Dashboard/SalesActivityTrend";
 import { SalesLeaderboard } from "@/components/Dashboard/SalesLeaderboard";
 import { DueTodayCard } from "@/components/Dashboard/DueTodayCard";
 import { CompactDashboard } from "@/components/Dashboard/CompactDashboard";
+import { ContactsByCategoryChart } from "@/components/Dashboard/ContactsByCategoryChart";
 import { SDRDashboard } from "@/components/Dashboard/SDRDashboard";
 import { useUserRole } from "@/hooks/useUserRole";
 import IedupDashboard from "@/pages/IedupDashboard";
@@ -133,6 +134,21 @@ export default function Dashboard() {
     enabled: isStandardDashboardOrg,
   });
 
+  // Fetch contacts grouped by category (populated for orgs that tag contacts
+  // by data-type/list origin, e.g. RMPL's OPM database imports)
+  const { data: contactsByCategory = [], isLoading: categoryLoading } = useQuery<{ category: string; contact_count: number }[]>({
+    queryKey: ["contacts-by-category", effectiveOrgId],
+    queryFn: async () => {
+      if (!effectiveOrgId) throw new Error("No organization context");
+      const { data, error } = await supabase.rpc("get_contacts_by_category", {
+        p_org_id: effectiveOrgId,
+      });
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: isStandardDashboardOrg,
+  });
+
   // Fetch contacts in won/lost stages for win rate
   const { data: wonLostData } = useQuery({
     queryKey: ["won-lost-counts", effectiveOrgId],
@@ -199,6 +215,7 @@ export default function Dashboard() {
     await queryClient.invalidateQueries({ queryKey: ["sales-activity-trends"] });
     await queryClient.invalidateQueries({ queryKey: ["new-leads-period"] });
     await queryClient.invalidateQueries({ queryKey: ["won-lost-counts"] });
+    await queryClient.invalidateQueries({ queryKey: ["contacts-by-category"] });
     setIsRefreshing(false);
   };
 
@@ -304,6 +321,11 @@ export default function Dashboard() {
             <SalesActivityTrend data={activityTrendData} isLoading={activityTrendsLoading} />
           </div>
         </div>
+
+        {/* Contacts by Category (only present for orgs that tag contacts by data type) */}
+        {(categoryLoading || contactsByCategory.length > 0) && (
+          <ContactsByCategoryChart data={contactsByCategory} isLoading={categoryLoading} />
+        )}
 
         {/* Sales Rep Leaderboard */}
         <SalesLeaderboard reps={salesReps} isLoading={salesRepsLoading} />
