@@ -9,6 +9,13 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { UserCheck, AlertTriangle, ExternalLink } from "lucide-react";
 import { useNotification } from "@/hooks/useNotification";
+import { RmplProjectPicker } from "./RmplProjectPicker";
+import { Label } from "@/components/ui/label";
+
+// Org that gets billed through RMPL OPM -- mirrors the DB-level check in
+// 20260926100000_clients_rmpl_project_id.sql. Only these clients need an
+// RMPL project reference to convert.
+const RMPL_ORG_ID = "9b3528ad-8946-4f31-a1ca-1c8d3d782fb9";
 
 interface Contact {
   id: string;
@@ -47,6 +54,8 @@ export function ConvertToClientButton({ contact, isWonStage, onConverted }: Conv
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [duplicates, setDuplicates] = useState<PotentialDuplicate[]>([]);
   const [showDuplicateWarning, setShowDuplicateWarning] = useState(false);
+  const [rmplProjectId, setRmplProjectId] = useState<string | null>(null);
+  const isRmplOrg = contact.org_id === RMPL_ORG_ID;
   const queryClient = useQueryClient();
   const notify = useNotification();
   const navigate = useNavigate();
@@ -125,8 +134,12 @@ export function ConvertToClientButton({ contact, isWonStage, onConverted }: Conv
 
   const convertMutation = useMutation({
     mutationFn: async () => {
+      if (isRmplOrg && !rmplProjectId) {
+        throw new Error("Select the RMPL project this client will be billed under before converting");
+      }
+
       const { data: user } = await supabase.auth.getUser();
-      
+
       // Check if this specific contact was already converted
       const { data: existingClient } = await supabase
         .from("clients")
@@ -157,6 +170,7 @@ export function ConvertToClientButton({ contact, isWonStage, onConverted }: Conv
           postal_code: contact.postal_code,
           notes: contact.notes,
           status: 'active',
+          ...(isRmplOrg ? { rmpl_project_id: rmplProjectId } : {}),
         });
 
       if (error) throw error;
@@ -168,6 +182,7 @@ export function ConvertToClientButton({ contact, isWonStage, onConverted }: Conv
       queryClient.invalidateQueries({ queryKey: ["pipeline-contacts"] });
       setIsDialogOpen(false);
       setShowDuplicateWarning(false);
+      setRmplProjectId(null);
       onConverted?.();
     },
     onError: (error: Error) => {
@@ -269,19 +284,31 @@ export function ConvertToClientButton({ contact, isWonStage, onConverted }: Conv
             </div>
           ) : null}
 
+          {!isCheckingDuplicates && isRmplOrg && (
+            <div className="space-y-2">
+              <Label>
+                RMPL Project ID <span className="text-destructive">*</span>
+              </Label>
+              <RmplProjectPicker value={rmplProjectId} onChange={setRmplProjectId} />
+              <p className="text-xs text-muted-foreground">
+                The RMPL OPM project where this client's billing will happen. Required to mark this client Won.
+              </p>
+            </div>
+          )}
+
           <DialogFooter className="flex-col sm:flex-row gap-2">
             <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
               Cancel
             </Button>
-            <Button 
+            <Button
               onClick={() => convertMutation.mutate()}
-              disabled={convertMutation.isPending || isCheckingDuplicates}
+              disabled={convertMutation.isPending || isCheckingDuplicates || (isRmplOrg && !rmplProjectId)}
               variant={showDuplicateWarning ? "secondary" : "default"}
             >
-              {convertMutation.isPending 
-                ? "Converting..." 
-                : showDuplicateWarning 
-                  ? "Create Anyway" 
+              {convertMutation.isPending
+                ? "Converting..."
+                : showDuplicateWarning
+                  ? "Create Anyway"
                   : "Convert to Client"
               }
             </Button>

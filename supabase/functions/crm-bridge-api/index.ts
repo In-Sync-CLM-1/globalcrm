@@ -108,6 +108,8 @@ Deno.serve(async (req) => {
     } else if (path.match(/^\/contacts\/[^/]+\/activities$/) && method === 'POST') {
       const contactId = path.split('/')[2];
       response = await handleCreateActivity(supabaseAdmin, context, req, contactId);
+    } else if (path === '/clients' && method === 'GET') {
+      response = await handleListClients(supabaseAdmin, context, url);
     } else if (path === '/pipeline-stages' && method === 'GET') {
       response = await handleGetPipelineStages(supabaseAdmin, context);
     } else if (path === '/custom-fields' && method === 'GET') {
@@ -512,6 +514,42 @@ async function handleCreateActivity(supabase: any, context: RequestContext, req:
   }
 
   return successResponse(data, crypto.randomUUID(), 201);
+}
+
+// Clients Handler
+//
+// Used by satellite apps (e.g. RMPL OPM) to pull which clients a given user
+// converted from Won, along with the rmpl_project_id reference recorded at
+// conversion time (see 20260926100000_clients_rmpl_project_id.sql).
+async function handleListClients(supabase: any, context: RequestContext, url: URL) {
+  const limit = parseInt(url.searchParams.get('limit') || '50');
+  const offset = parseInt(url.searchParams.get('offset') || '0');
+  const convertedBy = url.searchParams.get('converted_by');
+
+  let query = supabase
+    .from('clients')
+    .select('id, contact_id, company, converted_by, converted_at, rmpl_project_id, status, created_at', { count: 'exact' })
+    .eq('org_id', context.orgId)
+    .range(offset, offset + limit - 1)
+    .order('converted_at', { ascending: true });
+
+  if (convertedBy) query = query.eq('converted_by', convertedBy);
+
+  const { data, error, count } = await query;
+
+  if (error) {
+    return errorResponse(error.message, 500, crypto.randomUUID());
+  }
+
+  return successResponse({
+    clients: data,
+    pagination: {
+      total: count,
+      limit,
+      offset,
+      has_more: count ? offset + limit < count : false
+    }
+  }, crypto.randomUUID());
 }
 
 async function handleGetPipelineStages(supabase: any, context: RequestContext) {
