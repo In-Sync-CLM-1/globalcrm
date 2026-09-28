@@ -85,24 +85,8 @@ const json = (body: unknown, status = 200) =>
 const clean = (v: unknown) =>
   typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined;
 
-const FREE_EMAIL_DOMAINS = new Set([
-  'gmail.com', 'googlemail.com', 'yahoo.com', 'yahoo.co.in', 'ymail.com',
-  'hotmail.com', 'outlook.com', 'live.com', 'msn.com', 'icloud.com', 'me.com',
-  'rediffmail.com', 'aol.com', 'protonmail.com', 'proton.me', 'gmx.com', 'yandex.com', 'mail.com',
-]);
 const isValidPhone = (v: string) => /^[6-9]\d{9}$/.test(v.replace(/\D/g, ''));
-const isWorkEmail = (v: string) => {
-  const parts = v.toLowerCase().split('@');
-  if (parts.length !== 2) return false;
-  const domain = parts[1];
-  if (!/^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/.test(domain)) return false;
-  // startsWith catches garbage appended straight after a real free-mail domain
-  // (e.g. "gmail.comcg"); endsWith catches a subdomain of one (e.g. "mail.gmail.com").
-  for (const free of FREE_EMAIL_DOMAINS) {
-    if (domain.startsWith(free) || domain.endsWith('.' + free)) return false;
-  }
-  return true;
-};
+const isValidEmail = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
@@ -155,11 +139,13 @@ Deno.serve(async (req) => {
     const rawPhone = clean(payload.phone);
     const phone = rawPhone ? rawPhone.replace(/\D/g, '') : undefined;
     const email = clean(payload.email);
+    const company = clean(payload.company);
 
     if (!product) return json({ error: 'product is required' }, 400);
+    if (!company) return json({ error: 'Company name is required' }, 400);
     if (!phone && !email) return json({ error: 'A phone or email is required' }, 400);
     if (phone && !isValidPhone(phone)) return json({ error: 'Please enter a valid 10-digit mobile number' }, 400);
-    if (email && !isWorkEmail(email)) return json({ error: 'Please use a work email address, not a personal Gmail/Yahoo one' }, 400);
+    if (email && !isValidEmail(email)) return json({ error: 'Please enter a valid email address' }, 400);
 
     // Split a full name if first/last not given explicitly.
     let firstName = clean(payload.first_name);
