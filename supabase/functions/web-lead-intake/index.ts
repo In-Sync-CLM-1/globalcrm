@@ -47,6 +47,8 @@ interface LeadPayload {
   preferred_time?: string; // HH:mm
   // Honeypot — real users never fill this; bots do. If set, we 200-OK and drop.
   _hp?: string;
+  // Set by the browser when the form refused to send (never a real lead).
+  _client_event?: string;
   // Cloudflare Turnstile token from the form (turnstile.render in "invisible"
   // mode — the site key itself is provisioned invisible, so no challenge, no
   // checkbox, no user-visible friction at all). Same provider already proven
@@ -54,21 +56,34 @@ interface LeadPayload {
   turnstile_token?: string;
 }
 
-async function verifyTurnstile(token: string, ip: string | null): Promise<{ ok: boolean; reason?: string }> {
+type TurnstileResult = { result: 'pass' | 'fail' | 'missing' | 'unconfigured' | 'error'; codes?: string };
+
+// LOG-ONLY: this reports what Cloudflare said, it never rejects a lead. Turnstile
+// has no score, only pass/fail + error codes; both are recorded on every
+// submission so we can see whether real visitors were failing it before ever
+// deciding to enforce it again.
+async function checkTurnstile(token: string | undefined, ip: string | null): Promise<TurnstileResult> {
   const secret = Deno.env.get('TURNSTILE_SECRET_KEY');
-  if (!secret) return { ok: true }; // not configured yet — don't block real leads on a missing key
+  if (!secret) return { result: 'unconfigured' };
+  if (!token) return { result: 'missing' };
   try {
     const params = new URLSearchParams({ secret, response: token });
     if (ip) params.set('remoteip', ip);
     const r = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', { method: 'POST', body: params });
     const j = await r.json();
-    if (!j.success) return { ok: false, reason: 'turnstile_failed' };
-    return { ok: true };
+    if (j.success) return { result: 'pass' };
+    return { result: 'fail', codes: Array.isArray(j['error-codes']) ? j['error-codes'].join(',') : undefined };
   } catch (e) {
     console.error('turnstile verify error:', e);
-    return { ok: true }; // network hiccup — fail open, don't drop a real lead over it
+    return { result: 'error' };
   }
 }
+
+// Failures the browser reports about itself (validation it blocked, a network
+// error). Whitelisted so the public endpoint can't be used to write free text.
+const CLIENT_EVENTS = new Set([
+  'missing_fields', 'phone_invalid', 'email_invalid', 'network_error', 'server_error', 'unexpected_error',
+]);
 
 function clientIp(req: Request): string | null {
   const xff = req.headers.get('x-forwarded-for');
@@ -104,17 +119,29 @@ Deno.serve(async (req) => {
     const ip = clientIp(req);
     const userAgent = req.headers.get('user-agent');
 
+    // Browser-reported failure (e.g. the form refused to send): log it and stop.
+    // These are the failures the server would otherwise never see.
+    if (typeof payload._client_event === 'string') {
+      const ev = CLIENT_EVENTS.has(payload._client_event) ? payload._client_event : 'unexpected_error';
+      await supabase.from('web_lead_submissions').insert({
+        product: clean(payload.product) ?? null,
+        source_url: clean(payload.source_url) ?? null,
+        ip,
+        user_agent: userAgent,
+        outcome: 'client_error',
+        client_event: ev,
+      });
+      return json({ success: true });
+    }
+
     // Every hit gets logged before any other check runs — the whole point is
     // to be able to tell a blocked bot from a real lead that failed for some
     // other reason, so this can't be conditional on how the request turns out.
     const honeypotTriggered = !!clean(payload._hp);
-    const turnstile = honeypotTriggered
-      ? { ok: true } // don't bother calling Cloudflare if the honeypot already caught it
-      : payload.turnstile_token
-      ? await verifyTurnstile(payload.turnstile_token, ip)
-      : { ok: true };
-    const blocked = honeypotTriggered || !turnstile.ok;
-    const blockReason = honeypotTriggered ? 'honeypot' : !turnstile.ok ? turnstile.reason ?? 'turnstile_failed' : null;
+    const turnstile = await checkTurnstile(payload.turnstile_token, ip);
+    // Only the honeypot blocks. Turnstile is log-only (see checkTurnstile).
+    const blocked = honeypotTriggered;
+    const blockReason = honeypotTriggered ? 'honeypot' : null;
 
     const { data: submissionRow } = await supabase
       .from('web_lead_submissions')
@@ -125,15 +152,30 @@ Deno.serve(async (req) => {
         user_agent: userAgent,
         blocked,
         block_reason: blockReason,
+        honeypot_filled: honeypotTriggered,
+        turnstile_result: turnstile.result,
+        turnstile_codes: turnstile.codes ?? null,
       })
       .select('id')
       .single();
     const submissionId = submissionRow?.id as string | undefined;
 
-    // Silently absorb bot submissions (honeypot filled, or Turnstile flagged it
-    // as automated) — look successful, do nothing. Never tip off a script by
-    // returning a different response for a blocked vs. accepted submission.
-    if (blocked) return json({ success: true, contact_id: null });
+    // Closes out the audit row with how this hit ended.
+    const finish = async (status: number, outcome: string, errorMessage?: string, extra: Record<string, unknown> = {}) => {
+      if (submissionId) {
+        await supabase.from('web_lead_submissions')
+          .update({ outcome, http_status: status, error_message: errorMessage ?? null, ...extra })
+          .eq('id', submissionId);
+      }
+    };
+
+    // Silently absorb bot submissions (honeypot filled) — look successful, do
+    // nothing. Never tip off a script by returning a different response for a
+    // blocked vs. accepted submission.
+    if (blocked) {
+      await finish(200, 'blocked_honeypot');
+      return json({ success: true, contact_id: null });
+    }
 
     const product = clean(payload.product);
     const rawPhone = clean(payload.phone);
@@ -141,11 +183,11 @@ Deno.serve(async (req) => {
     const email = clean(payload.email);
     const company = clean(payload.company);
 
-    if (!product) return json({ error: 'product is required' }, 400);
-    if (!company) return json({ error: 'Company name is required' }, 400);
-    if (!phone && !email) return json({ error: 'A phone or email is required' }, 400);
-    if (phone && !isValidPhone(phone)) return json({ error: 'Please enter a valid 10-digit mobile number' }, 400);
-    if (email && !isValidEmail(email)) return json({ error: 'Please enter a valid email address' }, 400);
+    if (!product) { await finish(400, 'rejected', 'product_missing'); return json({ error: 'product is required' }, 400); }
+    if (!company) { await finish(400, 'rejected', 'company_missing'); return json({ error: 'Company name is required' }, 400); }
+    if (!phone && !email) { await finish(400, 'rejected', 'phone_and_email_missing'); return json({ error: 'A phone or email is required' }, 400); }
+    if (phone && !isValidPhone(phone)) { await finish(400, 'rejected', 'phone_invalid'); return json({ error: 'Please enter a valid 10-digit mobile number' }, 400); }
+    if (email && !isValidEmail(email)) { await finish(400, 'rejected', 'email_invalid'); return json({ error: 'Please enter a valid email address' }, 400); }
 
     // Split a full name if first/last not given explicitly.
     let firstName = clean(payload.first_name);
@@ -167,10 +209,12 @@ Deno.serve(async (req) => {
 
     if (ruleErr) {
       console.error('lead_assignment_rules lookup failed:', ruleErr);
+      await finish(500, 'rejected', 'rule_lookup_failed');
       return json({ error: 'Lookup failed' }, 500);
     }
     if (!rule) {
       console.warn('No active assignment rule for product:', product);
+      await finish(400, 'rejected', 'unknown_product');
       return json({ error: `Unknown product: ${product}` }, 400);
     }
     const orgId = rule.org_id;
@@ -203,6 +247,7 @@ Deno.serve(async (req) => {
         .maybeSingle();
       if (stageErr || !newStage) {
         console.error('Pipeline stage not found for org', orgId, stageErr);
+        await finish(500, 'rejected', 'pipeline_not_configured');
         return json({ error: 'Pipeline not configured' }, 500);
       }
       stage = newStage;
@@ -244,7 +289,7 @@ Deno.serve(async (req) => {
         description: message || 'Demo requested again via website form.',
         completed_at: new Date().toISOString(),
       });
-      if (submissionId) await supabase.from('web_lead_submissions').update({ contact_id: existingId }).eq('id', submissionId);
+      await finish(200, 'deduped', undefined, { contact_id: existingId });
       return json({ success: true, contact_id: existingId, deduped: true });
     }
 
@@ -285,10 +330,11 @@ Deno.serve(async (req) => {
 
     if (insertErr) {
       console.error('Contact insert failed:', insertErr);
+      await finish(500, 'rejected', `contact_insert_failed: ${insertErr.message}`.slice(0, 300));
       return json({ error: 'Failed to create lead', details: insertErr.message }, 500);
     }
 
-    if (submissionId) await supabase.from('web_lead_submissions').update({ contact_id: contact.id }).eq('id', submissionId);
+    await finish(200, 'accepted', undefined, { contact_id: contact.id });
 
     await supabase.from('contact_activities').insert({
       contact_id: contact.id,
