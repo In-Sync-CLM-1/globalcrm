@@ -100,8 +100,6 @@ const json = (body: unknown, status = 200) =>
 const clean = (v: unknown) =>
   typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined;
 
-const isValidPhone = (v: string) => /^[6-9]\d{9}$/.test(v.replace(/\D/g, ''));
-const isValidEmail = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
@@ -139,9 +137,11 @@ Deno.serve(async (req) => {
     // other reason, so this can't be conditional on how the request turns out.
     const honeypotTriggered = !!clean(payload._hp);
     const turnstile = await checkTurnstile(payload.turnstile_token, ip);
-    // Only the honeypot blocks. Turnstile is log-only (see checkTurnstile).
-    const blocked = honeypotTriggered;
-    const blockReason = honeypotTriggered ? 'honeypot' : null;
+    // Nothing blocks: the honeypot and Turnstile are both log-only. Someone who
+    // fills the form and sees "Thanks" always gets a lead; suspicious ones are
+    // flagged in this audit row for review afterwards instead of being dropped.
+    const blocked = false;
+    const blockReason = null;
 
     const { data: submissionRow } = await supabase
       .from('web_lead_submissions')
@@ -169,25 +169,13 @@ Deno.serve(async (req) => {
       }
     };
 
-    // Silently absorb bot submissions (honeypot filled) — look successful, do
-    // nothing. Never tip off a script by returning a different response for a
-    // blocked vs. accepted submission.
-    if (blocked) {
-      await finish(200, 'blocked_honeypot');
-      return json({ success: true, contact_id: null });
-    }
-
-    const product = clean(payload.product);
+    // No validation here: the form already checks what it needs to and tells
+    // the visitor. Whatever it sends becomes a lead as-is.
     const rawPhone = clean(payload.phone);
     const phone = rawPhone ? rawPhone.replace(/\D/g, '') : undefined;
     const email = clean(payload.email);
-    const company = clean(payload.company);
-
-    if (!product) { await finish(400, 'rejected', 'product_missing'); return json({ error: 'product is required' }, 400); }
-    if (!company) { await finish(400, 'rejected', 'company_missing'); return json({ error: 'Company name is required' }, 400); }
-    if (!phone && !email) { await finish(400, 'rejected', 'phone_and_email_missing'); return json({ error: 'A phone or email is required' }, 400); }
-    if (phone && !isValidPhone(phone)) { await finish(400, 'rejected', 'phone_invalid'); return json({ error: 'Please enter a valid 10-digit mobile number' }, 400); }
-    if (email && !isValidEmail(email)) { await finish(400, 'rejected', 'email_invalid'); return json({ error: 'Please enter a valid email address' }, 400); }
+    // A missing/unknown product still becomes a lead, routed as 'General'.
+    const product = clean(payload.product) ?? 'General';
 
     // Split a full name if first/last not given explicitly.
     let firstName = clean(payload.first_name);
@@ -199,23 +187,23 @@ Deno.serve(async (req) => {
     }
 
     // Resolve product -> org via the same rules that drive owner assignment.
-    const { data: rule, error: ruleErr } = await supabase
-      .from('lead_assignment_rules')
-      .select('org_id, product')
-      .ilike('product', product)
-      .eq('is_active', true)
-      .limit(1)
-      .maybeSingle();
-
-    if (ruleErr) {
+    const lookupRule = (p: string) =>
+      supabase
+        .from('lead_assignment_rules')
+        .select('org_id, product')
+        .ilike('product', p)
+        .eq('is_active', true)
+        .limit(1)
+        .maybeSingle();
+    let { data: rule, error: ruleErr } = await lookupRule(product);
+    if (!ruleErr && !rule) {
+      console.warn('No active assignment rule for product, routing as General:', product);
+      ({ data: rule, error: ruleErr } = await lookupRule('General'));
+    }
+    if (ruleErr || !rule) {
       console.error('lead_assignment_rules lookup failed:', ruleErr);
       await finish(500, 'rejected', 'rule_lookup_failed');
-      return json({ error: 'Lookup failed' }, 500);
-    }
-    if (!rule) {
-      console.warn('No active assignment rule for product:', product);
-      await finish(400, 'rejected', 'unknown_product');
-      return json({ error: `Unknown product: ${product}` }, 400);
+      return json({ error: 'Our server had a problem saving your request. Please try again in a minute.' }, 500);
     }
     const orgId = rule.org_id;
     // Use the product string exactly as stored so the auto-assign trigger matches.
@@ -263,35 +251,11 @@ Deno.serve(async (req) => {
     // Channel attribution: a gclid means it came from a Google Ad.
     const source = gclid ? 'Google Ads' : (utmSource || 'Website');
 
-    // Dedup within the org by phone (then email) so double-submits / repeat
-    // enquiries don't spawn duplicate contacts or re-trigger enrichment.
-    let existingId: string | null = null;
-    if (phone || email) {
-      const orFilter = [phone ? `phone.eq.${phone}` : null, email ? `email.eq.${email}` : null]
-        .filter(Boolean)
-        .join(',');
-      const { data: existing } = await supabase
-        .from('contacts')
-        .select('id')
-        .eq('org_id', orgId)
-        .or(orFilter)
-        .limit(1)
-        .maybeSingle();
-      existingId = existing?.id ?? null;
-    }
-
-    if (existingId) {
-      await supabase.from('contact_activities').insert({
-        contact_id: existingId,
-        org_id: orgId,
-        activity_type: 'note',
-        subject: `Repeat ${productCanonical} demo request (website)`,
-        description: message || 'Demo requested again via website form.',
-        completed_at: new Date().toISOString(),
-      });
-      await finish(200, 'deduped', undefined, { contact_id: existingId });
-      return json({ success: true, contact_id: existingId, deduped: true });
-    }
+    // NO de-duplication: every submission that gets a "Thanks" creates its own
+    // lead. A previous phone-or-email match silently turned genuine requests
+    // (same email, different person/number) into a note on an old contact with
+    // no new lead, stage change, call or alert. Duplicates are cleaner to merge
+    // in the CRM than a lost lead is to recover.
 
     const notes =
       `Demo requested via ${source} (${productCanonical}).` +
