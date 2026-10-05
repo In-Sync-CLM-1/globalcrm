@@ -255,6 +255,16 @@ export default function PipelineBoard() {
     }
     setWonSaving(true);
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const link = await fetch("/api/rmpl-won", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${session?.access_token ?? ""}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ contact_id: wonPrompt.contactId, project_number: number }),
+      });
+      if (!link.ok) {
+        const err = await link.json().catch(() => ({}));
+        throw new Error(err.error || "Could not record the project with RMPL");
+      }
       const { error } = await supabase
         .from("contacts")
         .update({ pipeline_stage_id: wonPrompt.stageId, won_project_number: number } as any)
