@@ -47,8 +47,8 @@ export function RmplProjectPicker({ value, onChange }: RmplProjectPickerProps) {
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button variant="outline" role="combobox" className={cn("w-full justify-between font-normal", !value && "text-muted-foreground")}>
-          <span className="truncate">
+        <Button variant="outline" role="combobox" className={cn("w-full min-w-0 justify-between font-normal", !value && "text-muted-foreground")}>
+          <span className="min-w-0 flex-1 truncate text-left">
             {value ? `${value}${selected ? ` — ${selected.project_name}` : ""}` : "Search RMPL projects…"}
           </span>
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
