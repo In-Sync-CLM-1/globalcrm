@@ -1618,7 +1618,7 @@ export default function PipelineBoard() {
                 Pick the RMPL project for this won deal.
               </DialogDescription>
             </DialogHeader>
-            <RmplProjectPicker value={wonProjectNumber} onChange={setWonProjectNumber} />
+            <div className="min-w-0"><RmplProjectPicker value={wonProjectNumber} onChange={setWonProjectNumber} /></div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setWonPrompt(null)}>Cancel</Button>
               <Button onClick={confirmWon} disabled={wonSaving || !wonProjectNumber.trim()}>Move to Won</Button>
