@@ -6,7 +6,7 @@ import DashboardLayout from "@/components/Layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { RmplProjectPicker } from "@/components/Pipeline/RmplProjectPicker";
 import { LoadingState } from "@/components/common/LoadingState";
 import { useNotification } from "@/hooks/useNotification";
 import { Mail, Phone as PhoneIcon, Building, LayoutGrid, Table as TableIcon, Loader2, Phone, MapPin, Factory, MessageSquare, MoreHorizontal, Pencil, Trash2, UserPlus, MessageCircle, Plus } from "lucide-react";
@@ -1615,16 +1615,10 @@ export default function PipelineBoard() {
             <DialogHeader>
               <DialogTitle>Project number</DialogTitle>
               <DialogDescription>
-                Enter the project number for this won deal (for example RMPL-26-123).
+                Pick the RMPL project for this won deal.
               </DialogDescription>
             </DialogHeader>
-            <Input
-              autoFocus
-              placeholder="RMPL-26-123"
-              value={wonProjectNumber}
-              onChange={(e) => setWonProjectNumber(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') confirmWon(); }}
-            />
+            <RmplProjectPicker value={wonProjectNumber} onChange={setWonProjectNumber} />
             <DialogFooter>
               <Button variant="outline" onClick={() => setWonPrompt(null)}>Cancel</Button>
               <Button onClick={confirmWon} disabled={wonSaving || !wonProjectNumber.trim()}>Move to Won</Button>
