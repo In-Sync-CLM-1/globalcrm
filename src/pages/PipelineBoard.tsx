@@ -6,6 +6,7 @@ import DashboardLayout from "@/components/Layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { RmplProjectPicker } from "@/components/Pipeline/RmplProjectPicker";
 import { LoadingState } from "@/components/common/LoadingState";
 import { useNotification } from "@/hooks/useNotification";
 import { Mail, Phone as PhoneIcon, Building, LayoutGrid, Table as TableIcon, Loader2, Phone, MapPin, Factory, MessageSquare, MoreHorizontal, Pencil, Trash2, UserPlus, MessageCircle, Plus } from "lucide-react";
@@ -209,6 +210,65 @@ export default function PipelineBoard() {
       return data as PipelineStage[];
     },
   });
+
+  // Orgs that must record a project number when a deal is moved to Won (RMPL)
+  const { data: requireProjectNumberOnWon } = useQuery({
+    queryKey: ['require-project-number-on-won', effectiveOrgId],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("organization_settings")
+        .select("require_project_number_on_won")
+        .eq("org_id", effectiveOrgId!)
+        .maybeSingle();
+      return !!(data as any)?.require_project_number_on_won;
+    },
+    enabled: !!effectiveOrgId,
+  });
+  const [wonPrompt, setWonPrompt] = useState<{ contactId: string; stageId: string } | null>(null);
+  const [wonProjectNumber, setWonProjectNumber] = useState("");
+  const [wonSaving, setWonSaving] = useState(false);
+
+  // Single path for every stage move: asks for the project number first when
+  // the target is the Won stage of an org that requires it.
+  const moveContactToStage = async (contactId: string, stageId: string, successMsg: [string, string]) => {
+    const target = (stagesData || []).find(s => s.id === stageId);
+    if (requireProjectNumberOnWon && target?.name?.trim().toLowerCase() === 'won') {
+      setWonProjectNumber("");
+      setWonPrompt({ contactId, stageId });
+      return;
+    }
+    const { error } = await supabase
+      .from("contacts")
+      .update({ pipeline_stage_id: stageId })
+      .eq("id", contactId);
+    if (error) throw error;
+    queryClient.invalidateQueries({ queryKey: ['pipeline-contacts'] });
+    notify.success(successMsg[0], successMsg[1]);
+  };
+
+  const confirmWon = async () => {
+    if (!wonPrompt) return;
+    const number = wonProjectNumber.trim().toUpperCase();
+    if (!/^RMPL-\d{2}-\d+$/.test(number)) {
+      notify.error("Invalid project number", "Use the format RMPL-26-123.");
+      return;
+    }
+    setWonSaving(true);
+    try {
+      const { error } = await supabase
+        .from("contacts")
+        .update({ pipeline_stage_id: wonPrompt.stageId, won_project_number: number } as any)
+        .eq("id", wonPrompt.contactId);
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ['pipeline-contacts'] });
+      notify.success("Moved to Won", `Project number ${number} recorded`);
+      setWonPrompt(null);
+    } catch (error: any) {
+      notify.error("Error", error.message);
+    } finally {
+      setWonSaving(false);
+    }
+  };
 
   // Fetch contact IDs that have been converted to clients
   const { data: clientContactIds } = useQuery({
@@ -460,17 +520,7 @@ export default function PipelineBoard() {
     if (!draggedContact) return;
 
     try {
-      const { error } = await supabase
-        .from("contacts")
-        .update({ pipeline_stage_id: stageId })
-        .eq("id", draggedContact);
-
-      if (error) throw error;
-
-      // Invalidate query to refresh data
-      queryClient.invalidateQueries({ queryKey: ['pipeline-contacts'] });
-
-      notify.success("Contact moved", "Contact has been moved to new stage");
+      await moveContactToStage(draggedContact, stageId, ["Contact moved", "Contact has been moved to new stage"]);
     } catch (error: any) {
       notify.error("Error", error);
     } finally {
@@ -804,15 +854,7 @@ export default function PipelineBoard() {
   // Handle inline stage change from table view
   const handleStageChange = async (contactId: string, newStageId: string) => {
     try {
-      const { error } = await supabase
-        .from("contacts")
-        .update({ pipeline_stage_id: newStageId })
-        .eq("id", contactId);
-
-      if (error) throw error;
-
-      queryClient.invalidateQueries({ queryKey: ['pipeline-contacts'] });
-      notify.success("Stage updated", "Contact stage has been updated");
+      await moveContactToStage(contactId, newStageId, ["Stage updated", "Contact stage has been updated"]);
     } catch (error: any) {
       notify.error("Error", error.message);
     }
@@ -1566,6 +1608,23 @@ export default function PipelineBoard() {
           confirmText={bulkDeleting ? "Deleting…" : `Delete ${selectedIds.size}`}
           variant="destructive"
         />
+
+        {/* Won: project number */}
+        <Dialog open={!!wonPrompt} onOpenChange={(o) => { if (!o) setWonPrompt(null); }}>
+          <DialogContent className="sm:max-w-[400px]">
+            <DialogHeader>
+              <DialogTitle>Project number</DialogTitle>
+              <DialogDescription>
+                Pick the RMPL project for this won deal.
+              </DialogDescription>
+            </DialogHeader>
+            <RmplProjectPicker value={wonProjectNumber} onChange={setWonProjectNumber} />
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setWonPrompt(null)}>Cancel</Button>
+              <Button onClick={confirmWon} disabled={wonSaving || !wonProjectNumber.trim()}>Move to Won</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* Assign Dialog */}
         <Dialog open={assignDialogOpen} onOpenChange={setAssignDialogOpen}>
