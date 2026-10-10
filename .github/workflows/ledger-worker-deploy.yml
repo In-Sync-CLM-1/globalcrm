@@ -1,0 +1,29 @@
+name: Deploy ledger worker
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'ledger-worker/**'
+      - '.github/workflows/ledger-worker-deploy.yml'
+
+concurrency:
+  group: ledger-worker-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Deploy globalcrm-ledger
+        working-directory: ledger-worker
+        run: npx wrangler@latest deploy
