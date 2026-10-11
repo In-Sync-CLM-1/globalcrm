@@ -1,0 +1,25 @@
+name = "globalcrm-ledger"
+main = "src/index.js"
+compatibility_date = "2026-05-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Seals the activity ledger and checks / copies it. See src/index.js.
+[triggers]
+crons = ["*/5 * * * *", "30 20 * * *"]
+
+[limits]
+cpu_ms = 300000
+
+[[r2_buckets]]
+binding = "LEDGER_BUCKET"
+bucket_name = "globalcrm-ledger"
+
+[vars]
+SUPABASE_URL = "https://ejzjrvazegaxrhqizgaa.supabase.co"
+PROJECT_LABEL = "GlobalCRM"
+OPS_EMAIL = "a@in-sync.co.in"
+ALERT_FROM = "GlobalCRM Ledger <ledger-alerts@in-sync.co.in>"
+
+# Secrets (set once with `wrangler secret put`, kept across deploys):
+#   SUPABASE_SERVICE_ROLE_KEY_REST, RESEND_API_KEY, GOOGLE_DRIVE_CLIENT_ID,
+#   GOOGLE_DRIVE_CLIENT_SECRET, GOOGLE_DRIVE_REFRESH_TOKEN, GOOGLE_DRIVE_ANCHOR_FOLDER_ID
