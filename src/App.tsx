@@ -29,6 +29,7 @@ import PublicForm from "./pages/PublicForm";
 import ProtectedRoute from "./components/Auth/ProtectedRoute";
 import LandingPage from "./pages/LandingPage";
 import Install from "./pages/Install";
+import { LedgerAccessTrail } from "@/lib/LedgerAccessTrail";
 
 // Page loader component
 const PageLoader = () => (
@@ -118,6 +119,7 @@ const App = () => (
         <Toaster />
         <Sonner />
         <BrowserRouter>
+          <LedgerAccessTrail />
           <Suspense fallback={<PageLoader />}>
             <Routes>
           {/* Public routes */}
