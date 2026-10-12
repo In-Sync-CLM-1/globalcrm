@@ -8,6 +8,7 @@ import ChannelPerformanceTable from "./ChannelPerformanceTable";
 import { useOrgContext } from "@/hooks/useOrgContext";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { UrlTabs } from "@/components/UrlTabs";
 
 export default function CampaignAnalyticsTab() {
   const { effectiveOrgId } = useOrgContext();
@@ -57,7 +58,7 @@ export default function CampaignAnalyticsTab() {
         <DateRangeFilter value={dateRange} onChange={setDateRange} />
       </div>
 
-      <Tabs defaultValue="email" className="space-y-4">
+      <UrlTabs param="campaignanalyticstab_tab" defaultValue="email" className="space-y-4">
         <TabsList>
           <TabsTrigger value="email">
             <Mail className="h-4 w-4 mr-2" />
@@ -94,7 +95,7 @@ export default function CampaignAnalyticsTab() {
             channelType="whatsapp"
           />
         </TabsContent>
-      </Tabs>
+      </UrlTabs>
     </div>
   );
 }

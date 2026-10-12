@@ -20,6 +20,7 @@ import { ClientDocuments } from "@/components/Clients/ClientDocuments";
 import { ClientInvoices } from "@/components/Clients/ClientInvoices";
 import { ClientAlternateContacts } from "@/components/Clients/ClientAlternateContacts";
 import { MonthlyTaxSummary } from "@/components/Clients/MonthlyTaxSummary";
+import { UrlTabs } from "@/components/UrlTabs";
 
 type ClientStatus = 'active' | 'inactive' | 'churned';
 
@@ -283,7 +284,7 @@ export default function ClientDetail() {
         )}
 
         {/* Tabs for Documents, Invoices, Discussion */}
-        <Tabs defaultValue="documents" className="space-y-4">
+        <UrlTabs param="tab" defaultValue="documents" className="space-y-4">
           <TabsList>
             <TabsTrigger value="documents" className="flex items-center gap-2">
               <FileText className="h-4 w-4" />
@@ -344,7 +345,7 @@ export default function ClientDetail() {
               </CardContent>
             </Card>
           </TabsContent>
-        </Tabs>
+        </UrlTabs>
       </div>
 
       <ConfirmDialog

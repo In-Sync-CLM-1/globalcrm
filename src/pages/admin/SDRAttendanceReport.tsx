@@ -10,6 +10,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { ChevronLeft, ChevronRight, Download, Users } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useOrgContext } from "@/hooks/useOrgContext";
+import { useUrlState } from "@/hooks/useUrlState";
 
 type Profile = { id: string; first_name: string | null; last_name: string | null; email: string | null; designation_id: string | null };
 type Designation = { id: string; name: string };
@@ -56,8 +57,13 @@ function fmtTimeISO(t: string | null): string {
 
 export default function SDRAttendanceReport() {
   const { effectiveOrgId } = useOrgContext();
-  const [monthStart, setMonthStart] = useState<Date>(startOfMonth(new Date()));
-  const [designationFilter, setDesignationFilter] = useState<string>("SDR");
+  const [monthKey, setMonthKey] = useUrlState("month", format(startOfMonth(new Date()), "yyyy-MM"));
+  const monthStart = useMemo(() => {
+    const [y, m] = monthKey.split("-").map(Number);
+    return y && m ? new Date(y, m - 1, 1) : startOfMonth(new Date());
+  }, [monthKey]);
+  const setMonthStart = (d: Date) => setMonthKey(format(startOfMonth(d), "yyyy-MM"));
+  const [designationFilter, setDesignationFilter] = useUrlState<string>("desig", "SDR");
 
   const monthEnd = endOfMonth(monthStart);
   const monthLabel = format(monthStart, "MMMM yyyy");

@@ -36,6 +36,8 @@ import {
   UNSPECIFIED,
 } from "@/components/FerventDashboard/ferventChartOptions";
 import "@/components/FerventDashboard/ferventEditorial.css";
+import { useUrlObjectState } from "@/hooks/useUrlState";
+import { useUrlState } from "@/hooks/useUrlState";
 
 echarts.registerMap("World", worldGeo as any);
 
@@ -165,8 +167,8 @@ function csvEscape(v: string): string {
 export default function FerventDashboard() {
   const { isLoading: orgLoading } = useIsFervent();
   const theme = useMemo(() => getFerventChartTheme(), []);
-  const [filters, setFilters] = useState<FilterState>(emptyFilters);
-  const [matchMode, setMatchMode] = useState<"exact" | "contains">("exact");
+  const [filters, setFilters] = useUrlObjectState<FilterState>("fd", emptyFilters);
+  const [matchMode, setMatchMode] = useUrlState<"exact" | "contains">("mm", "exact");
   const [drilldown, setDrilldown] = useState<{ label: string; rows: RepoRow[] } | null>(null);
 
   // Full row set powers interactive filtering, drilldown, and CSV export —

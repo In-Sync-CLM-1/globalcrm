@@ -11,13 +11,14 @@ import PipelineInsightsCard from "./PipelineInsightsCard";
 import { Lightbulb, RefreshCw, ChevronDown, ChevronUp } from "lucide-react";
 import { useNotification } from "@/hooks/useNotification";
 import { useState } from "react";
+import { useUrlState } from "@/hooks/useUrlState";
 
 export default function AIInsightsTab() {
   const { effectiveOrgId } = useOrgContext();
   const notify = useNotification();
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [chatExpanded, setChatExpanded] = useState(false);
-  const [filter, setFilter] = useState<'all' | 'pipeline' | 'campaign'>('all');
+  const [filter, setFilter] = useUrlState<'all' | 'pipeline' | 'campaign'>("aifilter", 'all');
 
   // Fetch AI insights
   const { data: aiInsights = [], isLoading, refetch } = useQuery({

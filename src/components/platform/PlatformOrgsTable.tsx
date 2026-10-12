@@ -8,6 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Search, ArrowUpDown, Eye, IndianRupee } from "lucide-react";
 import { RecordOfflinePaymentDialog } from "./RecordOfflinePaymentDialog";
+import { useUrlState } from "@/hooks/useUrlState";
 
 interface Organization {
   id: string;
@@ -41,7 +42,7 @@ const fmtDate = (d?: string | null) => (d ? new Date(d).toLocaleDateString("en-I
 const isPast = (d?: string | null) => !!d && new Date(d) < new Date(new Date().toDateString());
 
 export function PlatformOrgsTable({ organizations }: Props) {
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useUrlState("orgq", "");
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortAsc, setSortAsc] = useState(true);
 

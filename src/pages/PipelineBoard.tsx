@@ -35,6 +35,7 @@ import { BulkCallDialog } from "@/components/Pipeline/BulkCallDialog";
 import { PostCallDispositionDialog } from "@/components/Contact/PostCallDispositionDialog";
 import IedupPipeline from "@/pages/IedupPipeline";
 import { IEDUP_ORG_ID } from "@/hooks/useIsIedup";
+import { useUrlState } from "@/hooks/useUrlState";
 interface PipelineStage {
   id: string;
   name: string;
@@ -143,7 +144,7 @@ export default function PipelineBoard() {
     setFilters(urlFilters);
     // Don't manipulate filteredContacts here - let the auto-apply effect handle it
   }, [urlFilters]);
-  const [activeTab, setActiveTab] = useState("table");
+  const [activeTab, setActiveTab] = useUrlState("view", "table");
   const [callingContactId, setCallingContactId] = useState<string | null>(null);
 
   // Post-call disposition flow (for calls dialed from the pipeline table)

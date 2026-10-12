@@ -15,6 +15,7 @@ import { LoadingState } from "@/components/common/LoadingState";
 import { Loader2, CheckCircle2, AlertCircle, Copy, RefreshCw, Check } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { UrlTabs } from "@/components/UrlTabs";
 
 // WhatsApp Settings Component (Now uses Exotel)
 function WhatsAppSettingsTab() {
@@ -759,7 +760,7 @@ export default function CommunicationSettings() {
           </p>
         </div>
 
-        <Tabs defaultValue="whatsapp" className="space-y-6">
+        <UrlTabs param="tab" defaultValue="whatsapp" className="space-y-6">
           <TabsList className="grid w-full max-w-2xl grid-cols-3">
             <TabsTrigger value="whatsapp">
               <MessageSquare className="h-4 w-4 mr-2" />
@@ -786,7 +787,7 @@ export default function CommunicationSettings() {
           <TabsContent value="exotel" className="space-y-6">
             <ExotelSettingsTab />
           </TabsContent>
-        </Tabs>
+        </UrlTabs>
       </div>
     </DashboardLayout>
   );

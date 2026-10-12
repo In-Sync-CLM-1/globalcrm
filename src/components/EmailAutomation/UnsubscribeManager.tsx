@@ -9,9 +9,10 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { Search, Download, RotateCcw } from "lucide-react";
 import { format } from "date-fns";
+import { useUrlState } from "@/hooks/useUrlState";
 
 export function UnsubscribeManager() {
-  const [searchTerm, setSearchTerm] = useState("");
+  const [searchTerm, setSearchTerm] = useUrlState("uq", "");
   const queryClient = useQueryClient();
 
   const { data: unsubscribes, isLoading } = useQuery({

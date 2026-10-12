@@ -26,6 +26,7 @@ import { AutoDialer } from "@/components/Contact/AutoDialer";
 import { ContactFilters, ContactFiltersState, emptyContactFilters } from "@/components/Contacts/ContactFilters";
 import { useUrlFilterState } from "@/hooks/useUrlFilterState";
 import { CreateContactDialog } from "@/components/Contact/CreateContactDialog";
+import { UrlTabs } from "@/components/UrlTabs";
 
 interface Contact {
   id: string;
@@ -491,7 +492,7 @@ Jane,Smith,jane.smith@example.com,+0987654321,Tech Inc,CEO,contacted,Referral`;
 
   return (
     <DashboardLayout>
-      <Tabs defaultValue="all" className="space-y-4">
+      <UrlTabs param="tab" defaultValue="all" className="space-y-4">
         {/* Mobile-first header with responsive layout */}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex flex-col sm:flex-row sm:items-center gap-3">
@@ -760,7 +761,7 @@ Jane,Smith,jane.smith@example.com,+0987654321,Tech Inc,CEO,contacted,Referral`;
           </>
         )}
       </TabsContent>
-    </Tabs>
+    </UrlTabs>
 
     {effectiveOrgId && (
       <BulkUploadDialog

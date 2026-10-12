@@ -20,11 +20,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useUrlState } from "@/hooks/useUrlState";
 
 export function AdvancedReporting() {
   const { effectiveOrgId } = useOrgContext();
-  const [dateRange, setDateRange] = useState(30);
-  const [selectedRuleId, setSelectedRuleId] = useState<string>("all");
+  const [dateRange, setDateRange] = useUrlState("range", 30);
+  const [selectedRuleId, setSelectedRuleId] = useUrlState<string>("rule", "all");
 
   const { data: rules } = useQuery({
     queryKey: ['email-automation-rules', effectiveOrgId],

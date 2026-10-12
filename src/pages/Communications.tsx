@@ -19,6 +19,7 @@ import { useOrgContext } from "@/hooks/useOrgContext";
 import { useRealtimeSync } from "@/hooks/useRealtimeSync";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { exportToCSV, ExportColumn, formatDateForExport } from "@/utils/exportUtils";
+import { useUrlState } from "@/hooks/useUrlState";
 
 interface ConversationItem {
   id: string;
@@ -67,12 +68,12 @@ export default function Communications() {
   const [filteredConversations, setFilteredConversations] = useState<ConversationItem[]>([]);
   const [activeConversation, setActiveConversation] = useState<ConversationItem | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [channelFilter, setChannelFilter] = useState<string>("all");
-  const [searchQuery, setSearchQuery] = useState("");
+  const [channelFilter, setChannelFilter] = useUrlState<string>("channel", "all");
+  const [searchQuery, setSearchQuery] = useUrlState("q", "");
   const [replyText, setReplyText] = useState("");
   const [sending, setSending] = useState(false);
-  const [mainTab, setMainTab] = useState<string>("conversations");
-  const [emailCampaignSearch, setEmailCampaignSearch] = useState("");
+  const [mainTab, setMainTab] = useUrlState<string>("tab", "conversations");
+  const [emailCampaignSearch, setEmailCampaignSearch] = useUrlState("cq", "");
 
   // Fetch conversations with React Query
   const { data: conversations = [], isLoading: loading, refetch: refetchConversations } = useQuery({

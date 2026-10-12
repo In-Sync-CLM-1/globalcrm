@@ -7,9 +7,10 @@ import { DocumentsTab } from "@/components/ClientHub/DocumentsTab";
 import { InvoicesTab } from "@/components/ClientHub/InvoicesTab";
 import { ExternalEntitiesTab } from "@/components/ClientHub/ExternalEntitiesTab";
 import { TaxesTab } from "@/components/ClientHub/TaxesTab";
+import { useUrlState } from "@/hooks/useUrlState";
 
 export default function ClientHub() {
-  const [activeTab, setActiveTab] = useState("clients");
+  const [activeTab, setActiveTab] = useUrlState("tab", "clients");
 
   return (
     <DashboardLayout>

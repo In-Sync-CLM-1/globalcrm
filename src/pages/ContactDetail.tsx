@@ -26,6 +26,7 @@ import { EmailAutomationJourney } from "@/components/Contact/EmailAutomationJour
 import { LeadScoreCard } from "@/components/Contact/LeadScoreCard";
 import { EnrichedFieldsSection } from "@/components/Contact/EnrichedFieldsSection";
 import { ConvertToClientButton } from "@/components/Clients/ConvertToClientButton";
+import { UrlTabs } from "@/components/UrlTabs";
 
 interface Contact {
   id: string;
@@ -388,7 +389,7 @@ export default function ContactDetail() {
               </div>
             </CardHeader>
             <CardContent>
-              <Tabs defaultValue="journey">
+              <UrlTabs param="tab" defaultValue="journey">
                 <TabsList className="grid w-full grid-cols-3">
                   <TabsTrigger value="journey">Journey</TabsTrigger>
                   <TabsTrigger value="automation">Automation</TabsTrigger>
@@ -415,7 +416,7 @@ export default function ContactDetail() {
                     <p className="text-sm text-muted-foreground">No notes yet</p>
                   )}
                 </TabsContent>
-              </Tabs>
+              </UrlTabs>
             </CardContent>
           </Card>
         </div>

@@ -17,6 +17,7 @@ import {
   AlertTriangle, CheckCircle2, XCircle, Eye, Send, Mail,
 } from "lucide-react";
 import { useIsIedup, IEDUP_ORG_ID } from "@/hooks/useIsIedup";
+import { useUrlDateRange } from "@/hooks/useUrlDateRange";
 
 const REFRESH_MS = 30_000;
 
@@ -39,8 +40,7 @@ const C = { sent: "#3b82f6", delivered: "#10b981", opened: "#8b5cf6", placed: "#
 
 export default function IedupDashboard() {
   const { isLoading: orgLoading } = useIsIedup();
-  const [datePreset, setDatePreset] = useState<DateRangePreset>("this_month");
-  const [dateRange, setDateRange] = useState(() => getDateRangeFromPreset("this_month"));
+  const [datePreset, setDatePreset, dateRange, setDateRange] = useUrlDateRange("this_month");
 
   const fromIso = dateRange.from.toISOString();
   const toIso = dateRange.to.toISOString();

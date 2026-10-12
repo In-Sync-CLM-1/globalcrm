@@ -24,6 +24,8 @@ import {
   Tooltip,
   Legend,
 } from "recharts";
+import { UrlTabs } from "@/components/UrlTabs";
+import { useUrlDateRange } from "@/hooks/useUrlDateRange";
 
 interface Props {
   orgId: string;
@@ -37,8 +39,7 @@ const DISPO_COLORS = [
 export function SDRDashboard({ orgId }: Props) {
   const queryClient = useQueryClient();
   const notify = useNotification();
-  const [datePreset, setDatePreset] = useState<DateRangePreset>("this_month");
-  const [dateRange, setDateRange] = useState(() => getDateRangeFromPreset("this_month"));
+  const [datePreset, setDatePreset, dateRange, setDateRange] = useUrlDateRange("this_month");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
   const [selectedAnalysisLog, setSelectedAnalysisLog] = useState<any | null>(null);
@@ -372,7 +373,7 @@ export function SDRDashboard({ orgId }: Props) {
         })}
       </div>
 
-      <Tabs defaultValue="overview" className="w-full">
+      <UrlTabs param="sdrdashboard_tab" defaultValue="overview" className="w-full">
         <TabsList>
           <TabsTrigger value="overview">My Performance</TabsTrigger>
           <TabsTrigger value="coaching">My Coaching</TabsTrigger>
@@ -771,7 +772,7 @@ export function SDRDashboard({ orgId }: Props) {
             </Card>
           </div>
         </TabsContent>
-      </Tabs>
+      </UrlTabs>
 
       {/* Per-call analysis dialog */}
       <Dialog open={!!selectedAnalysisLog} onOpenChange={(o) => !o && setSelectedAnalysisLog(null)}>

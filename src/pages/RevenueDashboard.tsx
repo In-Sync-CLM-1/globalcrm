@@ -13,13 +13,11 @@ import { RevenueBreakdownTabs } from "@/components/Revenue/RevenueBreakdownTabs"
 import { SetGoalDialog } from "@/components/Revenue/SetGoalDialog";
 import { LoadingState } from "@/components/common/LoadingState";
 import { format, parseISO, isAfter, startOfMonth, endOfMonth } from "date-fns";
+import { useUrlDateRange } from "@/hooks/useUrlDateRange";
 
 export default function RevenueDashboard() {
   const { effectiveOrgId } = useOrgContext();
-  const [preset, setPreset] = useState<DateRangePreset>("this_year");
-  const [dateRange, setDateRange] = useState<{ from: Date; to: Date }>(
-    getDateRangeFromPreset("this_year")
-  );
+  const [preset, setPreset, dateRange, setDateRange] = useUrlDateRange("this_year");
   const [goalDialogOpen, setGoalDialogOpen] = useState(false);
 
   // Fetch invoices

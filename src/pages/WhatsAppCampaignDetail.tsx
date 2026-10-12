@@ -10,6 +10,7 @@ import { useNotification } from "@/hooks/useNotification";
 import { useRealtimeSync } from "@/hooks/useRealtimeSync";
 import { ArrowLeft, RefreshCw, Download, XCircle } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
+import { useUrlState } from "@/hooks/useUrlState";
 
 export default function WhatsAppCampaignDetail() {
   const { id } = useParams();
@@ -19,7 +20,7 @@ export default function WhatsAppCampaignDetail() {
   const [campaign, setCampaign] = useState<any>(null);
   const [recipients, setRecipients] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<string>("all");
+  const [filter, setFilter] = useUrlState<string>("filter", "all");
 
   const fetchCampaignDetails = async () => {
     setLoading(true);
