@@ -15,6 +15,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import CampaignAnalyticsTab from "@/components/Reports/Analytics/CampaignAnalyticsTab";
 import AIInsightsTab from "@/components/Reports/Insights/AIInsightsTab";
 import CallingDashboardTab from "@/components/Reports/CallingDashboard/CallingDashboardTab";
+import { UrlTabs } from "@/components/UrlTabs";
+import { useUrlState } from "@/hooks/useUrlState";
 
 interface SalesReport {
   user_name: string;
@@ -34,8 +36,8 @@ interface PipelineReport {
 
 export default function Reports() {
   const navigate = useNavigate();
-  const [dateRange, setDateRange] = useState<"week" | "month" | "quarter">("month");
-  const [activeTab, setActiveTab] = useState<string>("campaigns");
+  const [dateRange, setDateRange] = useUrlState<"week" | "month" | "quarter">("range", "month");
+  const [activeTab, setActiveTab] = useUrlState<string>("tab", "campaigns");
   const notify = useNotification();
   const { effectiveOrgId } = useOrgContext();
 
@@ -189,7 +191,7 @@ export default function Reports() {
                 <p className="text-muted-foreground">Individual sales metrics and pipeline analysis</p>
               </div>
               
-              <Tabs defaultValue="performance" className="space-y-4">
+              <UrlTabs param="ptab" defaultValue="performance" className="space-y-4">
                 <TabsList>
                   <TabsTrigger value="performance">Team Performance</TabsTrigger>
                   <TabsTrigger value="pipeline">Pipeline Analysis</TabsTrigger>
@@ -386,7 +388,7 @@ export default function Reports() {
               </Card>
             </div>
           </TabsContent>
-        </Tabs>
+        </UrlTabs>
       </div>
     </TabsContent>
   </Tabs>

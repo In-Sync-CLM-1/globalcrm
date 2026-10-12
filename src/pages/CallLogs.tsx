@@ -14,6 +14,7 @@ import { Search, Download, Phone, Clock, User, Calendar } from "lucide-react";
 import { format } from "date-fns";
 import { CallRecordingPlayer } from "@/components/Contact/CallRecordingPlayer";
 import { useOrgContext } from "@/hooks/useOrgContext";
+import { useUrlState } from "@/hooks/useUrlState";
 
 interface CallLog {
   id: string;
@@ -42,9 +43,9 @@ interface CallLog {
 
 export default function CallLogs() {
   const { effectiveOrgId } = useOrgContext();
-  const [searchQuery, setSearchQuery] = useState("");
-  const [callTypeFilter, setCallTypeFilter] = useState("all");
-  const [dateFilter, setDateFilter] = useState("7");
+  const [searchQuery, setSearchQuery] = useUrlState("q", "");
+  const [callTypeFilter, setCallTypeFilter] = useUrlState("type", "all");
+  const [dateFilter, setDateFilter] = useUrlState("days", "7");
   const notify = useNotification();
 
   // Fetch call logs with React Query

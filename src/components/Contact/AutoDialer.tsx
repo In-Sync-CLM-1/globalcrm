@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
+import { useUrlState } from "@/hooks/useUrlState";
 
 interface Contact {
   id: string;
@@ -32,7 +33,7 @@ export const AutoDialer = ({ preSelectedContacts = [] }: AutoDialerProps) => {
   const [isPaused, setIsPaused] = useState(false);
   const [callStatus, setCallStatus] = useState<'idle' | 'calling' | 'connected' | 'completed'>('idle');
   const [activeCallSession, setActiveCallSession] = useState<string | null>(null);
-  const [filterPipeline, setFilterPipeline] = useState<string>("all");
+  const [filterPipeline, setFilterPipeline] = useUrlState<string>("pipeline", "all");
   const [pipelines, setPipelines] = useState<any[]>([]);
 
   useEffect(() => {

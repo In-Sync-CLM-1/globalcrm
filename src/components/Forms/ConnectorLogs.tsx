@@ -9,6 +9,8 @@ import { ChevronLeft, ChevronRight, Eye, AlertCircle, CheckCircle2, RefreshCw } 
 import { format } from "date-fns";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { UrlTabs } from "@/components/UrlTabs";
+import { useUrlState } from "@/hooks/useUrlState";
 
 interface ConnectorLog {
   id: string;
@@ -36,7 +38,7 @@ interface ConnectorLogsProps {
 export function ConnectorLogs({ formId, formName }: ConnectorLogsProps) {
   const [logs, setLogs] = useState<ConnectorLog[]>([]);
   const [loading, setLoading] = useState(true);
-  const [page, setPage] = useState(1);
+  const [page, setPage] = useUrlState("logpage", 1);
   const [totalPages, setTotalPages] = useState(1);
   const [selectedLog, setSelectedLog] = useState<ConnectorLog | null>(null);
   const logsPerPage = 20;
@@ -203,7 +205,7 @@ export function ConnectorLogs({ formId, formName }: ConnectorLogsProps) {
                                   </div>
                                 )}
 
-                                <Tabs defaultValue="request">
+                                <UrlTabs param="connectorlogs_tab" defaultValue="request">
                                   <TabsList className="grid w-full grid-cols-2">
                                     <TabsTrigger value="request">Request Payload</TabsTrigger>
                                     <TabsTrigger value="response">Response</TabsTrigger>
@@ -218,7 +220,7 @@ export function ConnectorLogs({ formId, formName }: ConnectorLogsProps) {
                                       {JSON.stringify(log.response_payload, null, 2)}
                                     </pre>
                                   </TabsContent>
-                                </Tabs>
+                                </UrlTabs>
                               </div>
                             </ScrollArea>
                           </DialogContent>

@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import DashboardLayout from "@/components/Layout/DashboardLayout";
 import { useOrgContext } from "@/hooks/useOrgContext";
 import { useAttendanceRegularization } from "@/hooks/useAttendanceRegularization";
+import { UrlTabs } from "@/components/UrlTabs";
 
 const LEAVE_LABELS: Record<string, string> = {
   sick_leave: "Sick Leave",
@@ -133,7 +134,7 @@ export default function HRApprovals() {
           <p className="text-muted-foreground">Approve or reject team leave and attendance requests</p>
         </div>
 
-        <Tabs defaultValue="leaves" className="space-y-6">
+        <UrlTabs param="tab" defaultValue="leaves" className="space-y-6">
           <TabsList>
             <TabsTrigger value="leaves" className="flex items-center gap-2">
               <CalendarDays className="h-4 w-4" />
@@ -238,7 +239,7 @@ export default function HRApprovals() {
               ))
             )}
           </TabsContent>
-        </Tabs>
+        </UrlTabs>
 
         <Dialog open={!!rejectTarget} onOpenChange={(o) => { if (!o) { setRejectTarget(null); setRejectReason(""); } }}>
           <DialogContent>

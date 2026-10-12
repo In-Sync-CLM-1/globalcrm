@@ -41,6 +41,7 @@ import {
 } from "lucide-react";
 import { IEDUP_ORG_ID } from "@/hooks/useIsIedup";
 import { useNotification } from "@/hooks/useNotification";
+import { useUrlState } from "@/hooks/useUrlState";
 
 interface WindowSlot {
   start_min: number;
@@ -171,10 +172,10 @@ export default function IedupPipeline() {
   });
 
   // Filter + pagination state (declared before the query that reads them).
-  const [filterFrom, setFilterFrom] = useState<string>("");
-  const [filterTo, setFilterTo] = useState<string>("");
-  const [hideCalled, setHideCalled] = useState(false);
-  const [page, setPage] = useState(0);
+  const [filterFrom, setFilterFrom] = useUrlState<string>("from", "");
+  const [filterTo, setFilterTo] = useUrlState<string>("to", "");
+  const [hideCalled, setHideCalled] = useUrlState("hide", false);
+  const [page, setPage] = useUrlState("page", 0);
 
   // Beneficiaries list — server-side paginated (one page at a time + exact total).
   const { data: pageData, refetch: refetchList } = useQuery({

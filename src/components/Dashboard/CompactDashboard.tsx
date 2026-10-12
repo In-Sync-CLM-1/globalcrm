@@ -22,6 +22,9 @@ import { Progress } from "@/components/ui/progress";
 import { format, eachDayOfInterval } from "date-fns";
 import { EChart } from "@/components/charts/EChart";
 import type { EChartsOption } from "echarts";
+import { UrlTabs } from "@/components/UrlTabs";
+import { useUrlDateRange } from "@/hooks/useUrlDateRange";
+import { useUrlState } from "@/hooks/useUrlState";
 
 interface Props {
   orgId: string;
@@ -101,8 +104,7 @@ function stackedAreaOption(
 export function CompactDashboard({ orgId }: Props) {
   const queryClient = useQueryClient();
   const notify = useNotification();
-  const [datePreset, setDatePreset] = useState<DateRangePreset>("this_month");
-  const [dateRange, setDateRange] = useState(() => getDateRangeFromPreset("this_month"));
+  const [datePreset, setDatePreset, dateRange, setDateRange] = useUrlDateRange("this_month");
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const fromISO = dateRange.from.toISOString();
@@ -184,7 +186,7 @@ export function CompactDashboard({ orgId }: Props) {
     },
   });
 
-  const [callSearch, setCallSearch] = useState("");
+  const [callSearch, setCallSearch] = useUrlState("callq", "");
   const [selectedAnalysisLog, setSelectedAnalysisLog] = useState<any | null>(null);
   const filteredCallLogs = useMemo(() => {
     if (!callSearch.trim()) return callLogs;
@@ -495,7 +497,7 @@ export function CompactDashboard({ orgId }: Props) {
         </div>
       </div>
 
-      <Tabs defaultValue="overview" className="w-full">
+      <UrlTabs param="compactdashboard_tab" defaultValue="overview" className="w-full">
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="call-logs">Call Logs</TabsTrigger>
@@ -945,7 +947,7 @@ export function CompactDashboard({ orgId }: Props) {
 
           <RiyaScriptProposal orgId={orgId} />
         </TabsContent>
-      </Tabs>
+      </UrlTabs>
 
       <Dialog open={!!selectedAnalysisLog} onOpenChange={(o) => !o && setSelectedAnalysisLog(null)}>
         <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">

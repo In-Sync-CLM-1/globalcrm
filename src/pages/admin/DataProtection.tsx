@@ -15,6 +15,7 @@ import {
   ShieldCheck, FileText, CheckCircle2, AlertTriangle, KeyRound, Eye,
   Database, ClipboardList, Download, Lock, Trash2, Clock,
 } from "lucide-react";
+import { UrlTabs } from "@/components/UrlTabs";
 
 type DataRequest = {
   id: string; request_type: string; status: string; requester_identifier: string;
@@ -194,7 +195,7 @@ export default function DataProtection() {
           <Stat icon={<AlertTriangle className="h-4 w-4" />} label="Breaches" value={stats.breaches} danger={stats.breaches > 0} />
         </div>
 
-        <Tabs defaultValue="requests">
+        <UrlTabs param="tab" defaultValue="requests">
           <TabsList className="flex-wrap h-auto">
             <TabsTrigger value="requests"><ClipboardList className="h-4 w-4 mr-1" />Data Requests</TabsTrigger>
             <TabsTrigger value="consent"><FileText className="h-4 w-4 mr-1" />Consent</TabsTrigger>
@@ -389,7 +390,7 @@ export default function DataProtection() {
               </CardContent>
             </Card>
           </TabsContent>
-        </Tabs>
+        </UrlTabs>
       </div>
     </DashboardLayout>
   );

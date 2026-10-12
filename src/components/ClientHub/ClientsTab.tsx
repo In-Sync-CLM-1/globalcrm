@@ -12,11 +12,12 @@ import { useOrgContext } from "@/hooks/useOrgContext";
 import { LoadingState } from "@/components/common/LoadingState";
 import { EmptyState } from "@/components/common/EmptyState";
 import { format } from "date-fns";
+import { useUrlState } from "@/hooks/useUrlState";
 
 export function ClientsTab() {
   const navigate = useNavigate();
   const { effectiveOrgId } = useOrgContext();
-  const [searchTerm, setSearchTerm] = useState("");
+  const [searchTerm, setSearchTerm] = useUrlState("cq", "");
 
   const { data: clients, isLoading, refetch } = useQuery({
     queryKey: ["clients", effectiveOrgId],

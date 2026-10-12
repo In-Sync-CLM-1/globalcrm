@@ -9,6 +9,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid } from "recharts";
 import { TrendingUp, DollarSign, AlertTriangle, FileCheck, Clock, CalendarDays, X } from "lucide-react";
 import { startOfMonth, subMonths, startOfQuarter, startOfYear, isAfter, format, differenceInDays } from "date-fns";
 import { cn } from "@/lib/utils";
+import { useUrlState } from "@/hooks/useUrlState";
 
 interface RevenueAnalyticsProps {
   invoices: any[];
@@ -18,7 +19,7 @@ type DurationOption = "3months" | "6months" | "12months" | "thisQuarter" | "this
 type CategoryType = "invoiced" | "received" | "outstanding" | "overdue" | "quotations" | null;
 
 export function RevenueAnalytics({ invoices }: RevenueAnalyticsProps) {
-  const [duration, setDuration] = useState<DurationOption>("6months");
+  const [duration, setDuration] = useUrlState<DurationOption>("rev", "6months");
   const [selectedCategory, setSelectedCategory] = useState<CategoryType>(null);
   
   // Get date range based on selected duration

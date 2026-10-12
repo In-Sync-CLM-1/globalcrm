@@ -16,6 +16,7 @@ import { Download, ChevronDown, ChevronUp, Receipt, AlertTriangle, Clock, CheckC
 import { LoadingState } from "@/components/common/LoadingState";
 import { format, parseISO, isAfter, differenceInDays } from "date-fns";
 import { toast } from "sonner";
+import { UrlTabs } from "@/components/UrlTabs";
 
 interface DashboardGSTSectionProps {
   dateRange: { from: Date; to: Date };
@@ -1118,7 +1119,7 @@ export function DashboardGSTSection({ dateRange }: DashboardGSTSectionProps) {
               GST Details - {monthlyData.find(m => m.month === selectedMonth)?.monthLabel || selectedMonth}
             </DialogTitle>
           </DialogHeader>
-          <Tabs defaultValue="paid" className="w-full">
+          <UrlTabs param="dashboardgstsection_tab" defaultValue="paid" className="w-full">
             <TabsList className="grid w-full grid-cols-2">
               <TabsTrigger value="paid" className="gap-2">
                 <CheckCircle2 className="h-4 w-4" />
@@ -1232,7 +1233,7 @@ export function DashboardGSTSection({ dateRange }: DashboardGSTSectionProps) {
                 </div>
               )}
             </TabsContent>
-          </Tabs>
+          </UrlTabs>
         </DialogContent>
       </Dialog>
 

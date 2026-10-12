@@ -5,6 +5,7 @@ import { UnsubscribeManager } from "@/components/EmailAutomation/UnsubscribeMana
 import { SendLimitsConfig } from "@/components/EmailAutomation/SendLimitsConfig";
 import { SmartSendTimeConfig } from "@/components/EmailAutomation/SmartSendTimeConfig";
 import { Clock, Ban, Settings, UserX, Gauge, Zap } from "lucide-react";
+import { UrlTabs } from "@/components/UrlTabs";
 
 export default function EmailAutomationSettings() {
   return (
@@ -19,7 +20,7 @@ export default function EmailAutomationSettings() {
         </div>
       </div>
 
-      <Tabs defaultValue="business-hours" className="space-y-6">
+      <UrlTabs param="tab" defaultValue="business-hours" className="space-y-6">
         <TabsList>
           <TabsTrigger value="business-hours">
             <Clock className="mr-2 h-4 w-4" />
@@ -62,7 +63,7 @@ export default function EmailAutomationSettings() {
         <TabsContent value="smart-send">
           <SmartSendTimeConfig />
         </TabsContent>
-      </Tabs>
+      </UrlTabs>
     </div>
   );
 }

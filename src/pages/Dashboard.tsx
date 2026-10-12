@@ -25,6 +25,7 @@ import IedupDashboard from "@/pages/IedupDashboard";
 import { IEDUP_ORG_ID } from "@/hooks/useIsIedup";
 import FerventDashboard from "@/pages/FerventDashboard";
 import { FERVENT_ORG_ID } from "@/hooks/useIsFervent";
+import { useUrlDateRange } from "@/hooks/useUrlDateRange";
 
 const INSYNC_DEMO_ORG_ID = "61f7f96d-e80c-4d9b-a765-8eb32bd3c70d";
 
@@ -37,8 +38,7 @@ export default function Dashboard() {
   const hasCheckedReminders = useRef(false);
 
   // Date range filter state - default to This Month
-  const [datePreset, setDatePreset] = useState<DateRangePreset>("this_month");
-  const [dateRange, setDateRange] = useState(() => getDateRangeFromPreset("this_month"));
+  const [datePreset, setDatePreset, dateRange, setDateRange] = useUrlDateRange("this_month");
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Only the standard sales dashboard runs the heavy queries below.

@@ -41,6 +41,8 @@ import {
 } from "@/components/FerventRepository/ferventBooleanSearch";
 import { Upload, Download, Search, X, Phone, MessageSquare, GitBranch, Lock, History, Pencil, ArrowUp, ArrowDown, ArrowUpDown, ChevronDown, ChevronUp } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { useUrlObjectState } from "@/hooks/useUrlState";
+import { useUrlState } from "@/hooks/useUrlState";
 
 export interface RepositoryRecord {
   id: string;
@@ -249,8 +251,8 @@ export default function FerventRepository() {
     }
   }, [isImportRunning, queryClient]);
 
-  const [filters, setFilters] = useState<RepositoryFilters>(emptyFilters);
-  const [appliedFilters, setAppliedFilters] = useState<RepositoryFilters>(emptyFilters);
+  const [filters, setFilters] = useUrlObjectState<RepositoryFilters>("f", emptyFilters);
+  const [appliedFilters, setAppliedFilters] = useUrlObjectState<RepositoryFilters>("af", emptyFilters);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [showUpload, setShowUpload] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState<RepositoryRecord | null>(null);
@@ -261,7 +263,7 @@ export default function FerventRepository() {
   const [showImportHistory, setShowImportHistory] = useState(false);
   const [showBulkEdit, setShowBulkEdit] = useState(false);
   const [editingRecord, setEditingRecord] = useState<RepositoryRecord | null>(null);
-  const [searchMode, setSearchMode] = useState<"basic" | "advanced">("basic");
+  const [searchMode, setSearchMode] = useUrlState<"basic" | "advanced">("mode", "basic");
   const [filtersOpen, setFiltersOpen] = useState(true);
   const [advancedQuery, setAdvancedQuery] = useState<BooleanQuery>(emptyBooleanQuery);
   const [appliedAdvancedQuery, setAppliedAdvancedQuery] = useState<BooleanQuery | null>(null);
