@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Copy, Check, Mail, MessageCircle, Landmark } from "lucide-react";
+import { Building2, Copy, Check, Mail, MessageCircle, Landmark } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import upiQr from "@/assets/upi-qr.png";
@@ -16,6 +16,15 @@ import upiQr from "@/assets/upi-qr.png";
  * (record-offline-payment), which credits the wallet / settles the invoice and
  * lifts any account lock.
  */
+const BANK = {
+  accountName: "PROSYNC AI SOLUTIONS (OPC) PRIVATE LIMITED",
+  accountNumber: "10288101744",
+  accountNumberDisplay: "1028 8101 744",
+  ifsc: "IDFB0022461",
+  bank: "IDFC FIRST Bank",
+  branch: "Gurgaon — Sector 4",
+};
+
 const UPI_ID = "7738919680-4@ybl";
 
 const OPS_WHATSAPP = "917738919680";
@@ -71,20 +80,39 @@ export function ManualPaymentDetails({ amount, purpose = "payment", className }:
       <div className="flex items-start gap-2">
         <Landmark className="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-500" />
         <div>
-          <p className="text-sm font-semibold text-amber-900 dark:text-amber-200">Pay directly via UPI</p>
+          <p className="text-sm font-semibold text-amber-900 dark:text-amber-200">Pay directly via bank transfer or UPI</p>
           <p className="mt-0.5 text-xs text-amber-800/90 dark:text-amber-300/80">
-            If the online payment won't go through, pay {inr(amount)} using the UPI QR or ID below and send us the receipt — we'll activate your account manually.
+            If the online payment won't go through, pay {inr(amount)} to the account below and send us the receipt — we'll activate your account manually.
           </p>
         </div>
       </div>
 
-      <div className="mt-3 flex flex-col items-center rounded-md border bg-background p-3 text-center">
-        <p className="mb-2 text-sm font-medium">Scan to pay by UPI</p>
-        <img src={upiQr} alt="UPI QR code" className="h-44 w-44 rounded-md object-contain" />
-        <div className="mt-2 w-full max-w-xs text-left">
-          <CopyField label="UPI ID" value={UPI_ID} />
+      <div className="mt-3 grid gap-4 sm:grid-cols-2">
+        {/* Bank transfer */}
+        <div className="rounded-md border bg-background p-3">
+          <div className="mb-1 flex items-center gap-1.5 text-sm font-medium">
+            <Building2 className="h-4 w-4 text-muted-foreground" /> Bank transfer (NEFT / IMPS / RTGS)
+          </div>
+          <div className="divide-y">
+            <CopyField label="Account name" value={BANK.accountName} />
+            <CopyField label="Account number" value={BANK.accountNumber} display={BANK.accountNumberDisplay} />
+            <CopyField label="IFSC" value={BANK.ifsc} />
+            <div className="py-1.5">
+              <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Bank &amp; branch</p>
+              <p className="text-sm font-medium">{BANK.bank} · {BANK.branch}</p>
+            </div>
+          </div>
         </div>
-        <p className="mt-1 text-xs text-muted-foreground">Google Pay · PhonePe · Paytm · any UPI app</p>
+
+        {/* UPI */}
+        <div className="flex flex-col items-center justify-center rounded-md border bg-background p-3 text-center">
+          <p className="mb-2 text-sm font-medium">Scan to pay by UPI</p>
+          <img src={upiQr} alt="UPI QR code" className="h-40 w-40 rounded-md object-contain" />
+          <div className="mt-2 w-full text-left">
+            <CopyField label="UPI ID" value={UPI_ID} />
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">Google Pay · PhonePe · Paytm · any UPI app</p>
+        </div>
       </div>
 
       <div className="mt-3 rounded-md border bg-background p-3">
@@ -102,7 +130,7 @@ export function ManualPaymentDetails({ amount, purpose = "payment", className }:
           </Button>
         </div>
         <p className="mt-2 text-[11px] text-muted-foreground">
-          Include your registered email or organisation name. Activation is done manually after we confirm the payment.
+          Include your registered email or organisation name. Activation is done manually after we confirm the transfer.
         </p>
       </div>
     </div>
