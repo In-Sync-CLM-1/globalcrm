@@ -50,7 +50,7 @@ export function callsLineOption(points: DayPoint[], variant: LineVariant = "line
 export interface DateHourRow { label: string; total: number; counts: number[] }
 
 export function dateHourHeatmapOption(rows: DateHourRow[], hours: number[], measure: string): EChartsOption {
-  const display = rows.slice().reverse(); // newest date at the top
+  const display = rows.slice().reverse(); // newest date first; the y axis is inverted so it is drawn at the top
   const max = Math.max(1, ...rows.flatMap((r) => r.counts));
   // white numbers on the dark half of the ramp, dark numbers on the light half
   const data = display.flatMap((r, y) => r.counts.map((v, x) => ({ value: [x, y, v], label: { color: v / max > 0.5 ? "#ffffff" : INK } })));
@@ -68,7 +68,7 @@ export function dateHourHeatmapOption(rows: DateHourRow[], hours: number[], meas
     },
     grid: { left: 4, right: 12, top: 30, bottom: 4, containLabel: true },
     xAxis: { type: "category", position: "top", data: hours.map((h) => `${h}:00`), axisLabel: { fontSize: 11, color: MUTED }, axisLine: { show: false }, axisTick: { show: false } },
-    yAxis: { type: "category", data: display.map((r) => `${r.label}  ·  ${num(r.total)}`), axisLabel: { fontSize: 11, color: INK }, axisLine: { show: false }, axisTick: { show: false } },
+    yAxis: { type: "category", inverse: true, data: display.map((r) => `${r.label}  ·  ${num(r.total)}`), axisLabel: { fontSize: 11, color: INK }, axisLine: { show: false }, axisTick: { show: false } },
     visualMap: { show: false, min: 0, max, inRange: { color: RAMP } },
     series: [{
       type: "heatmap", data,

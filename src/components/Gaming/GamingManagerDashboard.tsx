@@ -3,13 +3,13 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { addDays, eachDayOfInterval, format, getDay, parseISO } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
-import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { LoadingState } from "@/components/common/LoadingState";
 import { useUrlState } from "@/hooks/useUrlState";
 import { CallsByDateHour } from "./CallsByDateHour";
+import { CELL, DayChip, Fig, NUM, Person, ROW, StatusChip, TH, TableCard, type Tone } from "./GamingTable";
 import { CallsOverTime } from "./CallsOverTime";
 import {
   fmtClock, fmtHM, pct, sumStats, useCallers, useDayStats, useDispoCounts, useDispositionCatalog, useHourlyCounts, useLatestCallDay,
@@ -17,12 +17,10 @@ import {
 
 const LATE_AFTER_MINUTES = 10 * 60 + 15; // 10:00 shift start + 15 min grace
 
-// Status colours, used only on small chips that name a state.
-const CATEGORY_STYLE: Record<string, string> = {
-  positive: "bg-emerald-50 text-emerald-800 border-emerald-200",
-  follow_up: "bg-amber-50 text-amber-800 border-amber-200",
-  negative: "bg-rose-50 text-rose-800 border-rose-200",
-  neutral: "bg-slate-50 text-slate-700 border-slate-200",
+// Status colours live only on small chips and the group-row edge; they name a state, never a measure.
+const CATEGORY_TONE: Record<string, Tone> = { positive: "good", follow_up: "warn", negative: "bad", neutral: "neutral" };
+const CATEGORY_BORDER: Record<string, string> = {
+  positive: "border-l-4 border-l-emerald-400", follow_up: "border-l-4 border-l-amber-400", negative: "border-l-4 border-l-rose-400", neutral: "border-l-4 border-l-slate-300",
 };
 const CATEGORY_LABEL: Record<string, string> = { positive: "Positive", follow_up: "Follow-up", negative: "Negative", neutral: "Neutral" };
 
@@ -62,9 +60,7 @@ function attendanceCode(row: AttendanceRow | undefined): AttCode {
   const m = istMinutes(row.sign_in_time);
   return m !== null && m > LATE_AFTER_MINUTES ? "L" : "P";
 }
-const ATT_STYLE: Record<AttCode, string> = {
-  P: "bg-emerald-50 text-emerald-800", L: "bg-amber-50 text-amber-800", H: "bg-orange-50 text-orange-800", A: "bg-rose-50 text-rose-800", "-": "bg-muted text-muted-foreground",
-};
+const ATT_TONE: Record<AttCode, Tone> = { P: "good", L: "warn", H: "info", A: "bad", "-": "neutral" };
 const ATT_LABEL: Record<AttCode, string> = { P: "Present", L: "Late", H: "Half day", A: "Absent", "-": "No record" };
 
 export function GamingManagerDashboard({ orgId }: { orgId: string }) {
@@ -166,133 +162,125 @@ export function GamingManagerDashboard({ orgId }: { orgId: string }) {
 
       <CallsByDateHour rows={hourly.data ?? []} />
 
-        <section className="space-y-3">
-          <h2 className="text-base font-semibold text-foreground">Callers on one day</h2>
-          <div className="flex flex-wrap items-center gap-2">
-            <label htmlFor="gaming-day" className="text-sm text-muted-foreground">Day</label>
-            <Input id="gaming-day" type="date" className="w-44" value={day} max={format(new Date(), "yyyy-MM-dd")} onChange={(e) => e.target.value && setDayParam(e.target.value)} />
-            <span className="text-sm text-muted-foreground">
-              {dayTotals.calls} dialled · {fmtHM(dayTotals.work_secs)} work hours · {fmtHM(dayTotals.idle_secs)} idle hours
-            </span>
-          </div>
-          <Card className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Caller</TableHead><TableHead>Attendance</TableHead><TableHead>Login</TableHead><TableHead>Logout</TableHead>
-                  <TableHead className="text-right">Work hrs</TableHead><TableHead className="text-right">Idle hrs</TableHead>
-                  <TableHead className="text-right">Calls</TableHead><TableHead className="text-right">New dials</TableHead><TableHead className="text-right">Clean calls</TableHead>
-                  <TableHead className="text-right">Registrations</TableHead><TableHead className="text-right">Activations</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {callers.map((c) => {
-                  const r = dayRows.find((x) => x.agent_id === c.id);
-                  const code = attendanceCode(attByKey.get(`${c.id}|${day}`));
-                  return (
-                    <TableRow key={c.id}>
-                      <TableCell className="font-medium">{c.name}</TableCell>
-                      <TableCell><span className={`rounded px-2 py-0.5 text-xs font-medium ${ATT_STYLE[code]}`}>{ATT_LABEL[code]}</span></TableCell>
-                      <TableCell className="tabular-nums">{fmtClock(r?.login_at ?? null)}</TableCell>
-                      <TableCell className="tabular-nums">{fmtClock(r?.logout_at ?? null)}</TableCell>
-                      <TableCell className="text-right tabular-nums">{r ? fmtHM(r.work_secs) : "—"}</TableCell>
-                      <TableCell className="text-right tabular-nums">{r ? fmtHM(r.idle_secs) : "—"}</TableCell>
-                      <TableCell className="text-right tabular-nums">{r?.calls ?? "—"}</TableCell>
-                      <TableCell className="text-right tabular-nums">{r?.new_dials ?? "—"}</TableCell>
-                      <TableCell className="text-right tabular-nums">{r?.clean_calls ?? "—"}</TableCell>
-                      <TableCell className="text-right tabular-nums">{r?.registrations ?? "—"}</TableCell>
-                      <TableCell className="text-right tabular-nums">{r?.activations ?? "—"}</TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </Card>
-          <p className="text-sm text-muted-foreground">
-            A clean call lasts a minute or more: {pct(dayTotals.clean_calls, dayTotals.calls)}% of calls were clean, {pct(dayTotals.registrations, dayTotals.clean_calls)}% of those became registrations and {pct(dayTotals.activations, dayTotals.registrations)}% of registrations activated.
-          </p>
-        </section>
+        <TableCard
+          title="Callers on one day"
+          subtitle={`${dayTotals.calls.toLocaleString("en-IN")} dialled · ${fmtHM(dayTotals.work_secs)} work hours · ${fmtHM(dayTotals.idle_secs)} idle hours. A clean call lasts a minute or more.`}
+          action={
+            <div className="flex items-center gap-2">
+              <label htmlFor="gaming-day" className="text-sm text-muted-foreground">Day</label>
+              <Input id="gaming-day" type="date" className="h-9 w-40" value={day} max={format(new Date(), "yyyy-MM-dd")} onChange={(e) => e.target.value && setDayParam(e.target.value)} />
+            </div>
+          }
+        >
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TH>Caller</TH><TH>Attendance</TH><TH>Login</TH><TH>Logout</TH>
+                <TH right>Work hrs</TH><TH right>Idle hrs</TH><TH right>Calls</TH><TH right>New dials</TH><TH right>Clean calls</TH><TH right>Registrations</TH><TH right>Activations</TH>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {callers.map((c) => {
+                const r = dayRows.find((x) => x.agent_id === c.id);
+                const code = attendanceCode(attByKey.get(`${c.id}|${day}`));
+                return (
+                  <TableRow key={c.id} className={ROW}>
+                    <TableCell className={CELL}><Person name={c.name} /></TableCell>
+                    <TableCell className={CELL}><StatusChip tone={ATT_TONE[code]}>{ATT_LABEL[code]}</StatusChip></TableCell>
+                    <TableCell className={`${CELL} tabular-nums`}>{fmtClock(r?.login_at ?? null)}</TableCell>
+                    <TableCell className={`${CELL} tabular-nums`}>{fmtClock(r?.logout_at ?? null)}</TableCell>
+                    <TableCell className={NUM}>{r ? fmtHM(r.work_secs) : <Fig v={0} />}</TableCell>
+                    <TableCell className={NUM}>{r ? fmtHM(r.idle_secs) : <Fig v={0} />}</TableCell>
+                    <TableCell className={NUM}><Fig v={r?.calls} /></TableCell>
+                    <TableCell className={NUM}><Fig v={r?.new_dials} /></TableCell>
+                    <TableCell className={NUM}><Fig v={r?.clean_calls} /></TableCell>
+                    <TableCell className={NUM}><Fig v={r?.registrations} bold /></TableCell>
+                    <TableCell className={NUM}><Fig v={r?.activations} bold /></TableCell>
+                  </TableRow>
+                );
+              })}
+              <TableRow className="border-t-2 bg-muted/50 font-semibold hover:bg-muted/50">
+                <TableCell className={CELL}>Team</TableCell><TableCell /><TableCell /><TableCell />
+                <TableCell className={NUM}>{fmtHM(dayTotals.work_secs)}</TableCell><TableCell className={NUM}>{fmtHM(dayTotals.idle_secs)}</TableCell>
+                <TableCell className={NUM}>{dayTotals.calls.toLocaleString("en-IN")}</TableCell><TableCell className={NUM}>{dayTotals.new_dials.toLocaleString("en-IN")}</TableCell>
+                <TableCell className={NUM}>{dayTotals.clean_calls.toLocaleString("en-IN")}</TableCell><TableCell className={NUM}>{dayTotals.registrations.toLocaleString("en-IN")}</TableCell>
+                <TableCell className={NUM}>{dayTotals.activations.toLocaleString("en-IN")}</TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </TableCard>
 
-        <section className="space-y-3">
-          <h2 className="text-base font-semibold text-foreground">Dispositions and sub-dispositions</h2>
-          <p className="text-sm text-muted-foreground">
-            Every call ends with one disposition and one sub-disposition chosen by the caller. Registered and Activated drive the funnel.{" "}
-            <Link to="/admin/call-dispositions" className="text-primary underline">Edit the list</Link>
-          </p>
-          <Card className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Disposition / sub-disposition</TableHead><TableHead className="text-right">Calls</TableHead><TableHead className="text-right">% of calls</TableHead>
-                  {callers.map((c) => <TableHead key={c.id} className="text-right">{c.name.split(" ")[0]}</TableHead>)}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {dispositions.flatMap((d) => {
-                  const cat = d.category ?? "neutral";
-                  return [
-                    <TableRow key={d.id} className="bg-muted/50">
-                      <TableCell>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="font-semibold text-foreground">{d.name}</span>
-                          <Badge variant="outline" className={CATEGORY_STYLE[cat]}>{CATEGORY_LABEL[cat] ?? cat}</Badge>
-                        </div>
-                        {d.description && <p className="text-xs text-muted-foreground">{d.description}</p>}
-                      </TableCell>
-                      <TableCell className="text-right font-semibold tabular-nums">{byDispo.get(d.id) ?? 0}</TableCell>
-                      <TableCell className="text-right font-semibold tabular-nums">{pct(byDispo.get(d.id) ?? 0, totalCalls)}%</TableCell>
-                      {callers.map((c) => <TableCell key={c.id} className="text-right font-semibold tabular-nums">{byCaller.get(`${d.id}|${c.id}`) ?? 0}</TableCell>)}
-                    </TableRow>,
-                    ...subs.filter((s) => s.disposition_id === d.id).map((s) => (
-                      <TableRow key={s.id}>
-                        <TableCell className="pl-8 text-muted-foreground">{s.name}</TableCell>
-                        <TableCell className="text-right tabular-nums">{bySub.get(s.id) ?? 0}</TableCell>
-                        <TableCell className="text-right tabular-nums">{pct(bySub.get(s.id) ?? 0, totalCalls)}%</TableCell>
-                        {callers.map((c) => <TableCell key={c.id} className="text-right tabular-nums">{byCaller.get(`s|${s.id}|${c.id}`) ?? 0}</TableCell>)}
-                      </TableRow>
-                    )),
-                  ];
-                })}
-              </TableBody>
-            </Table>
-          </Card>
-        </section>
-
-        <section className="space-y-3">
-          <h2 className="text-base font-semibold text-foreground">Attendance</h2>
-          <p className="text-sm text-muted-foreground">
-            Shift starts 10:00 with a 15 minute grace. Late = login after 10:15. Half day = under 8 hours logged in. Sundays and the 2nd and 4th Saturdays are off.{" "}
-            <Link to="/admin/attendance-report" className="text-primary underline">Full attendance report</Link>
-          </p>
-          <Card className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Caller</TableHead><TableHead className="text-right">Present</TableHead><TableHead className="text-right">Late</TableHead>
-                  <TableHead className="text-right">Half day</TableHead><TableHead className="text-right">Absent</TableHead>
-                  {rangeDays.map((d) => <TableHead key={d.toISOString()} className="px-1 text-center text-[11px]">{format(d, "d")}</TableHead>)}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {callers.map((c, i) => {
-                  const codes = attCodes[i] ?? [];
-                  const n = (k: AttCode) => codes.filter((x) => x === k).length;
-                  return (
-                    <TableRow key={c.id}>
-                      <TableCell className="font-medium">{c.name}</TableCell>
-                      <TableCell className="text-right tabular-nums">{n("P") + n("L")}</TableCell>
-                      <TableCell className="text-right tabular-nums">{n("L")}</TableCell>
-                      <TableCell className="text-right tabular-nums">{n("H")}</TableCell>
-                      <TableCell className="text-right tabular-nums">{n("A")}</TableCell>
-                      {codes.map((k, j) => <TableCell key={j} className="px-1 text-center"><span title={ATT_LABEL[k]} className={`inline-block w-6 rounded py-0.5 text-[11px] font-semibold ${ATT_STYLE[k]}`}>{k === "-" ? "" : k}</span></TableCell>)}
+        <TableCard
+          title="Dispositions and sub-dispositions"
+          subtitle={<>Every call ends with one disposition and one sub-disposition chosen by the caller. Registered and Activated drive the funnel. <Link to="/admin/call-dispositions" className="text-primary underline">Edit the list</Link></>}
+        >
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TH>Disposition / sub-disposition</TH><TH right>Calls</TH><TH right>Share</TH>
+                {callers.map((c) => <TH key={c.id} right>{c.name.split(" ")[0]}</TH>)}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {dispositions.flatMap((d) => {
+                const cat = d.category ?? "neutral";
+                return [
+                  <TableRow key={d.id} className={`bg-muted/40 hover:bg-muted/60 ${CATEGORY_BORDER[cat] ?? CATEGORY_BORDER.neutral}`}>
+                    <TableCell className="py-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-semibold text-foreground">{d.name}</span>
+                        <StatusChip tone={CATEGORY_TONE[cat] ?? "neutral"}>{CATEGORY_LABEL[cat] ?? cat}</StatusChip>
+                      </div>
+                      {d.description && <p className="mt-0.5 text-xs text-muted-foreground">{d.description}</p>}
+                    </TableCell>
+                    <TableCell className={`${NUM} font-semibold`}><Fig v={byDispo.get(d.id) ?? 0} bold /></TableCell>
+                    <TableCell className={`${NUM} font-semibold`}>{pct(byDispo.get(d.id) ?? 0, totalCalls)}%</TableCell>
+                    {callers.map((c) => <TableCell key={c.id} className={`${NUM} font-semibold`}><Fig v={byCaller.get(`${d.id}|${c.id}`) ?? 0} bold /></TableCell>)}
+                  </TableRow>,
+                  ...subs.filter((s) => s.disposition_id === d.id).map((s) => (
+                    <TableRow key={s.id} className="hover:bg-muted/40">
+                      <TableCell className="py-2 pl-9 text-muted-foreground"><span className="mr-2 inline-block h-1 w-1 rounded-full bg-muted-foreground/60 align-middle" />{s.name}</TableCell>
+                      <TableCell className={`${NUM} py-2`}><Fig v={bySub.get(s.id) ?? 0} /></TableCell>
+                      <TableCell className={`${NUM} py-2 text-muted-foreground`}>{pct(bySub.get(s.id) ?? 0, totalCalls)}%</TableCell>
+                      {callers.map((c) => <TableCell key={c.id} className={`${NUM} py-2`}><Fig v={byCaller.get(`s|${s.id}|${c.id}`) ?? 0} /></TableCell>)}
                     </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </Card>
-          <p className="text-xs text-muted-foreground">P present · L late · H half day · A absent</p>
-        </section>
+                  )),
+                ];
+              })}
+            </TableBody>
+          </Table>
+        </TableCard>
+
+        <TableCard
+          title="Attendance"
+          subtitle={<>Shift starts 10:00 with a 15 minute grace. Late = login after 10:15. Half day = under 8 hours logged in. Sundays and the 2nd and 4th Saturdays are off. <Link to="/admin/attendance-report" className="text-primary underline">Full attendance report</Link></>}
+          action={<div className="flex items-center gap-1.5 text-xs text-muted-foreground">{(["P", "L", "H", "A"] as AttCode[]).map((k) => <span key={k} className="inline-flex items-center gap-1"><DayChip code={k} label={ATT_LABEL[k]} />{ATT_LABEL[k]}</span>)}</div>}
+        >
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TH>Caller</TH><TH right>Present</TH><TH right>Late</TH><TH right>Half day</TH><TH right>Absent</TH>
+                {rangeDays.map((d) => <TH key={d.toISOString()} className="px-1 text-center">{format(d, "d")}</TH>)}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {callers.map((c, i) => {
+                const codes = attCodes[i] ?? [];
+                const n = (k: AttCode) => codes.filter((x) => x === k).length;
+                return (
+                  <TableRow key={c.id} className={ROW}>
+                    <TableCell className={CELL}><Person name={c.name} /></TableCell>
+                    <TableCell className={NUM}><Fig v={n("P") + n("L")} bold /></TableCell>
+                    <TableCell className={NUM}><Fig v={n("L")} /></TableCell>
+                    <TableCell className={NUM}><Fig v={n("H")} /></TableCell>
+                    <TableCell className={NUM}><Fig v={n("A")} /></TableCell>
+                    {codes.map((k, j) => <TableCell key={j} className="px-1 py-2 text-center"><DayChip code={k} label={ATT_LABEL[k]} /></TableCell>)}
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </TableCard>
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useGamingAccess } from "@/hooks/useGamingAccess";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -92,6 +93,7 @@ export function PipelineFilters({
   totalCount,
 }: PipelineFiltersProps) {
   const [isOpen, setIsOpen] = useState(true);
+  const gaming = useGamingAccess(); // Gaming CRM Demo hides the outreach and product filters
 
   const handleChange = (field: keyof PipelineFiltersState, value: string) => {
     onFiltersChange({ ...filters, [field]: value });
@@ -132,7 +134,7 @@ export function PipelineFilters({
         <div className="p-3 pt-0 space-y-3">
           <div className="flex items-center justify-between">
             <span className="text-xs text-muted-foreground">
-              Match mode for Name / Company / Targeted Product
+              {gaming.isGaming ? "Match mode for Name / Company" : "Match mode for Name / Company / Targeted Product"}
             </span>
             <ToggleGroup
               type="single"
@@ -175,45 +177,51 @@ export function PipelineFilters({
                 ))}
               </SelectContent>
             </Select>
-            <Input
-              placeholder="Targeted Product"
-              value={filters.product}
-              onChange={(e) => handleChange("product", e.target.value)}
-              onKeyDown={handleKeyDown}
-              className="h-8 text-xs"
-            />
-            <Select
-              value={filters.emailOutreachStatus}
-              onValueChange={(v) => handleChange("emailOutreachStatus", v === "all" ? "" : v)}
-            >
-              <SelectTrigger className="h-8 text-xs">
-                <SelectValue placeholder="Email Outreach State" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Email States</SelectItem>
-                {EMAIL_OUTREACH_OPTIONS.map((o) => (
-                  <SelectItem key={o.value} value={o.value}>
-                    {o.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select
-              value={filters.whatsappOutreachStatus}
-              onValueChange={(v) => handleChange("whatsappOutreachStatus", v === "all" ? "" : v)}
-            >
-              <SelectTrigger className="h-8 text-xs">
-                <SelectValue placeholder="WhatsApp Outreach State" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All WhatsApp States</SelectItem>
-                {WHATSAPP_OUTREACH_OPTIONS.map((o) => (
-                  <SelectItem key={o.value} value={o.value}>
-                    {o.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+{!gaming.isGaming && (
+              <Input
+                placeholder="Targeted Product"
+                value={filters.product}
+                onChange={(e) => handleChange("product", e.target.value)}
+                onKeyDown={handleKeyDown}
+                className="h-8 text-xs"
+              />
+            )}
+{!gaming.isGaming && (
+              <Select
+                value={filters.emailOutreachStatus}
+                onValueChange={(v) => handleChange("emailOutreachStatus", v === "all" ? "" : v)}
+              >
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue placeholder="Email Outreach State" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Email States</SelectItem>
+                  {EMAIL_OUTREACH_OPTIONS.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+{!gaming.isGaming && (
+              <Select
+                value={filters.whatsappOutreachStatus}
+                onValueChange={(v) => handleChange("whatsappOutreachStatus", v === "all" ? "" : v)}
+              >
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue placeholder="WhatsApp Outreach State" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All WhatsApp States</SelectItem>
+                  {WHATSAPP_OUTREACH_OPTIONS.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
             <Select
               value={filters.assignedTo}
               onValueChange={(v) => handleChange("assignedTo", v === "all" ? "" : v)}

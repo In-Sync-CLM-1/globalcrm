@@ -13,13 +13,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table";
 import { TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useNotification } from "@/hooks/useNotification";
 import { useOrgContext } from "@/hooks/useOrgContext";
 import { CallsByDateHour } from "@/components/Gaming/CallsByDateHour";
 import { CallsOverTime, type DayCounts } from "@/components/Gaming/CallsOverTime";
+import { CELL, Fig, NUM, Person, ROW, StatusChip, TH, TableCard, type Tone } from "@/components/Gaming/GamingTable";
 import type { HourlyRow } from "@/components/Gaming/gamingStats";
 
 interface AiConfig {
@@ -37,6 +38,8 @@ interface Script {
 const hm = (min: number) => `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
 const toMin = (v: string) => { const [h, m] = v.split(":").map(Number); return (h || 0) * 60 + (m || 0); };
 
+const QUEUE_TONE: Record<string, Tone> = { pending: "neutral", calling: "info", done: "good", skipped: "warn", failed: "bad", cancelled: "neutral" };
+const OUTCOME_TONE: Record<string, Tone> = { Interested: "good", "Callback Requested": "warn", "Not Interested": "bad", "Do Not Call": "bad" };
 const STATUS_STYLE: Record<string, string> = {
   pending: "bg-slate-100 text-slate-700", calling: "bg-blue-100 text-blue-800", done: "bg-emerald-100 text-emerald-800",
   skipped: "bg-amber-100 text-amber-800", failed: "bg-rose-100 text-rose-800", cancelled: "bg-slate-100 text-slate-500",
@@ -213,39 +216,42 @@ export default function AiCalling() {
             </div>
             <CallsOverTime rows={dayRows} note="AI calls, last 30 days." />
             <CallsByDateHour rows={hourlyRows} measures={["calls", "connected_calls", "clean_calls"]} note="AI calls, last 30 days." />
-            <Card className="overflow-x-auto">
-              <h2 className="p-4 pb-0 text-sm font-semibold">How AI calls ended (last 30 days)</h2>
+            <TableCard title="How AI calls ended" subtitle="Last 30 days, by disposition">
               <Table>
-                <TableHeader><TableRow><TableHead>Outcome</TableHead><TableHead className="text-right">Calls</TableHead><TableHead className="text-right">Share</TableHead></TableRow></TableHeader>
+                <TableHeader><TableRow className="hover:bg-transparent"><TH>Outcome</TH><TH right>Calls</TH><TH right>Share</TH></TableRow></TableHeader>
                 <TableBody>
                   {outcomes.map(([name, n]) => (
-                    <TableRow key={name}><TableCell>{name}</TableCell><TableCell className="text-right tabular-nums">{n}</TableCell><TableCell className="text-right tabular-nums">{stats.total ? Math.round((100 * n) / stats.total) : 0}%</TableCell></TableRow>
+                    <TableRow key={name} className={ROW}>
+                      <TableCell className={CELL}><StatusChip tone={OUTCOME_TONE[name] ?? "neutral"}>{name}</StatusChip></TableCell>
+                      <TableCell className={NUM}><Fig v={n} bold /></TableCell>
+                      <TableCell className={`${NUM} text-muted-foreground`}>{stats.total ? Math.round((100 * n) / stats.total) : 0}%</TableCell>
+                    </TableRow>
                   ))}
                 </TableBody>
               </Table>
-            </Card>
-            <Card className="overflow-x-auto">
-              <h2 className="p-4 pb-0 text-sm font-semibold">Recent AI calls</h2>
+            </TableCard>
+            <TableCard title="Recent AI calls" subtitle="The 12 most recent">
               <Table>
-                <TableHeader><TableRow><TableHead>When</TableHead><TableHead>Lead</TableHead><TableHead>Outcome</TableHead><TableHead>Detail</TableHead><TableHead className="text-right">Talk time</TableHead><TableHead>Summary</TableHead></TableRow></TableHeader>
+                <TableHeader><TableRow className="hover:bg-transparent"><TH>When</TH><TH>Lead</TH><TH>Outcome</TH><TH>Detail</TH><TH right>Talk time</TH><TH>Summary</TH></TableRow></TableHeader>
                 <TableBody>
                   {calls.slice(0, 12).map((c) => {
                     const ct = c.contacts as { first_name: string; last_name: string | null } | null;
+                    const outcome = (c.call_dispositions as { name: string } | null)?.name;
                     return (
-                      <TableRow key={c.id}>
-                        <TableCell className="whitespace-nowrap text-xs">{format(new Date(c.started_at as string), "d MMM, HH:mm")}</TableCell>
-                        <TableCell className="font-medium">{ct ? `${ct.first_name} ${ct.last_name ?? ""}` : "—"}</TableCell>
-                        <TableCell>{(c.call_dispositions as { name: string } | null)?.name ?? "—"}</TableCell>
-                        <TableCell className="text-muted-foreground">{(c.call_sub_dispositions as { name: string } | null)?.name ?? ""}</TableCell>
-                        <TableCell className="text-right tabular-nums">{c.conversation_duration ? `${Math.floor(c.conversation_duration / 60)}m ${String(c.conversation_duration % 60).padStart(2, "0")}s` : "—"}</TableCell>
-                        <TableCell className="max-w-xs truncate text-xs text-muted-foreground">{c.analysis_summary ?? ""}</TableCell>
+                      <TableRow key={c.id} className={ROW}>
+                        <TableCell className={`${CELL} whitespace-nowrap text-xs text-muted-foreground`}>{format(new Date(c.started_at as string), "d MMM, HH:mm")}</TableCell>
+                        <TableCell className={CELL}>{ct ? <Person name={`${ct.first_name} ${ct.last_name ?? ""}`.trim()} /> : "—"}</TableCell>
+                        <TableCell className={CELL}>{outcome ? <StatusChip tone={OUTCOME_TONE[outcome] ?? "neutral"}>{outcome}</StatusChip> : "—"}</TableCell>
+                        <TableCell className={`${CELL} text-muted-foreground`}>{(c.call_sub_dispositions as { name: string } | null)?.name ?? ""}</TableCell>
+                        <TableCell className={NUM}>{c.conversation_duration ? `${Math.floor(c.conversation_duration / 60)}m ${String(c.conversation_duration % 60).padStart(2, "0")}s` : <Fig v={0} />}</TableCell>
+                        <TableCell className={`${CELL} max-w-xs truncate text-xs text-muted-foreground`}>{c.analysis_summary ?? ""}</TableCell>
                       </TableRow>
                     );
                   })}
-                  {calls.length === 0 && <TableRow><TableCell colSpan={6} className="text-center text-sm text-muted-foreground">No AI calls yet.</TableCell></TableRow>}
+                  {calls.length === 0 && <TableRow><TableCell colSpan={6} className="py-8 text-center text-sm text-muted-foreground">No AI calls yet.</TableCell></TableRow>}
                 </TableBody>
               </Table>
-            </Card>
+            </TableCard>
           </TabsContent>
 
           <TabsContent value="launch" className="space-y-4">
@@ -286,33 +292,35 @@ export default function AiCalling() {
                 </Button>
               </Card>
             </div>
-            <Card className="overflow-x-auto">
-              <div className="flex flex-wrap items-center justify-between gap-2 p-4 pb-0">
-                <h2 className="text-sm font-semibold">Queue</h2>
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  {Object.entries(queueCounts.data ?? {}).map(([k, v]) => <span key={k} className={`rounded px-2 py-0.5 ${STATUS_STYLE[k]}`}>{k} {v}</span>)}
+            <TableCard
+              title="Queue"
+              subtitle="Leads waiting for, or already given, an AI call"
+              action={
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  {Object.entries(queueCounts.data ?? {}).map(([k, v]) => <StatusChip key={k} tone={QUEUE_TONE[k] ?? "neutral"}>{k} {v}</StatusChip>)}
                   <Button size="sm" variant="outline" disabled={!(queueCounts.data?.pending)} onClick={() => call.mutate({ action: "cancel" })}>Cancel pending</Button>
                 </div>
-              </div>
+              }
+            >
               <Table>
-                <TableHeader><TableRow><TableHead>Lead</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Attempts</TableHead><TableHead>Next try</TableHead><TableHead>Note</TableHead></TableRow></TableHeader>
+                <TableHeader><TableRow className="hover:bg-transparent"><TH>Lead</TH><TH>Status</TH><TH right>Attempts</TH><TH>Next try</TH><TH>Note</TH></TableRow></TableHeader>
                 <TableBody>
                   {(queueQ.data ?? []).map((q) => {
                     const ct = q.contacts as unknown as { first_name: string; last_name: string | null } | null;
                     return (
-                      <TableRow key={q.id}>
-                        <TableCell className="font-medium">{ct ? `${ct.first_name} ${ct.last_name ?? ""}` : "—"}</TableCell>
-                        <TableCell><span className={`rounded px-2 py-0.5 text-xs ${STATUS_STYLE[q.status]}`}>{q.status}</span></TableCell>
-                        <TableCell className="text-right tabular-nums">{q.attempts}</TableCell>
-                        <TableCell className="whitespace-nowrap text-xs">{q.status === "pending" ? format(new Date(q.next_attempt_at), "d MMM, HH:mm") : ""}</TableCell>
-                        <TableCell className="text-xs text-muted-foreground">{q.last_error ?? ""}</TableCell>
+                      <TableRow key={q.id} className={ROW}>
+                        <TableCell className={CELL}>{ct ? <Person name={`${ct.first_name} ${ct.last_name ?? ""}`.trim()} /> : "—"}</TableCell>
+                        <TableCell className={CELL}><StatusChip tone={QUEUE_TONE[q.status] ?? "neutral"}>{q.status}</StatusChip></TableCell>
+                        <TableCell className={NUM}><Fig v={q.attempts} /></TableCell>
+                        <TableCell className={`${CELL} whitespace-nowrap text-xs text-muted-foreground`}>{q.status === "pending" ? format(new Date(q.next_attempt_at), "d MMM, HH:mm") : ""}</TableCell>
+                        <TableCell className={`${CELL} text-xs text-muted-foreground`}>{q.last_error ?? ""}</TableCell>
                       </TableRow>
                     );
                   })}
-                  {(queueQ.data ?? []).length === 0 && <TableRow><TableCell colSpan={5} className="text-center text-sm text-muted-foreground">The queue is empty.</TableCell></TableRow>}
+                  {(queueQ.data ?? []).length === 0 && <TableRow><TableCell colSpan={5} className="py-8 text-center text-sm text-muted-foreground">The queue is empty.</TableCell></TableRow>}
                 </TableBody>
               </Table>
-            </Card>
+            </TableCard>
           </TabsContent>
 
           <TabsContent value="scripts" className="space-y-4">
