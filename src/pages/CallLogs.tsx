@@ -16,6 +16,7 @@ import { CallRecordingPlayer } from "@/components/Contact/CallRecordingPlayer";
 import { useOrgContext } from "@/hooks/useOrgContext";
 import { useUrlState } from "@/hooks/useUrlState";
 import { useGamingAccess } from "@/hooks/useGamingAccess";
+import GamingCallLogs from "@/components/Gaming/GamingCallLogs";
 
 interface CallLog {
   id: string;
@@ -42,7 +43,7 @@ interface CallLog {
   };
 }
 
-export default function CallLogs() {
+function LegacyCallLogs() {
   const gaming = useGamingAccess();
   const { effectiveOrgId } = useOrgContext();
   const [searchQuery, setSearchQuery] = useUrlState("q", "");
@@ -282,4 +283,10 @@ export default function CallLogs() {
       </div>
     </DashboardLayout>
   );
+}
+
+/** The Gaming CRM Demo org gets its own Call Logs screen (recordings, transcripts and AI review). */
+export default function CallLogs() {
+  const { isGaming } = useGamingAccess();
+  return isGaming ? <GamingCallLogs /> : <LegacyCallLogs />;
 }
