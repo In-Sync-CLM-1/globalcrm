@@ -58,6 +58,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useTotalUnreadCount } from "@/hooks/useConversations";
 import { IEDUP_ORG_ID } from "@/hooks/useIsIedup";
 import { FERVENT_ORG_ID } from "@/hooks/useIsFervent";
+import { GAMING_ORG_ID } from "@/components/Gaming/gamingStats";
 
 interface DashboardLayoutProps {
   children: ReactNode;
@@ -132,6 +133,7 @@ function DashboardLayout({ children }: DashboardLayoutProps) {
   const onboardingCompleted = userData?.profile?.onboarding_completed || false;
   const isIedup = userData?.profile?.org_id === IEDUP_ORG_ID;
   const isFervent = userData?.profile?.org_id === FERVENT_ORG_ID;
+  const isGaming = userData?.profile?.org_id === GAMING_ORG_ID;
 
   // Check if user needs onboarding
   useEffect(() => {
@@ -381,6 +383,17 @@ function DashboardLayout({ children }: DashboardLayoutProps) {
                 >
                   <GitBranch size={16} className="shrink-0 text-sidebar-muted" />
                   <span>Pipeline</span>
+                </Link>
+              )}
+
+              {isGaming && (
+                <Link
+                  to="/call-logs"
+                  className="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-primary transition-colors"
+                  onClick={() => setSidebarOpen(false)}
+                >
+                  <PhoneCall size={16} className="shrink-0 text-sidebar-muted" />
+                  <span>Call Logs</span>
                 </Link>
               )}
 
