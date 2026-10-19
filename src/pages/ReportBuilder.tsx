@@ -13,8 +13,10 @@ import { DataSourceType, getDataSource } from "@/config/reportDataSources";
 import { ReportParameters } from "@/utils/reportQueryBuilder";
 import { useOrgContext } from "@/hooks/useOrgContext";
 import { useNotification } from "@/hooks/useNotification";
+import { useGamingAccess } from "@/hooks/useGamingAccess";
 
 export default function ReportBuilder() {
+  const gaming = useGamingAccess();
   const { effectiveOrgId } = useOrgContext();
   const notify = useNotification();
   const navigate = useNavigate();
@@ -46,10 +48,12 @@ export default function ReportBuilder() {
               <Settings className="h-4 w-4 mr-2" />
               Manage Reports
             </Button>
-            <Button variant="outline" onClick={handleExportCSV}>
-              <Download className="h-4 w-4 mr-2" />
-              Export CSV
-            </Button>
+            {gaming.canExport && (
+              <Button variant="outline" onClick={handleExportCSV}>
+                <Download className="h-4 w-4 mr-2" />
+                Export CSV
+              </Button>
+            )}
             <Button onClick={() => setShowSaveDialog(true)} disabled={!selectedDataSource || components.length === 0}>
               <Save className="h-4 w-4 mr-2" />
               Save Report

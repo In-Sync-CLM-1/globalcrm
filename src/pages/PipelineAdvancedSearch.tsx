@@ -12,6 +12,7 @@ import SearchResultsTable from "@/components/Pipeline/SearchResultsTable";
 import { Plus, Search, X } from "lucide-react";
 import { usePagination } from "@/hooks/usePagination";
 import { exportToCSV, ExportColumn, formatDateForExport } from "@/utils/exportUtils";
+import { useGamingAccess } from "@/hooks/useGamingAccess";
 
 export interface SearchableField {
   id: string;
@@ -42,6 +43,7 @@ const PipelineAdvancedSearch = () => {
   const [isSearching, setIsSearching] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const gaming = useGamingAccess();
   const isInitialMount = useRef(true);
   
   const pagination = usePagination({ defaultPageSize: 25 });
@@ -672,7 +674,7 @@ const PipelineAdvancedSearch = () => {
                 onPageChange={pagination.setPage}
                 onPageSizeChange={pagination.setPageSize}
                 isLoading={isSearching}
-                onExport={handleExport}
+                onExport={gaming.canExport ? handleExport : undefined}
                 isExporting={isExporting}
               />
             </CardContent>

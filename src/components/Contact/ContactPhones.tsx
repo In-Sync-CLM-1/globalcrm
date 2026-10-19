@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { useNotification } from "@/hooks/useNotification";
 import { Phone as PhoneIcon, Plus, X, Star } from "lucide-react";
+import { useGamingAccess } from "@/hooks/useGamingAccess";
 
 interface ContactPhone {
   id: string;
@@ -22,6 +23,7 @@ interface ContactPhonesProps {
 
 export function ContactPhones({ contactId, orgId, readOnly = false }: ContactPhonesProps) {
   const notify = useNotification();
+  const gaming = useGamingAccess();
   const [phones, setPhones] = useState<ContactPhone[]>([]);
   const [newPhone, setNewPhone] = useState({ phone: "", phone_type: "mobile" });
   const [loading, setLoading] = useState(false);
@@ -118,9 +120,13 @@ export function ContactPhones({ contactId, orgId, readOnly = false }: ContactPho
         {phones.map((item) => (
           <div key={item.id} className="flex items-center gap-2">
             <PhoneIcon className="h-4 w-4 text-muted-foreground" />
-            <a href={`tel:${item.phone}`} className="text-sm hover:underline">
-              {item.phone}
-            </a>
+            {gaming.masked ? (
+              <span className="text-sm">{gaming.phone(item.phone)}</span>
+            ) : (
+              <a href={`tel:${item.phone}`} className="text-sm hover:underline">
+                {item.phone}
+              </a>
+            )}
             <Badge variant="secondary" className={`text-xs ${getTypeColor(item.phone_type)}`}>
               {item.phone_type}
             </Badge>
