@@ -4,7 +4,6 @@ import { format, subDays } from "date-fns";
 import { AlertTriangle, CheckCircle2, Phone, Plus, Sparkles } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import DashboardLayout from "@/components/Layout/DashboardLayout";
-import { EChart } from "@/components/charts/EChart";
 import { UrlTabs } from "@/components/UrlTabs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,7 +18,8 @@ import { TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useNotification } from "@/hooks/useNotification";
 import { useOrgContext } from "@/hooks/useOrgContext";
-import { SERIES, VIZ, groupedBarsOption, rankedBarsOption } from "@/components/Gaming/gamingCharts";
+import { CallsByDateHour } from "@/components/Gaming/CallsByDateHour";
+import type { HourlyRow } from "@/components/Gaming/gamingStats";
 
 interface AiConfig {
   enabled: boolean; mode: "test" | "live"; test_numbers: string[]; windows: { start_min: number; end_min: number }[];
@@ -136,15 +136,23 @@ export default function AiCalling() {
   const outcomes = useMemo(() => {
     const m = new Map<string, number>();
     for (const c of calls) { const n = (c.call_dispositions as { name: string } | null)?.name ?? "Unclassified"; m.set(n, (m.get(n) ?? 0) + 1); }
-    const color = (n: string) => (n === "Interested" ? VIZ.good : n === "Callback Requested" ? VIZ.warning : n === "Not Interested" || n === "Do Not Call" ? VIZ.critical : VIZ.gray);
-    return [...m.entries()].sort((a, b) => b[1] - a[1]).map(([name, value]) => ({ name, value, color: color(name) }));
+    return [...m.entries()].sort((a, b) => b[1] - a[1]);
   }, [calls]);
 
-  const daily = useMemo(() => {
-    const days = Array.from({ length: 14 }, (_, i) => format(subDays(new Date(), 13 - i), "yyyy-MM-dd"));
-    const by = new Map(days.map((d) => [d, { calls: 0, connected: 0 }]));
-    for (const c of calls) { const d = format(new Date(c.started_at as string), "yyyy-MM-dd"); const e = by.get(d); if (e) { e.calls++; if ((c.conversation_duration ?? 0) > 0) e.connected++; } }
-    return { labels: days.map((d) => format(new Date(d), "d MMM")), calls: days.map((d) => by.get(d)!.calls), connected: days.map((d) => by.get(d)!.connected) };
+  // AI calls as date x hour rows for the one graph (IST)
+  const hourlyRows = useMemo<HourlyRow[]>(() => {
+    const by = new Map<string, HourlyRow>();
+    for (const c of calls) {
+      const at = new Date(c.started_at as string);
+      const day = at.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+      const hour = Number(at.toLocaleTimeString("en-GB", { hour: "2-digit", hour12: false, timeZone: "Asia/Kolkata" }).slice(0, 2));
+      const e = by.get(`${day}|${hour}`) ?? { day, hour, calls: 0, new_dials: 0, connected_calls: 0, clean_calls: 0 };
+      e.calls++;
+      if ((c.conversation_duration ?? 0) > 0) e.connected_calls++;
+      if ((c.conversation_duration ?? 0) >= 60) e.clean_calls++;
+      by.set(`${day}|${hour}`, e);
+    }
+    return [...by.values()];
   }, [calls]);
 
   const lineReady = !!cfg.exotel_app_id;
@@ -181,25 +189,25 @@ export default function AiCalling() {
 
           <TabsContent value="overview" className="space-y-4">
             <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-              {[["AI calls (30 days)", stats.total, SERIES.dialled], ["Connected", stats.connected, SERIES.connected], ["Interested", stats.interested, VIZ.good], ["Callbacks", stats.callbacks, VIZ.warning], ["Waiting in queue", queueCounts.data?.pending ?? 0, VIZ.gray]].map(([label, value, color]) => (
+              {[["AI calls (30 days)", stats.total], ["Connected", stats.connected], ["Interested", stats.interested], ["Callbacks", stats.callbacks], ["Waiting in queue", queueCounts.data?.pending ?? 0]].map(([label, value]) => (
                 <Card key={label as string} className="p-4">
-                  <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><span className="h-2 w-2 rounded-full" style={{ background: color as string }} />{label}</p>
+                  <p className="text-xs text-muted-foreground">{label}</p>
                   <p className="mt-1 text-2xl font-semibold tabular-nums">{(value as number).toLocaleString("en-IN")}</p>
                 </Card>
               ))}
             </div>
-            <div className="grid gap-4 lg:grid-cols-2">
-              <Card className="p-4">
-                <h2 className="text-sm font-semibold">How AI calls ended</h2>
-                <p className="text-xs text-muted-foreground">By disposition, last 30 days</p>
-                <div className="mt-2 h-72"><EChart option={rankedBarsOption(outcomes)} /></div>
-              </Card>
-              <Card className="p-4">
-                <h2 className="text-sm font-semibold">AI calls per day</h2>
-                <p className="text-xs text-muted-foreground">Dialled and connected, last 14 days</p>
-                <div className="mt-2 h-72"><EChart option={groupedBarsOption(daily.labels, [{ name: "Dialled", color: SERIES.dialled, data: daily.calls }, { name: "Connected", color: SERIES.connected, data: daily.connected }])} /></div>
-              </Card>
-            </div>
+            <CallsByDateHour rows={hourlyRows} measures={["calls", "connected_calls", "clean_calls"]} note="AI calls, last 30 days." />
+            <Card className="overflow-x-auto">
+              <h2 className="p-4 pb-0 text-sm font-semibold">How AI calls ended (last 30 days)</h2>
+              <Table>
+                <TableHeader><TableRow><TableHead>Outcome</TableHead><TableHead className="text-right">Calls</TableHead><TableHead className="text-right">Share</TableHead></TableRow></TableHeader>
+                <TableBody>
+                  {outcomes.map(([name, n]) => (
+                    <TableRow key={name}><TableCell>{name}</TableCell><TableCell className="text-right tabular-nums">{n}</TableCell><TableCell className="text-right tabular-nums">{stats.total ? Math.round((100 * n) / stats.total) : 0}%</TableCell></TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </Card>
             <Card className="overflow-x-auto">
               <h2 className="p-4 pb-0 text-sm font-semibold">Recent AI calls</h2>
               <Table>

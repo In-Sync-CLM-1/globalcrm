@@ -126,6 +126,7 @@ for (let i = 0; i < 220 && i < leads.length; i++) {
   const day = int(0, 13);
   const start = new Date(now - day * 864e5); start.setUTCHours(4 + int(0, 8), int(0, 59), int(0, 59), 0); // ~10:00-19:00 IST
   if (start.getTime() > now) start.setTime(now - int(1, 6) * 3600e3);
+  if (new Date(start.getTime() + 330 * 60000).getUTCDay() === 0) start.setTime(start.getTime() - 864e5); // no Sunday calls
   const connected = outcome !== 'no_answer';
   const talk = connected ? int(outcome === 'wrong_number' || outcome === 'do_not_call' ? 12 : 35, outcome.startsWith('interested') || outcome === 'link_requested' ? 170 : 95) : 0;
   const ring = int(8, 28);
