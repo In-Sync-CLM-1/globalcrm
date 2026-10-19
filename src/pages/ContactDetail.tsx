@@ -28,6 +28,7 @@ import { EnrichedFieldsSection } from "@/components/Contact/EnrichedFieldsSectio
 import { ConvertToClientButton } from "@/components/Clients/ConvertToClientButton";
 import { UrlTabs } from "@/components/UrlTabs";
 import { useGamingAccess } from "@/hooks/useGamingAccess";
+import { RevealContactDetails } from "@/components/Contact/RevealContactDetails";
 
 interface Contact {
   id: string;
@@ -269,7 +270,10 @@ export default function ContactDetail() {
           <div className="space-y-6">
             <Card className="md:col-span-1">
               <CardHeader>
-                <CardTitle>Contact Information</CardTitle>
+                <div className="flex items-start justify-between gap-2">
+                  <CardTitle>Contact Information</CardTitle>
+                  <RevealContactDetails contactId={id!} />
+                </div>
               </CardHeader>
               <CardContent className="space-y-4">
               <div>

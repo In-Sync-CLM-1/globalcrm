@@ -355,7 +355,29 @@ serve(async (req) => {
     replyToEmail = identityOverride?.replyToEmail ?? (replyToEmail || fromEmail);
     if (fromNameOverride) fromName = fromNameOverride;
 
-    console.log("Sending email to:", to, "from:", fromEmail, "reply-to:", replyToEmail);
+    // Protected orgs store only a masked email in contacts.email, so a recipient that arrives masked is
+    // resolved here from the encrypted copy. The conversation log below keeps the masked form.
+    let recipient = to;
+    let loggedTo = to;
+    let protectedRecipient = false;
+    if (contactId) {
+      const svc = getSupabaseClient();
+      const { data: isProtected } = await svc.rpc('pii_protected', { _org: orgId });
+      if (isProtected) {
+        protectedRecipient = true;
+        if (!String(to).includes('•')) {
+          const { data: maskedTo } = await svc.rpc('pii_mask_email', { _t: to });
+          loggedTo = (maskedTo as string) ?? to;
+        }
+        if (String(to).includes('•')) {
+          const { data: realEmail } = await svc.rpc('pii_contact_email', { _contact_id: contactId });
+          if (!realEmail || String(realEmail).includes('•')) throw new Error('This contact has no email address on file');
+          recipient = realEmail as string;
+        }
+      }
+    }
+
+    console.log("Sending email to:", protectedRecipient ? '(protected)' : to, "from:", fromEmail, "reply-to:", replyToEmail);
 
     // Generate unsubscribe token if not provided
     const unsubToken = unsubscribeToken || crypto.randomUUID();
@@ -388,7 +410,7 @@ serve(async (req) => {
     // note, not a newsletter -- the List-Unsubscribe header is what makes
     // Gmail/Outlook show an "Unsubscribe" chip next to the sender even with
     // no visible footer, so skip it for those.
-    const emailData = await sendEmail(resendApiKey, to, subject, finalHtml, fromEmail, fromName, replyToEmail, bareEmail ? undefined : unsubscribeUrl, inReplyTo, attachments);
+    const emailData = await sendEmail(resendApiKey, recipient, subject, finalHtml, fromEmail, fromName, replyToEmail, bareEmail ? undefined : unsubscribeUrl, inReplyTo, attachments);
 
     console.log("Email sent successfully:", emailData);
 
@@ -421,7 +443,7 @@ serve(async (req) => {
         conversation_id: conversationId || emailData?.id || crypto.randomUUID(),
         from_email: fromEmail,
         from_name: fromName,
-        to_email: to,
+        to_email: loggedTo,
         reply_to_email: replyToEmail,
         subject: subject,
         email_content: emailHtml,

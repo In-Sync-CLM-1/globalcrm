@@ -202,7 +202,14 @@ export async function placeAiCall(supabase: any, params: { orgId: string; contac
   if (!contact?.phone) return { success: false, skip: true, error: "Lead not found or has no phone number" };
   if (contact.do_not_call || contact.opted_out) return { success: false, skip: true, error: "Lead is on the do-not-call list" };
 
-  const callee = normalizeToE164(contact.phone);
+  // Protected orgs keep only a masked number in contacts.phone; decrypt the real one here, server side.
+  let realPhone: string = contact.phone;
+  if (String(contact.phone).includes("•")) {
+    const { data: decrypted } = await supabase.rpc("pii_contact_phone", { _contact_id: contactId });
+    if (!decrypted || String(decrypted).includes("•")) return { success: false, skip: true, error: "Lead has no callable number on file" };
+    realPhone = decrypted as string;
+  }
+  const callee = normalizeToE164(realPhone);
   const isTest = cfg.test_numbers.includes(callee);
   if (cfg.mode === "test" && !isTest) return { success: false, skip: true, error: "Test mode: only approved test numbers can be called" };
 
