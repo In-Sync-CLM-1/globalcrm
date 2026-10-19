@@ -86,6 +86,7 @@ const OnboardingWizard = lazyRetry(() => import("./pages/OnboardingWizard"));
 // Lazy loaded pages - Other
 const DataExport = lazyRetry(() => import("./pages/admin/DataExport"));
 const DataProtection = lazyRetry(() => import("./pages/admin/DataProtection"));
+const AiCalling = lazyRetry(() => import("./pages/AiCalling"));
 const PrivacyPolicy = lazyRetry(() => import("./pages/PrivacyPolicy"));
 const DataRights = lazyRetry(() => import("./pages/DataRights"));
 const PlatformAdmin = lazyRetry(() => import("./pages/PlatformAdmin"));
@@ -385,6 +386,12 @@ const App = () => (
             </ProtectedRoute>
           } />
           
+          <Route path="/ai-calling" element={
+            <ProtectedRoute requiredRole="admin">
+              <AiCalling />
+            </ProtectedRoute>
+          } />
+
           <Route path="/admin/data-export" element={
             <ProtectedRoute>
               <DataExport />
