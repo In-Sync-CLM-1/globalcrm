@@ -36,6 +36,7 @@ import { PostCallDispositionDialog } from "@/components/Contact/PostCallDisposit
 import IedupPipeline from "@/pages/IedupPipeline";
 import { IEDUP_ORG_ID } from "@/hooks/useIsIedup";
 import { useUrlState } from "@/hooks/useUrlState";
+import { useGamingAccess } from "@/hooks/useGamingAccess";
 interface PipelineStage {
   id: string;
   name: string;
@@ -446,20 +447,40 @@ export default function PipelineBoard() {
   const { data: latestDispositionsByContact } = useQuery({
     queryKey: ['pipeline-latest-dispositions', contactsData?.data?.map(c => c.id)],
     queryFn: async () => {
-      if (!contactsData?.data?.length) return {} as Record<string, { name: string; category: string | null }>;
+      if (!contactsData?.data?.length) return {} as Record<string, { name: string; category: string | null; callLogId: string | null }>;
       const ids = contactsData.data.map(c => c.id);
       const { data, error } = await supabase
         .from("contact_latest_disposition")
-        .select("contact_id, disposition_name, disposition_category")
+        .select("contact_id, disposition_name, disposition_category, call_log_id")
         .in("contact_id", ids);
       if (error) throw error;
-      const map: Record<string, { name: string; category: string | null }> = {};
+      const map: Record<string, { name: string; category: string | null; callLogId: string | null }> = {};
       (data || []).forEach((r: any) => {
-        map[r.contact_id] = { name: r.disposition_name, category: r.disposition_category };
+        map[r.contact_id] = { name: r.disposition_name, category: r.disposition_category, callLogId: r.call_log_id };
       });
       return map;
     },
     enabled: !!contactsData?.data?.length,
+  });
+
+  // Gaming CRM Demo shows the sub-disposition of each lead's latest call.
+  const gaming = useGamingAccess();
+  const { data: subDispositionByContact } = useQuery({
+    queryKey: ['pipeline-latest-sub-dispositions', latestDispositionsByContact],
+    queryFn: async () => {
+      const byLog = new Map<string, string>(); // call_log_id -> contact_id
+      Object.entries(latestDispositionsByContact ?? {}).forEach(([contactId, d]) => { if (d.callLogId) byLog.set(d.callLogId, contactId); });
+      if (!byLog.size) return {} as Record<string, string>;
+      const { data: logs } = await supabase.from("call_logs").select("id, sub_disposition_id").in("id", [...byLog.keys()]).not("sub_disposition_id", "is", null);
+      const subIds = [...new Set((logs ?? []).map((l) => l.sub_disposition_id as string))];
+      if (!subIds.length) return {} as Record<string, string>;
+      const { data: subs } = await supabase.from("call_sub_dispositions").select("id, name").in("id", subIds);
+      const nameById = new Map((subs ?? []).map((s) => [s.id, s.name]));
+      const out: Record<string, string> = {};
+      (logs ?? []).forEach((l) => { const c = byLog.get(l.id); const n = nameById.get(l.sub_disposition_id as string); if (c && n) out[c] = n; });
+      return out;
+    },
+    enabled: gaming.isGaming && !!latestDispositionsByContact && Object.keys(latestDispositionsByContact).length > 0,
   });
 
   // Fetch primary phones for all contacts
@@ -1258,13 +1279,14 @@ export default function PipelineBoard() {
                       </TableHead>
                       <TableHead className="py-2 text-xs h-8">Name / Title</TableHead>
                       <TableHead className="py-2 text-xs h-8">Quick Actions</TableHead>
-                      <TableHead className="py-2 text-xs h-8">Company</TableHead>
+                      {!gaming.isGaming && <TableHead className="py-2 text-xs h-8">Company</TableHead>}
                       {showEnhancedFields && <TableHead className="py-2 text-xs h-8">Industry</TableHead>}
-                      <TableHead className="py-2 text-xs h-8">Targeted Product</TableHead>
+                      {!gaming.isGaming && <TableHead className="py-2 text-xs h-8">Targeted Product</TableHead>}
                       <TableHead className="py-2 text-xs h-8">Assigned To</TableHead>
                       <TableHead className="py-2 text-xs h-8">Latest Disposition</TableHead>
-                      <TableHead className="py-2 text-xs h-8">Email Outreach</TableHead>
-                      <TableHead className="py-2 text-xs h-8">WhatsApp Outreach</TableHead>
+                      {gaming.isGaming && <TableHead className="py-2 text-xs h-8">Sub-disposition</TableHead>}
+                      {!gaming.isGaming && <TableHead className="py-2 text-xs h-8">Email Outreach</TableHead>}
+                      {!gaming.isGaming && <TableHead className="py-2 text-xs h-8">WhatsApp Outreach</TableHead>}
                       <TableHead className="py-2 text-xs h-8">Stage</TableHead>
                       <TableHead className="py-2 text-xs h-8">Updated</TableHead>
                       <TableHead className="py-2 text-xs h-8 w-20">Actions</TableHead>
@@ -1345,9 +1367,11 @@ export default function PipelineBoard() {
                               </Button>
                             </div>
                           </TableCell>
-                          <TableCell onClick={() => navigate(`/contacts/${contact.id}`)} className="py-1.5 cursor-pointer text-xs">
-                            {contact.company || '-'}
-                          </TableCell>
+                          {!gaming.isGaming && (
+                            <TableCell onClick={() => navigate(`/contacts/${contact.id}`)} className="py-1.5 cursor-pointer text-xs">
+                              {contact.company || '-'}
+                            </TableCell>
+                          )}
                           {showEnhancedFields && (
                             <TableCell onClick={() => navigate(`/contacts/${contact.id}`)} className="py-1.5 cursor-pointer text-xs">
                               <span className="truncate max-w-[100px] block" title={contact.industry_type || ''}>
@@ -1355,9 +1379,11 @@ export default function PipelineBoard() {
                               </span>
                             </TableCell>
                           )}
-                          <TableCell onClick={() => navigate(`/contacts/${contact.id}`)} className="py-1.5 cursor-pointer text-xs">
-                            {contact.product || '-'}
-                          </TableCell>
+                          {!gaming.isGaming && (
+                            <TableCell onClick={() => navigate(`/contacts/${contact.id}`)} className="py-1.5 cursor-pointer text-xs">
+                              {contact.product || '-'}
+                            </TableCell>
+                          )}
                           <TableCell className="py-1.5 text-xs">
                             {contact.assigned_to ? (
                               <span title={userNameById.get(contact.assigned_to) || 'User'}>
@@ -1388,6 +1414,12 @@ export default function PipelineBoard() {
                               );
                             })()}
                           </TableCell>
+                          {gaming.isGaming ? (
+                            <TableCell className="py-1.5 text-xs">
+                              {subDispositionByContact?.[contact.id] ?? <span className="text-[10px] text-muted-foreground">-</span>}
+                            </TableCell>
+                          ) : (
+                            <>
                           <TableCell onClick={() => navigate(`/contacts/${contact.id}`)} className="py-1.5 cursor-pointer">
                             {(() => {
                               const eo = parseEmailOutreach(contact.source);
@@ -1412,6 +1444,8 @@ export default function PipelineBoard() {
                               );
                             })()}
                           </TableCell>
+                            </>
+                          )}
                           <TableCell className="py-1.5">
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>

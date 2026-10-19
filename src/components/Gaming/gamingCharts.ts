@@ -19,9 +19,10 @@ export type LineVariant = "line" | "area";
 
 /** The measures are nested, so the area version overlaps the fills (translucent) rather than stacking them. */
 export function callsLineOption(points: DayPoint[], variant: LineVariant = "line"): EChartsOption {
-  const line = (name: string, key: "calls" | "connected" | "clean", color: string) => ({
+  // Large markers; a different shape per line so they stay distinguishable without colour.
+  const line = (name: string, key: "calls" | "connected" | "clean", color: string, symbol: string, size: number) => ({
     name, type: "line" as const, data: points.map((p) => p[key]), color,
-    symbol: "circle", symbolSize: 8, lineStyle: { width: 4 }, itemStyle: { borderColor: "#fff", borderWidth: 2 },
+    symbol, symbolSize: size, lineStyle: { width: 4 }, itemStyle: { borderColor: "#fff", borderWidth: 3 },
     ...(variant === "area" ? { areaStyle: { color, opacity: 0.2 } } : {}),
     endLabel: { show: true, formatter: `${name}`, color: INK, fontSize: 12, fontWeight: 600 },
     labelLayout: { moveOverlap: "shiftY" },
@@ -43,14 +44,14 @@ export function callsLineOption(points: DayPoint[], variant: LineVariant = "line
     grid: { left: 8, right: 84, top: 16, bottom: 8, containLabel: true },
     xAxis: { type: "category", data: points.map((p) => p.label), boundaryGap: false, axisLine: { lineStyle: { color: GRID } }, axisTick: { show: false }, axisLabel: { color: MUTED, fontSize: 11 } },
     yAxis: { type: "value", min: 0, axisLine: { show: false }, axisTick: { show: false }, axisLabel: { color: MUTED, fontSize: 11 }, splitLine: { lineStyle: { color: GRID } } },
-    series: [line("Dialled", "calls", SERIES.dialled), line("Connected", "connected", SERIES.connected), line("Clean", "clean", SERIES.clean)],
+    series: [line("Dialled", "calls", SERIES.dialled, "circle", 16), line("Connected", "connected", SERIES.connected, "diamond", 22), line("Clean", "clean", SERIES.clean, "roundRect", 15)],
   } as EChartsOption;
 }
 
 export interface DateHourRow { label: string; total: number; counts: number[] }
 
 export function dateHourHeatmapOption(rows: DateHourRow[], hours: number[], measure: string): EChartsOption {
-  const display = rows.slice().reverse(); // newest date at the top
+  const display = rows.slice().reverse(); // newest date first; the y axis is inverted so it is drawn at the top
   const max = Math.max(1, ...rows.flatMap((r) => r.counts));
   // white numbers on the dark half of the ramp, dark numbers on the light half
   const data = display.flatMap((r, y) => r.counts.map((v, x) => ({ value: [x, y, v], label: { color: v / max > 0.5 ? "#ffffff" : INK } })));
@@ -68,7 +69,7 @@ export function dateHourHeatmapOption(rows: DateHourRow[], hours: number[], meas
     },
     grid: { left: 4, right: 12, top: 30, bottom: 4, containLabel: true },
     xAxis: { type: "category", position: "top", data: hours.map((h) => `${h}:00`), axisLabel: { fontSize: 11, color: MUTED }, axisLine: { show: false }, axisTick: { show: false } },
-    yAxis: { type: "category", data: display.map((r) => `${r.label}  ·  ${num(r.total)}`), axisLabel: { fontSize: 11, color: INK }, axisLine: { show: false }, axisTick: { show: false } },
+    yAxis: { type: "category", inverse: true, data: display.map((r) => `${r.label}  ·  ${num(r.total)}`), axisLabel: { fontSize: 11, color: INK }, axisLine: { show: false }, axisTick: { show: false } },
     visualMap: { show: false, min: 0, max, inRange: { color: RAMP } },
     series: [{
       type: "heatmap", data,

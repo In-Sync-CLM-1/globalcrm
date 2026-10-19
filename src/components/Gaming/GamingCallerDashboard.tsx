@@ -7,10 +7,11 @@ import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table";
 import { LoadingState } from "@/components/common/LoadingState";
 import { useUrlState } from "@/hooks/useUrlState";
 import { CallsByDateHour } from "./CallsByDateHour";
+import { Fig, NUM, CELL, Person, ROW, TH, TableCard } from "./GamingTable";
 import { CallsOverTime } from "./CallsOverTime";
 import { DAILY_TARGETS, fmtClock, fmtHM, pct, sumStats, useCallers, useDayStats, useDispoCounts, useDispositionCatalog, useHourlyCounts, useLatestCallDay } from "./gamingStats";
 
@@ -168,23 +169,25 @@ export function GamingCallerDashboard({ orgId }: { orgId: string }) {
               </ul>
             )}
           </Card>
-          <Card className="overflow-x-auto">
-            <h2 className="p-4 pb-0 text-sm font-semibold text-foreground">Team, last 7 days</h2>
+          <TableCard title="Team, last 7 days" subtitle="Registrations and activations">
             <Table>
-              <TableHeader><TableRow><TableHead>#</TableHead><TableHead>Caller</TableHead><TableHead className="text-right">Registrations</TableHead><TableHead className="text-right">Activations</TableHead></TableRow></TableHeader>
+              <TableHeader><TableRow className="hover:bg-transparent"><TH className="w-10">#</TH><TH>Caller</TH><TH right>Registrations</TH><TH right>Activations</TH></TableRow></TableHeader>
               <TableBody>
                 {board.map((b, i) => {
-                  const name = callers.find((c) => c.id === b.id)?.name.split(" ")[0] ?? "Caller";
+                  const name = callers.find((c) => c.id === b.id)?.name ?? "Caller";
+                  const you = b.id === userId;
                   return (
-                    <TableRow key={b.id} className={b.id === userId ? "bg-muted/60 font-semibold" : ""}>
-                      <TableCell>{i + 1}</TableCell><TableCell>{b.id === userId ? `${name} (you)` : name}</TableCell>
-                      <TableCell className="text-right tabular-nums">{b.registrations}</TableCell><TableCell className="text-right tabular-nums">{b.activations}</TableCell>
+                    <TableRow key={b.id} className={`${ROW} ${you ? "bg-primary/5 hover:bg-primary/10" : ""}`}>
+                      <TableCell className={`${CELL} tabular-nums text-muted-foreground`}>{i + 1}</TableCell>
+                      <TableCell className={CELL}><Person name={name} sub={you ? "You" : undefined} /></TableCell>
+                      <TableCell className={NUM}><Fig v={b.registrations} bold /></TableCell>
+                      <TableCell className={NUM}><Fig v={b.activations} bold /></TableCell>
                     </TableRow>
                   );
                 })}
               </TableBody>
             </Table>
-          </Card>
+          </TableCard>
         </div>
       </div>
     </div>
