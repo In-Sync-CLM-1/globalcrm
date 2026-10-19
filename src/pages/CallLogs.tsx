@@ -15,6 +15,7 @@ import { format } from "date-fns";
 import { CallRecordingPlayer } from "@/components/Contact/CallRecordingPlayer";
 import { useOrgContext } from "@/hooks/useOrgContext";
 import { useUrlState } from "@/hooks/useUrlState";
+import { useGamingAccess } from "@/hooks/useGamingAccess";
 
 interface CallLog {
   id: string;
@@ -42,6 +43,7 @@ interface CallLog {
 }
 
 export default function CallLogs() {
+  const gaming = useGamingAccess();
   const { effectiveOrgId } = useOrgContext();
   const [searchQuery, setSearchQuery] = useUrlState("q", "");
   const [callTypeFilter, setCallTypeFilter] = useUrlState("type", "all");
@@ -235,7 +237,7 @@ export default function CallLogs() {
                           {log.contacts ? `${log.contacts.first_name} ${log.contacts.last_name || ''}` : 'Unknown'}
                         </TableCell>
                         <TableCell className="py-1.5 font-mono text-xs">
-                          {log.call_type === 'outbound' ? log.to_number : log.from_number}
+                          {gaming.phone(log.call_type === 'outbound' ? log.to_number : log.from_number)}
                         </TableCell>
                         <TableCell className="py-1.5 text-xs">Agent</TableCell>
                         <TableCell className="py-1.5">

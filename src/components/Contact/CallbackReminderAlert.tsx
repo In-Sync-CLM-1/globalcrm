@@ -15,6 +15,7 @@ import { useNotifications } from "@/hooks/useNotifications";
 import { useCallbackReminders } from "@/hooks/useCallbackReminders";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
+import { useGamingAccess } from "@/hooks/useGamingAccess";
 
 interface CallbackAlert {
   id: string;
@@ -31,6 +32,7 @@ interface CallbackAlert {
 }
 
 export function CallbackReminderAlert() {
+  const gaming = useGamingAccess();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { notifications, markAsRead } = useNotifications();
@@ -409,12 +411,16 @@ export function CallbackReminderAlert() {
                 {currentAlert.contact_phone && (
                   <div className="flex items-center gap-2 text-foreground">
                     <Phone className="h-4 w-4 text-primary" />
-                    <a
-                      href={`tel:${currentAlert.contact_phone}`}
-                      className="hover:text-primary transition-colors"
-                    >
-                      {currentAlert.contact_phone}
-                    </a>
+                    {gaming.masked ? (
+                      <span>{gaming.phone(currentAlert.contact_phone)}</span>
+                    ) : (
+                      <a
+                        href={`tel:${currentAlert.contact_phone}`}
+                        className="hover:text-primary transition-colors"
+                      >
+                        {currentAlert.contact_phone}
+                      </a>
+                    )}
                   </div>
                 )}
 
@@ -422,7 +428,7 @@ export function CallbackReminderAlert() {
                   <div className="flex items-center gap-2 text-foreground">
                     <Mail className="h-4 w-4 text-primary" />
                     <span className="text-sm truncate">
-                      {currentAlert.contact_email}
+                      {gaming.email(currentAlert.contact_email)}
                     </span>
                   </div>
                 )}

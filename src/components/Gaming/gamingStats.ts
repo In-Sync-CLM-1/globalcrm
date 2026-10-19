@@ -7,6 +7,7 @@ export const GAMING_ORG_ID = "f07a3fa9-3a30-43bb-af2a-4c35bda2fce8";
 /** Daily targets shown on the caller dashboard. */
 export const DAILY_TARGETS = { calls: 100, clean: 35, registrations: 8, activations: 4 };
 
+
 export interface DayStat {
   agent_id: string;
   day: string;
@@ -15,6 +16,7 @@ export interface DayStat {
   work_secs: number;
   idle_secs: number;
   calls: number;
+  new_dials: number;
   connected_calls: number;
   clean_calls: number;
   registrations: number;
@@ -33,6 +35,8 @@ export interface Totals {
   work_secs: number;
   idle_secs: number;
   calls: number;
+  new_dials: number;
+  connected_calls: number;
   clean_calls: number;
   registrations: number;
   activations: number;
@@ -44,11 +48,13 @@ export const sumStats = (rows: DayStat[]): Totals =>
       work_secs: t.work_secs + r.work_secs,
       idle_secs: t.idle_secs + r.idle_secs,
       calls: t.calls + r.calls,
+      new_dials: t.new_dials + r.new_dials,
+      connected_calls: t.connected_calls + r.connected_calls,
       clean_calls: t.clean_calls + r.clean_calls,
       registrations: t.registrations + r.registrations,
       activations: t.activations + r.activations,
     }),
-    { work_secs: 0, idle_secs: 0, calls: 0, clean_calls: 0, registrations: 0, activations: 0 },
+    { work_secs: 0, idle_secs: 0, calls: 0, new_dials: 0, connected_calls: 0, clean_calls: 0, registrations: 0, activations: 0 },
   );
 
 export const pct = (num: number, den: number) => (den > 0 ? Math.round((100 * num) / den) : 0);

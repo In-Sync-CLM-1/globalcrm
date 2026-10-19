@@ -10,6 +10,7 @@ import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { useUrlState } from "@/hooks/useUrlState";
+import { useGamingAccess } from "@/hooks/useGamingAccess";
 
 interface Contact {
   id: string;
@@ -25,6 +26,7 @@ interface AutoDialerProps {
 }
 
 export const AutoDialer = ({ preSelectedContacts = [] }: AutoDialerProps) => {
+  const gaming = useGamingAccess();
   const notify = useNotification();
   const [isOpen, setIsOpen] = useState(false);
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -356,9 +358,9 @@ export const AutoDialer = ({ preSelectedContacts = [] }: AutoDialerProps) => {
                     )}
                   </div>
                   <div className="flex items-center gap-4 text-sm">
-                    <span className="font-mono">{currentContact.phone}</span>
+                    <span className="font-mono">{gaming.phone(currentContact.phone)}</span>
                     {currentContact.email && (
-                      <span className="text-muted-foreground">{currentContact.email}</span>
+                      <span className="text-muted-foreground">{gaming.email(currentContact.email)}</span>
                     )}
                   </div>
                 </div>
@@ -414,7 +416,7 @@ export const AutoDialer = ({ preSelectedContacts = [] }: AutoDialerProps) => {
                         {idx + 1}. {contact.first_name} {contact.last_name}
                       </span>
                       <span className="text-xs text-muted-foreground font-mono">
-                        {contact.phone}
+                        {gaming.phone(contact.phone)}
                       </span>
                     </div>
                   </div>

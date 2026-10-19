@@ -27,6 +27,7 @@ import { ContactFilters, ContactFiltersState, emptyContactFilters } from "@/comp
 import { useUrlFilterState } from "@/hooks/useUrlFilterState";
 import { CreateContactDialog } from "@/components/Contact/CreateContactDialog";
 import { UrlTabs } from "@/components/UrlTabs";
+import { useGamingAccess } from "@/hooks/useGamingAccess";
 
 interface Contact {
   id: string;
@@ -71,6 +72,7 @@ export default function Contacts() {
   const navigate = useNavigate();
   const [selectedContacts, setSelectedContacts] = useState<string[]>([]);
   const [showBulkUpload, setShowBulkUpload] = useState(false);
+  const gaming = useGamingAccess();
   const [exporting, setExporting] = useState(false);
   const [callingContactId, setCallingContactId] = useState<string | null>(null);
   const [emailDialogOpen, setEmailDialogOpen] = useState(false);
@@ -502,18 +504,22 @@ Jane,Smith,jane.smith@example.com,+0987654321,Tech Inc,CEO,contacted,Referral`;
             </div>
             <TabsList className="w-fit">
               <TabsTrigger value="all" className="text-xs sm:text-sm">All Contacts</TabsTrigger>
-              <TabsTrigger value="uploads" className="text-xs sm:text-sm">Uploads</TabsTrigger>
+              {gaming.canUpload && <TabsTrigger value="uploads" className="text-xs sm:text-sm">Uploads</TabsTrigger>}
             </TabsList>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={handleExport} disabled={exporting} className="flex-1 sm:flex-none">
-              <Download className="h-4 w-4 sm:mr-2" />
-              <span className="hidden sm:inline">{exporting ? "Exporting..." : selectedContacts.length > 0 ? `Download (${selectedContacts.length})` : "Download All"}</span>
-            </Button>
-            <Button size="sm" onClick={() => setShowBulkUpload(true)} className="flex-1 sm:flex-none">
-              <Upload className="h-4 w-4 sm:mr-2" />
-              <span className="hidden sm:inline">Bulk Upload</span>
-            </Button>
+            {gaming.canExport && (
+              <Button variant="outline" size="sm" onClick={handleExport} disabled={exporting} className="flex-1 sm:flex-none">
+                <Download className="h-4 w-4 sm:mr-2" />
+                <span className="hidden sm:inline">{exporting ? "Exporting..." : selectedContacts.length > 0 ? `Download (${selectedContacts.length})` : "Download All"}</span>
+              </Button>
+            )}
+            {gaming.canUpload && (
+              <Button size="sm" onClick={() => setShowBulkUpload(true)} className="flex-1 sm:flex-none">
+                <Upload className="h-4 w-4 sm:mr-2" />
+                <span className="hidden sm:inline">Bulk Upload</span>
+              </Button>
+            )}
           </div>
         </div>
 
@@ -663,13 +669,13 @@ Jane,Smith,jane.smith@example.com,+0987654321,Tech Inc,CEO,contacted,Referral`;
                             {contact.email && (
                               <span className="flex items-center gap-1">
                                 <Mail className="h-3 w-3 shrink-0" />
-                                <span className="truncate max-w-[180px]">{contact.email}</span>
+                                <span className="truncate max-w-[180px]">{gaming.email(contact.email)}</span>
                               </span>
                             )}
                             {contact.phone && (
                               <span className="flex items-center gap-1">
                                 <PhoneIcon className="h-3 w-3 shrink-0" />
-                                {contact.phone}
+                                {gaming.phone(contact.phone)}
                               </span>
                             )}
                           </div>
