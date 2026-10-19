@@ -20,6 +20,9 @@ import { DueTodayCard } from "@/components/Dashboard/DueTodayCard";
 import { CompactDashboard } from "@/components/Dashboard/CompactDashboard";
 import { ContactsByCategoryChart } from "@/components/Dashboard/ContactsByCategoryChart";
 import { SDRDashboard } from "@/components/Dashboard/SDRDashboard";
+import { GamingManagerDashboard } from "@/components/Gaming/GamingManagerDashboard";
+import { GamingCallerDashboard } from "@/components/Gaming/GamingCallerDashboard";
+import { GAMING_ORG_ID } from "@/components/Gaming/gamingStats";
 import { useUserRole } from "@/hooks/useUserRole";
 import IedupDashboard from "@/pages/IedupDashboard";
 import { IEDUP_ORG_ID } from "@/hooks/useIsIedup";
@@ -47,6 +50,7 @@ export default function Dashboard() {
     !!effectiveOrgId &&
     effectiveOrgId !== IEDUP_ORG_ID &&
     effectiveOrgId !== FERVENT_ORG_ID &&
+    effectiveOrgId !== GAMING_ORG_ID &&
     effectiveOrgId !== INSYNC_DEMO_ORG_ID;
 
   // Trigger reminder check on dashboard load
@@ -229,6 +233,26 @@ export default function Dashboard() {
   // Fervent org: render the database-insights dashboard
   if (effectiveOrgId === FERVENT_ORG_ID) {
     return <FerventDashboard />;
+  }
+
+  // Gaming CRM Demo: managers see every caller's day; callers see their own targets
+  if (effectiveOrgId === GAMING_ORG_ID) {
+    if (roleLoading) {
+      return (
+        <DashboardLayout>
+          <LoadingState message="Loading dashboard..." />
+        </DashboardLayout>
+      );
+    }
+    return (
+      <DashboardLayout>
+        {isAdmin || isSuperAdmin ? (
+          <GamingManagerDashboard orgId={effectiveOrgId} />
+        ) : (
+          <GamingCallerDashboard orgId={effectiveOrgId} />
+        )}
+      </DashboardLayout>
+    );
   }
 
   // In-Sync Demo: admins see team-level compact dashboard; SDRs see their own dashboard
