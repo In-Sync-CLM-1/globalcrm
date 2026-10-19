@@ -675,15 +675,22 @@ async function processBatch(
       
       // Check which emails already exist in database
       if (emailsToCheck.length > 0) {
-        const { data: existingByEmail } = await supabase
-          .from('contacts')
-          .select('email')
-          .eq('org_id', importJob.org_id)
-          .in('email', emailsToCheck);
-        
-        existingEmails = new Set(
-          (existingByEmail || []).map((r: any) => r.email?.trim()?.toLowerCase())
-        );
+        const { data: orgIsProtected } = await supabase.rpc('pii_protected', { _org: importJob.org_id });
+        if (orgIsProtected) {
+          // contacts.email holds only a masked value for this org; match on the keyed hash instead.
+          const { data: existingHashed } = await supabase.rpc('pii_existing_emails', { _org: importJob.org_id, _emails: emailsToCheck });
+          existingEmails = new Set((existingHashed || []).map((e: string) => e?.trim()?.toLowerCase()));
+        } else {
+          const { data: existingByEmail } = await supabase
+            .from('contacts')
+            .select('email')
+            .eq('org_id', importJob.org_id)
+            .in('email', emailsToCheck);
+
+          existingEmails = new Set(
+            (existingByEmail || []).map((r: any) => r.email?.trim()?.toLowerCase())
+          );
+        }
       }
       
       // Deduplicate: skip emails that exist in DB or in batch

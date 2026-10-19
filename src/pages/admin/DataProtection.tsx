@@ -43,6 +43,7 @@ const fmt = (d?: string | null) =>
 
 export default function DataProtection() {
   const { effectiveOrgId } = useOrgContext();
+  const [piiProtected, setPiiProtected] = useState(false);
   const { isAdmin, loading: roleLoading } = useUserRole();
   const notify = useNotification();
   // The DPDP tables/columns are newer than the committed Supabase types; use a
@@ -65,6 +66,7 @@ export default function DataProtection() {
 
   useEffect(() => {
     if (!effectiveOrgId) return;
+    supabase.rpc("pii_protected" as never, { _org: effectiveOrgId } as never).then(({ data }) => setPiiProtected(!!data));
     void loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveOrgId]);
@@ -355,6 +357,12 @@ export default function DataProtection() {
                 <div className="flex items-center gap-2 text-emerald-700">
                   <CheckCircle2 className="h-5 w-5" /><span className="font-medium">Encryption key configured (held in Supabase Vault)</span>
                 </div>
+                {piiProtected && (
+                  <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+                    <p className="font-medium">Full PII protection is on for this organisation</p>
+                    <p className="mt-1">Phone numbers and emails are stored only in encrypted form. The readable columns, call logs and exports hold masked values, so callers never receive a real number. The server decrypts a number only to place a call or send an email, and admins can reveal a contact's details, which is logged below.</p>
+                  </div>
+                )}
                 <ul className="text-sm text-muted-foreground space-y-2 list-disc pl-5">
                   <li>Contact email and phone are encrypted at rest with AES-256; the key lives in the vault, never in code or logs.</li>
                   <li>Decryption runs only through an authorized server function, and <span className="font-medium text-foreground">every access is written to the audit log</span>.</li>

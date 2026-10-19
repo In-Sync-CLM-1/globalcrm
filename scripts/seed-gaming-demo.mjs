@@ -109,7 +109,7 @@ if (!existing.length) {
   await insert('organizations', [{
     id: ORG, name: 'Gaming CRM Demo', slug: 'gaming-crm-demo', industry: 'Gaming', is_internal: true,
     subscription_active: true, smart_import_enabled: true, services_enabled: true,
-    settings: { timezone: 'Asia/Kolkata' }, usage_limits: { users: 50, storage_gb: 10 }, primary_color: '#7C3AED',
+    settings: { timezone: 'Asia/Kolkata', pii_protection: { enabled: true } }, usage_limits: { users: 50, storage_gb: 10 }, primary_color: '#7C3AED',
   }], 'return=minimal');
   await insert('organization_subscriptions', [{
     org_id: ORG, subscription_status: 'active', user_count: 8, monthly_subscription_amount: 0,

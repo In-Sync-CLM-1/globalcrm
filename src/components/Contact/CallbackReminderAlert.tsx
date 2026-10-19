@@ -163,7 +163,7 @@ export function CallbackReminderAlert() {
           description: "Please configure your phone number in your profile to use click-to-call. Opening phone dialer instead.",
           variant: "destructive",
         });
-        window.location.href = `tel:${currentAlert.contact_phone}`;
+        if (!String(currentAlert.contact_phone).includes("•")) window.location.href = `tel:${currentAlert.contact_phone}`;
         setIsCallingLoading(false);
         return;
       }
