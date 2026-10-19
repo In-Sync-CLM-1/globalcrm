@@ -19,9 +19,10 @@ export type LineVariant = "line" | "area";
 
 /** The measures are nested, so the area version overlaps the fills (translucent) rather than stacking them. */
 export function callsLineOption(points: DayPoint[], variant: LineVariant = "line"): EChartsOption {
-  const line = (name: string, key: "calls" | "connected" | "clean", color: string) => ({
+  // Large markers; a different shape per line so they stay distinguishable without colour.
+  const line = (name: string, key: "calls" | "connected" | "clean", color: string, symbol: string, size: number) => ({
     name, type: "line" as const, data: points.map((p) => p[key]), color,
-    symbol: "circle", symbolSize: 8, lineStyle: { width: 4 }, itemStyle: { borderColor: "#fff", borderWidth: 2 },
+    symbol, symbolSize: size, lineStyle: { width: 4 }, itemStyle: { borderColor: "#fff", borderWidth: 3 },
     ...(variant === "area" ? { areaStyle: { color, opacity: 0.2 } } : {}),
     endLabel: { show: true, formatter: `${name}`, color: INK, fontSize: 12, fontWeight: 600 },
     labelLayout: { moveOverlap: "shiftY" },
@@ -43,7 +44,7 @@ export function callsLineOption(points: DayPoint[], variant: LineVariant = "line
     grid: { left: 8, right: 84, top: 16, bottom: 8, containLabel: true },
     xAxis: { type: "category", data: points.map((p) => p.label), boundaryGap: false, axisLine: { lineStyle: { color: GRID } }, axisTick: { show: false }, axisLabel: { color: MUTED, fontSize: 11 } },
     yAxis: { type: "value", min: 0, axisLine: { show: false }, axisTick: { show: false }, axisLabel: { color: MUTED, fontSize: 11 }, splitLine: { lineStyle: { color: GRID } } },
-    series: [line("Dialled", "calls", SERIES.dialled), line("Connected", "connected", SERIES.connected), line("Clean", "clean", SERIES.clean)],
+    series: [line("Dialled", "calls", SERIES.dialled, "circle", 16), line("Connected", "connected", SERIES.connected, "diamond", 22), line("Clean", "clean", SERIES.clean, "roundRect", 15)],
   } as EChartsOption;
 }
 
