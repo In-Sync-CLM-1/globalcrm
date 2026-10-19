@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useGamingAccess } from "@/hooks/useGamingAccess";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -95,6 +95,12 @@ export function PipelineFilters({
   const [isOpen, setIsOpen] = useState(true);
   const gaming = useGamingAccess(); // Gaming CRM Demo hides the outreach and product filters
 
+  // Gaming CRM Demo always searches with "contains"; there is no exact mode to choose.
+  useEffect(() => {
+    if (gaming.isGaming && filters.matchMode !== "contains") onFiltersChange({ ...filters, matchMode: "contains" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gaming.isGaming, filters.matchMode]);
+
   const handleChange = (field: keyof PipelineFiltersState, value: string) => {
     onFiltersChange({ ...filters, [field]: value });
   };
@@ -110,7 +116,7 @@ export function PipelineFilters({
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen} className="border rounded-lg bg-card">
       <CollapsibleTrigger asChild>
-        <div className="flex items-center justify-between p-3 cursor-pointer hover:bg-muted/50 transition-colors">
+        <div className={`flex items-center justify-between cursor-pointer hover:bg-muted/50 transition-colors ${gaming.isGaming ? "px-3 py-2" : "p-3"}`}>
           <div className="flex items-center gap-2">
             <Search className="h-4 w-4 text-muted-foreground" />
             <span className="font-medium text-sm">Field Filters</span>
@@ -131,7 +137,8 @@ export function PipelineFilters({
         </div>
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <div className="p-3 pt-0 space-y-3">
+        <div className={gaming.isGaming ? "flex flex-wrap items-center gap-2 px-3 pb-3" : "p-3 pt-0 space-y-3"}>
+          {!gaming.isGaming && (
           <div className="flex items-center justify-between">
             <span className="text-xs text-muted-foreground">
               {gaming.isGaming ? "Match mode for Name / Company" : "Match mode for Name / Company / Targeted Product"}
@@ -146,7 +153,8 @@ export function PipelineFilters({
               <ToggleGroupItem value="contains" className="text-xs px-2.5 h-7">Contains</ToggleGroupItem>
             </ToggleGroup>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-2">
+          )}
+          <div className={gaming.isGaming ? "flex flex-wrap items-center gap-2 [&>*]:w-44" : "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-2"}>
             <Input
               placeholder="Name"
               value={filters.name}
@@ -260,7 +268,7 @@ export function PipelineFilters({
               </SelectContent>
             </Select>
           </div>
-          <div className="flex gap-2 justify-end">
+          <div className={`flex gap-2 ${gaming.isGaming ? "ml-auto" : "justify-end"}`}>
             <Button
               size="sm"
               onClick={onSearch}
