@@ -67,13 +67,16 @@ begin
   if org is null or not exists (select 1 from public.user_roles r where r.user_id = auth.uid() and r.org_id = org and r.is_active and r.role in ('admin', 'super_admin')) then
     raise exception 'Admins only';
   end if;
-  select id, phone, email, phone_encrypted, email_encrypted, phone_hash, email_hash into c
-    from public.contacts where org_id = org and phone_encrypted is not null and email_encrypted is not null order by created_at desc limit 1;
-  if c.id is null then return; end if;
-  begin ok := public.pii_hash('phone', public.decrypt_pii(c.phone_encrypted)) = c.phone_hash; exception when others then ok := false; end;
-  kind := 'Phone number'; shown_in_app := c.phone; stored_ciphertext_hex := encode(c.phone_encrypted, 'hex'); ciphertext_bytes := octet_length(c.phone_encrypted); decrypts_correctly := ok; return next;
-  begin ok := public.pii_hash('email', public.decrypt_pii(c.email_encrypted)) = c.email_hash; exception when others then ok := false; end;
-  kind := 'Email'; shown_in_app := c.email; stored_ciphertext_hex := encode(c.email_encrypted, 'hex'); ciphertext_bytes := octet_length(c.email_encrypted); decrypts_correctly := ok; return next;
+  select id, phone, phone_encrypted, phone_hash into c from public.contacts where org_id = org and phone_encrypted is not null order by created_at desc limit 1;
+  if c.id is not null then
+    begin ok := public.pii_hash('phone', public.decrypt_pii(c.phone_encrypted)) = c.phone_hash; exception when others then ok := false; end;
+    kind := 'Phone number'; shown_in_app := c.phone; stored_ciphertext_hex := encode(c.phone_encrypted, 'hex'); ciphertext_bytes := octet_length(c.phone_encrypted); decrypts_correctly := ok; return next;
+  end if;
+  select id, email, email_encrypted, email_hash into c from public.contacts where org_id = org and email_encrypted is not null order by created_at desc limit 1;
+  if c.id is not null then
+    begin ok := public.pii_hash('email', public.decrypt_pii(c.email_encrypted)) = c.email_hash; exception when others then ok := false; end;
+    kind := 'Email'; shown_in_app := c.email; stored_ciphertext_hex := encode(c.email_encrypted, 'hex'); ciphertext_bytes := octet_length(c.email_encrypted); decrypts_correctly := ok; return next;
+  end if;
 end $$;
 revoke all on function public.get_pii_encryption_proof() from public, anon;
 grant execute on function public.get_pii_encryption_proof() to authenticated;
