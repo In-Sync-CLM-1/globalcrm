@@ -27,6 +27,7 @@ import { LeadScoreCard } from "@/components/Contact/LeadScoreCard";
 import { EnrichedFieldsSection } from "@/components/Contact/EnrichedFieldsSection";
 import { ConvertToClientButton } from "@/components/Clients/ConvertToClientButton";
 import { UrlTabs } from "@/components/UrlTabs";
+import { useGamingAccess } from "@/hooks/useGamingAccess";
 
 interface Contact {
   id: string;
@@ -82,6 +83,7 @@ export default function ContactDetail() {
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isFillFormOpen, setIsFillFormOpen] = useState(false);
   const [isWhatsAppOpen, setIsWhatsAppOpen] = useState(false);
+  const gaming = useGamingAccess();
   const [resendTemplateId, setResendTemplateId] = useState<string | null>(null);
   const [isEmailOpen, setIsEmailOpen] = useState(false);
   const [activityType, setActivityType] = useState<string>("note");
@@ -378,13 +380,15 @@ export default function ContactDetail() {
                   >
                     <Mail className="h-4 w-4" />
                   </Button>
-                  <Button 
-                    size="sm" 
-                    variant="outline"
-                    onClick={() => setIsWhatsAppOpen(true)}
-                  >
-                    <MessageCircle className="h-4 w-4" />
-                  </Button>
+                  {gaming.whatsapp && (
+                    <Button 
+                      size="sm" 
+                      variant="outline"
+                      onClick={() => setIsWhatsAppOpen(true)}
+                    >
+                      <MessageCircle className="h-4 w-4" />
+                    </Button>
+                  )}
                 </div>
               </div>
             </CardHeader>

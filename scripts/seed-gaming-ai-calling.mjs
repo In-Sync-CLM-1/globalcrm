@@ -26,9 +26,9 @@ const SCRIPTS = [
     name: 'New lead: registration invite', language: 'hinglish', max_duration_seconds: 240,
     objective: 'Invite the lead to create a free account on the platform today, and answer questions about how it works.',
     opening: '{greeting}, {first_name}. This is the AI assistant from the platform. You showed interest in our games, do you have two minutes?',
-    key_points: ['Registration is free and takes about two minutes.', 'New players get a welcome reward in their account after registering.', 'There are skill and casual games to try, including the one they showed interest in.', 'We can send the registration link on WhatsApp right away.'],
+    key_points: ['Registration is free and takes about two minutes.', 'New players get a welcome reward in their account after registering.', 'There are skill and casual games to try, including the one they showed interest in.', 'We can send you the registration link right away.'],
     objection_handling: { 'I already play on another app': 'That is fine. Many players use more than one. Offer the welcome reward as a reason to try it once.', 'Is it safe?': 'Explain that accounts are verified, personal details are encrypted, and the team never asks for OTPs or passwords on calls.', 'I am busy now': 'Offer a callback at a time that suits them and note it.' },
-    closing: 'Thank them, confirm the WhatsApp link or callback time, and wish them a good day.',
+    closing: 'Thank them, confirm the link or callback time, and wish them a good day.',
     product_name: 'the platform',
     product_notes: 'Registration is free. A welcome reward is added to a new account after sign-up. Players must be 18 or older. Never quote rewards or amounts beyond this note.',
     behavioral_guidelines: 'Be warm and brief. Do not push after a clear no. If the lead prefers Hindi, switch to Hindi.',
@@ -37,7 +37,7 @@ const SCRIPTS = [
     name: 'Interested lead: registration follow-up', language: 'hinglish', max_duration_seconds: 180,
     objective: 'Follow up with a lead who said they would register, and help them finish signing up.',
     opening: '{greeting}, {first_name}. This is the AI assistant from the platform, following up on the registration you were thinking about.',
-    key_points: ['The link was shared on WhatsApp; we can resend it.', 'Signing up takes about two minutes.', 'The welcome reward is added right after registration.'],
+    key_points: ['The registration link was already shared; we can resend it.', 'Signing up takes about two minutes.', 'The welcome reward is added right after registration.'],
     objection_handling: { 'I have not had time': 'No problem. Offer to resend the link and ask when a quick call back would suit.', 'I changed my mind': 'Thank them and respect the decision.' },
     closing: 'Confirm what happens next and thank them.',
     product_name: 'the platform', product_notes: 'Registration is free. A welcome reward is added after sign-up. Players must be 18 or older.',
@@ -49,7 +49,7 @@ const SCRIPTS = [
     opening: '{greeting}, {first_name}. This is the AI assistant from the platform. Thanks for registering with us!',
     key_points: ['Their welcome reward is waiting in their account.', 'Their first game takes only a couple of minutes.', 'Inviting a friend is optional.'],
     objection_handling: { 'I will try later': 'Great. Remind them the reward is waiting and offer help if anything is unclear.' },
-    closing: 'Thank them and say the team is available on WhatsApp for help.',
+    closing: 'Thank them and say the team is happy to help if anything is unclear.',
     product_name: 'the platform', product_notes: 'A welcome reward is added to new accounts. Never quote amounts.',
     behavioral_guidelines: 'Keep it under two minutes.',
   },
@@ -58,7 +58,7 @@ const SCRIPTS = [
 // outcome key -> [disposition, sub-disposition | null, sets_opt_out]
 const MAP = {
   interested_register_today: ['Interested', 'Will Register Today'], interested_register_week: ['Interested', 'Will Register This Week'],
-  link_requested: ['Interested', 'Link Sent on WhatsApp'], callback: ['Callback Requested', 'Specific Time Given'],
+  link_requested: ['Interested', 'Registration Link Sent'], callback: ['Callback Requested', 'Specific Time Given'],
   not_interested_elsewhere: ['Not Interested', 'Already Plays Elsewhere'], not_interested_no_games: ['Not Interested', 'Does Not Play Online Games'],
   not_interested_trust: ['Not Interested', 'Trust or Safety Concern'], not_interested_no_time: ['Not Interested', 'No Time'], not_interested_other: ['Not Interested', null],
   already_registered: ['Already Registered', 'Existing Active Player'], wrong_number: ['Wrong Number', 'Not the Lead'],
@@ -67,9 +67,9 @@ const MAP = {
 
 const COMMON = ['hindi', 'english'];
 const DIALOGUE = {
-  link_requested: (n) => `agent: Hello ${n}, this is the AI assistant from the platform. Do you have two minutes?\nuser: Haan, bolo.\nagent: You showed interest in our games. Registration is free and takes two minutes.\nuser: Okay, WhatsApp pe link bhej do.\nagent: Sure, I will send the link on WhatsApp right now.\nuser: Thanks.\nagent: Thank you, have a good day.`,
+  link_requested: (n) => `agent: Hello ${n}, this is the AI assistant from the platform. Do you have two minutes?\nuser: Haan, bolo.\nagent: You showed interest in our games. Registration is free and takes two minutes.\nuser: Okay, link bhej do.\nagent: Sure, I will send the link right now.\nuser: Thanks.\nagent: Thank you, have a good day.`,
   interested_register_today: (n) => `agent: Good afternoon ${n}, I am the AI assistant from the platform.\nuser: Haan, I was going to register.\nagent: Great. It is free and you get a welcome reward after signing up.\nuser: Okay, I will do it today evening.\nagent: Wonderful. I will send you the link as well. Thank you.`,
-  interested_register_week: (n) => `agent: Hello ${n}, calling from the platform. Do you have a minute?\nuser: Yes, but I am travelling this week.\nagent: No problem. Would you like to register once you are back?\nuser: Yes, I will sign up this weekend.\nagent: Perfect, I will share the link on WhatsApp. Thank you.`,
+  interested_register_week: (n) => `agent: Hello ${n}, calling from the platform. Do you have a minute?\nuser: Yes, but I am travelling this week.\nagent: No problem. Would you like to register once you are back?\nuser: Yes, I will sign up this weekend.\nagent: Perfect, I will share the link. Thank you.`,
   callback: (n) => `agent: Hello ${n}, this is the AI assistant from the platform.\nuser: I am in a meeting, call me tomorrow morning.\nagent: Sure, I will note that and call tomorrow morning.\nuser: Okay.\nagent: Thank you.`,
   not_interested_elsewhere: (n) => `agent: Hello ${n}, calling from the platform about our games.\nuser: I already play on another app, not interested.\nagent: Understood. The welcome reward may be worth a try, but I will not trouble you. Thank you.\nuser: Ok bye.`,
   not_interested_no_games: (n) => `agent: Hello ${n}, calling from the platform.\nuser: I do not play online games at all.\nagent: Understood, thank you for your time.`,
@@ -82,7 +82,7 @@ const DIALOGUE = {
   language_barrier: (n) => `agent: Hello ${n}, this is the AI assistant from the platform.\nuser: Mujhe Tamil mein baat karni hai.\nagent: I am sorry, I can speak English or Hindi. A team member will call you.\nuser: Okay.`,
 };
 const SUMMARY = {
-  link_requested: 'Wants the registration link on WhatsApp.', interested_register_today: 'Plans to register this evening.', interested_register_week: 'Will register this weekend.',
+  link_requested: 'Wants the registration link.', interested_register_today: 'Plans to register this evening.', interested_register_week: 'Will register this weekend.',
   callback: 'Asked for a call back tomorrow morning.', not_interested_elsewhere: 'Plays on another platform.', not_interested_no_games: 'Does not play online games.',
   not_interested_trust: 'Worried about safety of personal details.', not_interested_no_time: 'No time, declined.', not_interested_other: 'Declined.', already_registered: 'Already has an account.',
   wrong_number: 'Wrong number.', do_not_call: 'Asked not to be called again; opted out.', language_barrier: 'Needs a Tamil speaker.',

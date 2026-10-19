@@ -127,7 +127,7 @@ export async function classifyOutcome(transcript: string): Promise<{ outcome: Ou
     "Judge only by what the lead (the 'user' turns) actually said. A polite goodbye is not interest.",
     `Return JSON only: {"outcome": one of ${JSON.stringify(OUTCOME_KEYS)}, "summary": "max 25 words"}.`,
     "interested_register_today: agreed to register today. interested_register_week: will register within the week.",
-    "link_requested: wants the registration link on WhatsApp. callback: asked to be called at another time.",
+    "link_requested: wants the registration link sent to them. callback: asked to be called at another time.",
     "not_interested_elsewhere: declined because they play on another platform. not_interested_no_games: does not play online games.",
     "not_interested_trust: declined over trust, safety or data worries. not_interested_no_time: declined for lack of time. not_interested_other: declined for another reason.",
     "already_registered: already has an account. wrong_number: not the person or number.",
