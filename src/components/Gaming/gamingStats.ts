@@ -24,6 +24,15 @@ export interface DayStat {
   talk_secs: number;
 }
 
+export interface HourlyRow {
+  day: string;
+  hour: number;
+  calls: number;
+  new_dials: number;
+  connected_calls: number;
+  clean_calls: number;
+}
+
 export interface DispoCount {
   agent_id: string;
   disposition_id: string | null;
@@ -85,6 +94,20 @@ export function useDayStats(orgId: string, from: string, to: string, agentId?: s
   });
 }
 
+export function useHourlyCounts(orgId: string, from: string, to: string, agentId?: string | null) {
+  return useQuery({
+    queryKey: ["gaming-hourly-counts", orgId, from, to, agentId ?? "all"],
+    queryFn: async (): Promise<HourlyRow[]> => {
+      const { data, error } = await supabase.rpc("gaming_hourly_counts" as never, {
+        _org: orgId, _from: from, _to: to, _agent: agentId ?? null,
+      } as never);
+      if (error) throw error;
+      return (data ?? []) as HourlyRow[];
+    },
+    enabled: !!orgId && !!from && !!to,
+  });
+}
+
 export function useDispoCounts(orgId: string, from: string, to: string, agentId?: string | null) {
   return useQuery({
     queryKey: ["gaming-dispo-counts", orgId, from, to, agentId ?? "all"],
@@ -141,7 +164,7 @@ export function useLatestCallDay(orgId: string, agentId?: string | null) {
   return useQuery({
     queryKey: ["gaming-latest-day", orgId, agentId ?? "all"],
     queryFn: async (): Promise<string | null> => {
-      let q = supabase.from("call_logs").select("started_at").eq("org_id", orgId).order("started_at", { ascending: false }).limit(1);
+      let q = supabase.from("call_logs").select("started_at").eq("org_id", orgId).eq("caller_type", "human").order("started_at", { ascending: false }).limit(1);
       if (agentId) q = q.eq("agent_id", agentId);
       const { data } = await q;
       const at = data?.[0]?.started_at;

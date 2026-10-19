@@ -175,3 +175,17 @@ verify_jwt = false
 # stays on — suggestions are only ever shown to a signed-in human for approval.
 [functions.suggest-name-fix]
 verify_jwt = true
+
+# AI calling on the in-house LiveKit stack. The bridge, the LiveKit agent and the cron Worker present
+# AI_CALL_INTERNAL_TOKEN (checked inside the function), so the gateway must not require a user JWT.
+[functions.ai-call-context]
+verify_jwt = false
+
+[functions.ai-call-webhook]
+verify_jwt = false
+
+[functions.ai-call-advance]
+verify_jwt = false
+
+[functions.ai-call-enqueue]
+verify_jwt = false

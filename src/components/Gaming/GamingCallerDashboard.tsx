@@ -7,45 +7,18 @@ import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Progress } from "@/components/ui/progress";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { LoadingState } from "@/components/common/LoadingState";
-import { EChart } from "@/components/charts/EChart";
 import { useUrlState } from "@/hooks/useUrlState";
-import { SERIES, VIZ, dispoTreemapOption, funnelOption, groupedBarsOption, linesOption, rankedBarsOption, stackedBarsOption } from "./gamingCharts";
-import { DAILY_TARGETS, fmtClock, fmtHM, pct, sumStats, useCallers, useDayStats, useDispoCounts, useDispositionCatalog, useLatestCallDay } from "./gamingStats";
+import { CallsByDateHour } from "./CallsByDateHour";
+import { DAILY_TARGETS, fmtClock, fmtHM, pct, sumStats, useCallers, useDayStats, useDispoCounts, useDispositionCatalog, useHourlyCounts, useLatestCallDay } from "./gamingStats";
 
-const HOURS = [9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19];
-
-function Tile({ label, value, hint, color }: { label: string; value: string | number; hint?: string; color?: string }) {
+function Tile({ label, value, hint }: { label: string; value: string | number; hint?: string }) {
   return (
     <Card className="p-4">
-      <p className="flex items-center gap-1.5 text-xs text-muted-foreground">{color && <span className="h-2 w-2 rounded-full" style={{ background: color }} />}{label}</p>
+      <p className="text-xs text-muted-foreground">{label}</p>
       <p className="mt-1 text-2xl font-semibold tabular-nums text-foreground">{value}</p>
       {hint && <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p>}
-    </Card>
-  );
-}
-
-function TargetTile({ label, value, target, color }: { label: string; value: number; target: number; color: string }) {
-  const done = value >= target;
-  return (
-    <Card className="p-4">
-      <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><span className="h-2 w-2 rounded-full" style={{ background: color }} />{label}</p>
-      <p className="mt-1 text-2xl font-semibold tabular-nums text-foreground">
-        {value} <span className="text-sm font-normal text-muted-foreground">of {target}</span>
-      </p>
-      <Progress value={Math.min(100, pct(value, target))} className="mt-2 h-1.5" />
-      <p className="mt-1 text-xs text-muted-foreground">{done ? "Daily target met" : `${target - value} to go`}</p>
-    </Card>
-  );
-}
-
-function ChartCard({ title, note, height = 260, children }: { title: string; note?: string; height?: number; children: React.ReactNode }) {
-  return (
-    <Card className="p-4">
-      <h2 className="text-sm font-semibold text-foreground">{title}</h2>
-      {note && <p className="text-xs text-muted-foreground">{note}</p>}
-      <div className="mt-2" style={{ height }}>{children}</div>
     </Card>
   );
 }
@@ -57,14 +30,14 @@ export function GamingCallerDashboard({ orgId }: { orgId: string }) {
   const { data: latest, isLoading: latestLoading } = useLatestCallDay(orgId, userId);
   const [dayParam, setDayParam] = useUrlState("day", "");
   const day = dayParam || latest || format(new Date(), "yyyy-MM-dd");
-  const weekFrom = format(addDays(parseISO(day), -6), "yyyy-MM-dd");
+  const weekFrom = format(addDays(parseISO(day), -13), "yyyy-MM-dd");
 
   const { data: callers = [] } = useCallers(orgId);
   const me = callers.find((c) => c.id === userId);
 
   const dayStats = useDayStats(orgId, day, day, userId);
-  const weekStats = useDayStats(orgId, weekFrom, day, userId);
-  const teamWeek = useDayStats(orgId, weekFrom, day);
+  const teamWeek = useDayStats(orgId, format(addDays(parseISO(day), -6), "yyyy-MM-dd"), day);
+  const hourly = useHourlyCounts(orgId, weekFrom, day, userId);
   const dispoCounts = useDispoCounts(orgId, day, day, userId);
   const catalog = useDispositionCatalog(orgId);
 
@@ -77,30 +50,11 @@ export function GamingCallerDashboard({ orgId }: { orgId: string }) {
     enabled: !!userId,
   });
 
-  const hourly = useQuery({
-    queryKey: ["gaming-my-hourly", userId, day],
-    queryFn: async () => {
-      const { data } = await supabase.from("call_logs").select("started_at, call_duration, answered_at")
-        .eq("org_id", orgId).eq("agent_id", userId!)
-        .gte("started_at", `${day}T00:00:00+05:30`).lt("started_at", `${format(addDays(parseISO(day), 1), "yyyy-MM-dd")}T00:00:00+05:30`)
-        .limit(1000);
-      const b = new Map<number, { calls: number; connected: number; clean: number }>();
-      for (const r of data ?? []) {
-        const h = Number(new Date(r.started_at!).toLocaleTimeString("en-GB", { hour: "2-digit", hour12: false, timeZone: "Asia/Kolkata" }).slice(0, 2));
-        const e = b.get(h) ?? { calls: 0, connected: 0, clean: 0 };
-        e.calls++; if (r.answered_at) e.connected++; if ((r.call_duration ?? 0) >= 60) e.clean++;
-        b.set(h, e);
-      }
-      return b;
-    },
-    enabled: !!userId,
-  });
-
   const callbacks = useQuery({
     queryKey: ["gaming-my-callbacks", userId],
     queryFn: async () => {
       const { data } = await supabase.from("contact_activities")
-        .select("id, contact_id, subject, scheduled_at, priority")
+        .select("id, contact_id, subject, scheduled_at")
         .eq("org_id", orgId).eq("created_by", userId!).eq("activity_type", "call").is("completed_at", null)
         .order("scheduled_at", { ascending: true }).limit(8);
       return data ?? [];
@@ -108,31 +62,19 @@ export function GamingCallerDashboard({ orgId }: { orgId: string }) {
     enabled: !!userId,
   });
 
-  const myLeads = useQuery({
-    queryKey: ["gaming-my-leads", userId],
-    queryFn: async () => {
-      const { data: st } = await supabase.from("pipeline_stages").select("id, name, stage_order, color").eq("org_id", orgId).order("stage_order");
-      return Promise.all((st ?? []).map(async (s) => {
-        const { count } = await supabase.from("contacts").select("id", { count: "exact", head: true }).eq("org_id", orgId).eq("assigned_to", userId!).eq("pipeline_stage_id", s.id);
-        return { ...s, count: count ?? 0 };
-      }));
-    },
-    enabled: !!userId,
-  });
-
   const today = sumStats(dayStats.data ?? []);
   const row = dayStats.data?.[0];
 
-  const dispoNodes = useMemo(() => {
+  const ended = useMemo(() => {
     const bySub = new Map<string, number>(); const byDispo = new Map<string, number>();
     for (const r of dispoCounts.data ?? []) {
       if (r.sub_disposition_id) bySub.set(r.sub_disposition_id, (bySub.get(r.sub_disposition_id) ?? 0) + r.calls);
       if (r.disposition_id) byDispo.set(r.disposition_id, (byDispo.get(r.disposition_id) ?? 0) + r.calls);
     }
     return (catalog.data?.dispositions ?? []).map((d) => ({
-      id: d.id, name: d.name, category: d.category ?? "neutral", calls: byDispo.get(d.id) ?? 0,
-      subs: (catalog.data?.subs ?? []).filter((s) => s.disposition_id === d.id).map((s) => ({ name: s.name, calls: bySub.get(s.id) ?? 0 })),
-    }));
+      id: d.id, name: d.name, total: byDispo.get(d.id) ?? 0,
+      subs: (catalog.data?.subs ?? []).filter((s) => s.disposition_id === d.id).map((s) => ({ name: s.name, n: bySub.get(s.id) ?? 0 })).filter((x) => x.n > 0).sort((a, b) => b.n - a.n),
+    })).filter((x) => x.total > 0);
   }, [dispoCounts.data, catalog.data]);
 
   const board = useMemo(() => {
@@ -149,16 +91,17 @@ export function GamingCallerDashboard({ orgId }: { orgId: string }) {
 
   const status = attendance.data?.status;
   const attLabel = status === "present" ? "Present" : status === "half_day" ? "Half day" : status === "absent" ? "Absent" : "No record";
-  const week = (weekStats.data ?? []).slice().sort((a, b) => a.day.localeCompare(b.day));
-  const weekLabels = week.map((r) => format(parseISO(r.day), "EEE d"));
-  const boardNames = board.map((b) => (b.id === userId ? "You" : (callers.find((c) => c.id === b.id)?.name ?? "Caller").split(" ")[0]));
+  const metTargets = [today.calls >= DAILY_TARGETS.calls, today.clean_calls >= DAILY_TARGETS.clean, today.registrations >= DAILY_TARGETS.registrations, today.activations >= DAILY_TARGETS.activations].filter(Boolean).length;
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold text-foreground">Hello{me ? `, ${me.name.split(" ")[0]}` : ""}</h1>
-          <p className="text-sm text-muted-foreground">Your calling day: where you stand against today's targets.</p>
+          <p className="mt-1 max-w-3xl text-base text-foreground">
+            You dialled {today.calls} calls on {format(parseISO(day), "EEE d MMM")}: {pct(today.clean_calls, today.calls)}% were clean, {today.registrations} became registrations and {today.activations} activated.
+            {" "}You met {metTargets} of 4 daily targets.
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <label htmlFor="caller-day" className="text-sm text-muted-foreground">Day</label>
@@ -175,46 +118,38 @@ export function GamingCallerDashboard({ orgId }: { orgId: string }) {
         <Link to="/attendance" className="ml-auto text-sm text-primary underline">My attendance</Link>
       </Card>
 
-      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        <TargetTile label="Dialled" value={today.calls} target={DAILY_TARGETS.calls} color={SERIES.dialled} />
-        <TargetTile label="Clean calls" value={today.clean_calls} target={DAILY_TARGETS.clean} color={SERIES.clean} />
-        <TargetTile label="Registrations" value={today.registrations} target={DAILY_TARGETS.registrations} color={SERIES.registrations} />
-        <TargetTile label="Activations" value={today.activations} target={DAILY_TARGETS.activations} color={SERIES.activations} />
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <Tile label="Dialled" value={`${today.calls} / ${DAILY_TARGETS.calls}`} hint={today.calls >= DAILY_TARGETS.calls ? "target met" : `${DAILY_TARGETS.calls - today.calls} to go`} />
+        <Tile label="New dials" value={today.new_dials} hint="first-ever call to a lead" />
+        <Tile label="Connected" value={today.connected_calls} hint={`${pct(today.connected_calls, today.calls)}% of dialled`} />
+        <Tile label="Clean calls" value={`${today.clean_calls} / ${DAILY_TARGETS.clean}`} hint={today.clean_calls >= DAILY_TARGETS.clean ? "target met" : `${DAILY_TARGETS.clean - today.clean_calls} to go`} />
+        <Tile label="Registrations" value={`${today.registrations} / ${DAILY_TARGETS.registrations}`} hint={`${pct(today.registrations, today.clean_calls)}% of clean calls`} />
+        <Tile label="Activations" value={`${today.activations} / ${DAILY_TARGETS.activations}`} hint={`${pct(today.activations, today.registrations)}% of registrations`} />
       </div>
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-        <Tile label="New dials" value={today.new_dials} hint="first-ever calls to a lead" color={SERIES.newDials} />
-        <Tile label="Connected" value={today.connected_calls} hint={`${pct(today.connected_calls, today.calls)}% of your calls`} color={SERIES.connected} />
-        <Tile label="Clean calls" value={`${pct(today.clean_calls, today.calls)}%`} hint="of your calls ran a minute or more" color={SERIES.clean} />
-        <Tile label="Registrations" value={`${pct(today.registrations, today.clean_calls)}%`} hint="of your clean calls" color={SERIES.registrations} />
-        <Tile label="Activations" value={`${pct(today.activations, today.registrations)}%`} hint="of your registrations" color={SERIES.activations} />
-      </div>
+
+      <CallsByDateHour rows={hourly.data ?? []} note="Your calls, last 14 days." />
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <ChartCard title="Calls through the day" note="Dialled, connected and clean calls per hour">
-          <EChart option={groupedBarsOption(HOURS.map((h) => `${h}:00`), [
-            { name: "Dialled", color: SERIES.dialled, data: HOURS.map((h) => hourly.data?.get(h)?.calls ?? 0) },
-            { name: "Connected", color: SERIES.connected, data: HOURS.map((h) => hourly.data?.get(h)?.connected ?? 0) },
-            { name: "Clean", color: SERIES.clean, data: HOURS.map((h) => hourly.data?.get(h)?.clean ?? 0) },
-          ])} />
-        </ChartCard>
-        <ChartCard title="My funnel today">
-          <EChart option={funnelOption([
-            { name: "Calls dialled", value: today.calls, note: "" },
-            { name: "Clean calls", value: today.clean_calls, note: `${pct(today.clean_calls, today.calls)}% of calls` },
-            { name: "Registrations", value: today.registrations, note: `${pct(today.registrations, today.clean_calls)}% of clean` },
-            { name: "Activations", value: today.activations, note: `${pct(today.activations, today.registrations)}% of registered` },
-          ])} />
-        </ChartCard>
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-5">
-        <div className="lg:col-span-3">
-          <ChartCard title="How my calls ended" note="Each block is a disposition, split into its sub-dispositions; size is the number of calls" height={320}>
-            <EChart option={dispoTreemapOption(dispoNodes)} />
-          </ChartCard>
-        </div>
-        <div className="lg:col-span-2">
-          <Card className="h-full p-4">
+        <Card className="p-4">
+          <h2 className="text-sm font-semibold text-foreground">How your calls ended on {format(parseISO(day), "d MMM")}</h2>
+          {ended.length === 0 ? (
+            <p className="mt-2 text-sm text-muted-foreground">No calls on this day.</p>
+          ) : (
+            <div className="mt-3 space-y-3">
+              {ended.map((d) => (
+                <div key={d.id}>
+                  <div className="flex justify-between text-sm">
+                    <span className="font-medium text-foreground">{d.name}</span>
+                    <span className="tabular-nums text-foreground">{d.total} <span className="text-xs text-muted-foreground">({pct(d.total, today.calls)}%)</span></span>
+                  </div>
+                  {d.subs.length > 0 && <p className="text-xs text-muted-foreground">{d.subs.map((x) => `${x.name} ${x.n}`).join(" · ")}</p>}
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+        <div className="space-y-4">
+          <Card className="p-4">
             <h2 className="text-sm font-semibold text-foreground">Callbacks waiting for you</h2>
             {(callbacks.data ?? []).length === 0 ? (
               <p className="mt-2 text-sm text-muted-foreground">No callbacks scheduled.</p>
@@ -229,35 +164,24 @@ export function GamingCallerDashboard({ orgId }: { orgId: string }) {
               </ul>
             )}
           </Card>
+          <Card className="overflow-x-auto">
+            <h2 className="p-4 pb-0 text-sm font-semibold text-foreground">Team, last 7 days</h2>
+            <Table>
+              <TableHeader><TableRow><TableHead>#</TableHead><TableHead>Caller</TableHead><TableHead className="text-right">Registrations</TableHead><TableHead className="text-right">Activations</TableHead></TableRow></TableHeader>
+              <TableBody>
+                {board.map((b, i) => {
+                  const name = callers.find((c) => c.id === b.id)?.name.split(" ")[0] ?? "Caller";
+                  return (
+                    <TableRow key={b.id} className={b.id === userId ? "bg-muted/60 font-semibold" : ""}>
+                      <TableCell>{i + 1}</TableCell><TableCell>{b.id === userId ? `${name} (you)` : name}</TableCell>
+                      <TableCell className="text-right tabular-nums">{b.registrations}</TableCell><TableCell className="text-right tabular-nums">{b.activations}</TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </Card>
         </div>
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        <ChartCard title="My last 7 days" note="Dialled, connected and clean calls; the dashed line is the daily dialling target">
-          <EChart option={groupedBarsOption(weekLabels, [
-            { name: "Dialled", color: SERIES.dialled, data: week.map((r) => r.calls) },
-            { name: "Connected", color: SERIES.connected, data: week.map((r) => r.connected_calls) },
-            { name: "Clean", color: SERIES.clean, data: week.map((r) => r.clean_calls) },
-          ], "", DAILY_TARGETS.calls)} />
-        </ChartCard>
-        <ChartCard title="Registrations and activations, last 7 days">
-          <EChart option={linesOption(weekLabels, [
-            { name: "Registrations", color: SERIES.registrations, data: week.map((r) => r.registrations) },
-            { name: "Activations", color: SERIES.activations, data: week.map((r) => r.activations) },
-          ])} />
-        </ChartCard>
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        <ChartCard title="Team this week" note="Registrations and activations; you are the bar labelled “You”">
-          <EChart option={stackedBarsOption(boardNames, [
-            { name: "Registrations", color: SERIES.registrations, data: board.map((b) => b.registrations) },
-            { name: "Activations", color: SERIES.activations, data: board.map((b) => b.activations) },
-          ])} />
-        </ChartCard>
-        <ChartCard title="My leads by stage" note="Every lead assigned to you">
-          <EChart option={rankedBarsOption((myLeads.data ?? []).map((s) => ({ name: s.name, value: s.count, color: s.color ?? VIZ.blue })), "", 90)} />
-        </ChartCard>
       </div>
     </div>
   );

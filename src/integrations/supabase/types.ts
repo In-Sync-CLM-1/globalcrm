@@ -207,6 +207,80 @@ export type Database = {
           },
         ]
       }
+      ai_call_queue: {
+        Row: {
+          attempts: number
+          call_log_id: string | null
+          contact_id: string
+          created_at: string
+          created_by: string | null
+          id: string
+          last_error: string | null
+          next_attempt_at: string
+          org_id: string
+          script_id: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          attempts?: number
+          call_log_id?: string | null
+          contact_id: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          last_error?: string | null
+          next_attempt_at?: string
+          org_id: string
+          script_id: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          attempts?: number
+          call_log_id?: string | null
+          contact_id?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          last_error?: string | null
+          next_attempt_at?: string
+          org_id?: string
+          script_id?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_call_queue_call_log_id_fkey"
+            columns: ["call_log_id"]
+            isOneToOne: false
+            referencedRelation: "call_logs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_call_queue_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_call_queue_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_call_queue_script_id_fkey"
+            columns: ["script_id"]
+            isOneToOne: false
+            referencedRelation: "ai_call_scripts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       ai_call_scripts: {
         Row: {
           behavioral_guidelines: string | null
