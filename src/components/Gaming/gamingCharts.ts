@@ -15,10 +15,14 @@ const num = (n: number) => n.toLocaleString("en-IN");
 
 export interface DayPoint { label: string; calls: number; connected: number; clean: number }
 
-export function callsLineOption(points: DayPoint[]): EChartsOption {
+export type LineVariant = "line" | "area";
+
+/** The measures are nested, so the area version overlaps the fills (translucent) rather than stacking them. */
+export function callsLineOption(points: DayPoint[], variant: LineVariant = "line"): EChartsOption {
   const line = (name: string, key: "calls" | "connected" | "clean", color: string) => ({
     name, type: "line" as const, data: points.map((p) => p[key]), color,
-    symbol: "circle", symbolSize: 6, lineStyle: { width: 2.5 }, itemStyle: { borderColor: "#fff", borderWidth: 2 },
+    symbol: "circle", symbolSize: 8, lineStyle: { width: 4 }, itemStyle: { borderColor: "#fff", borderWidth: 2 },
+    ...(variant === "area" ? { areaStyle: { color, opacity: 0.2 } } : {}),
     endLabel: { show: true, formatter: `${name}`, color: INK, fontSize: 12, fontWeight: 600 },
     labelLayout: { moveOverlap: "shiftY" },
   });
