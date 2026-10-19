@@ -19,6 +19,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useNotification } from "@/hooks/useNotification";
 import { useOrgContext } from "@/hooks/useOrgContext";
 import { CallsByDateHour } from "@/components/Gaming/CallsByDateHour";
+import { CallsOverTime, type DayCounts } from "@/components/Gaming/CallsOverTime";
 import type { HourlyRow } from "@/components/Gaming/gamingStats";
 
 interface AiConfig {
@@ -155,6 +156,20 @@ export default function AiCalling() {
     return [...by.values()];
   }, [calls]);
 
+  // AI calls per date (IST) for the line chart
+  const dayRows = useMemo<DayCounts[]>(() => {
+    const by = new Map<string, DayCounts>();
+    for (const c of calls) {
+      const day = new Date(c.started_at as string).toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+      const e = by.get(day) ?? { day, calls: 0, connected_calls: 0, clean_calls: 0 };
+      e.calls++;
+      if ((c.conversation_duration ?? 0) > 0) e.connected_calls++;
+      if ((c.conversation_duration ?? 0) >= 60) e.clean_calls++;
+      by.set(day, e);
+    }
+    return [...by.values()];
+  }, [calls]);
+
   const lineReady = !!cfg.exotel_app_id;
   const set = (patch: Partial<AiConfig>) => setDraft({ ...settings, ...patch });
 
@@ -196,6 +211,7 @@ export default function AiCalling() {
                 </Card>
               ))}
             </div>
+            <CallsOverTime rows={dayRows} note="AI calls, last 30 days." />
             <CallsByDateHour rows={hourlyRows} measures={["calls", "connected_calls", "clean_calls"]} note="AI calls, last 30 days." />
             <Card className="overflow-x-auto">
               <h2 className="p-4 pb-0 text-sm font-semibold">How AI calls ended (last 30 days)</h2>

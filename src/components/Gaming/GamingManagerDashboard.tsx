@@ -7,11 +7,10 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { LoadingState } from "@/components/common/LoadingState";
-import { UrlTabs } from "@/components/UrlTabs";
 import { useUrlState } from "@/hooks/useUrlState";
 import { CallsByDateHour } from "./CallsByDateHour";
+import { CallsOverTime } from "./CallsOverTime";
 import {
   fmtClock, fmtHM, pct, sumStats, useCallers, useDayStats, useDispoCounts, useDispositionCatalog, useHourlyCounts, useLatestCallDay,
 } from "./gamingStats";
@@ -163,16 +162,12 @@ export function GamingManagerDashboard({ orgId }: { orgId: string }) {
         <p className="text-xs text-muted-foreground">Leads by stage: {(stages.data ?? []).map((s) => `${s.name} ${s.count.toLocaleString("en-IN")}`).join(" · ")}</p>
       )}
 
+      <CallsOverTime rows={rangeStats.data ?? []} />
+
       <CallsByDateHour rows={hourly.data ?? []} />
 
-      <UrlTabs defaultValue="day" className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="day">Day view</TabsTrigger>
-          <TabsTrigger value="dispositions">Dispositions</TabsTrigger>
-          <TabsTrigger value="attendance">Attendance</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="day" className="space-y-3">
+        <section className="space-y-3">
+          <h2 className="text-base font-semibold text-foreground">Callers on one day</h2>
           <div className="flex flex-wrap items-center gap-2">
             <label htmlFor="gaming-day" className="text-sm text-muted-foreground">Day</label>
             <Input id="gaming-day" type="date" className="w-44" value={day} max={format(new Date(), "yyyy-MM-dd")} onChange={(e) => e.target.value && setDayParam(e.target.value)} />
@@ -216,9 +211,10 @@ export function GamingManagerDashboard({ orgId }: { orgId: string }) {
           <p className="text-sm text-muted-foreground">
             A clean call lasts a minute or more: {pct(dayTotals.clean_calls, dayTotals.calls)}% of calls were clean, {pct(dayTotals.registrations, dayTotals.clean_calls)}% of those became registrations and {pct(dayTotals.activations, dayTotals.registrations)}% of registrations activated.
           </p>
-        </TabsContent>
+        </section>
 
-        <TabsContent value="dispositions" className="space-y-3">
+        <section className="space-y-3">
+          <h2 className="text-base font-semibold text-foreground">Dispositions and sub-dispositions</h2>
           <p className="text-sm text-muted-foreground">
             Every call ends with one disposition and one sub-disposition chosen by the caller. Registered and Activated drive the funnel.{" "}
             <Link to="/admin/call-dispositions" className="text-primary underline">Edit the list</Link>
@@ -260,9 +256,10 @@ export function GamingManagerDashboard({ orgId }: { orgId: string }) {
               </TableBody>
             </Table>
           </Card>
-        </TabsContent>
+        </section>
 
-        <TabsContent value="attendance" className="space-y-3">
+        <section className="space-y-3">
+          <h2 className="text-base font-semibold text-foreground">Attendance</h2>
           <p className="text-sm text-muted-foreground">
             Shift starts 10:00 with a 15 minute grace. Late = login after 10:15. Half day = under 8 hours logged in. Sundays and the 2nd and 4th Saturdays are off.{" "}
             <Link to="/admin/attendance-report" className="text-primary underline">Full attendance report</Link>
@@ -295,8 +292,7 @@ export function GamingManagerDashboard({ orgId }: { orgId: string }) {
             </Table>
           </Card>
           <p className="text-xs text-muted-foreground">P present · L late · H half day · A absent</p>
-        </TabsContent>
-      </UrlTabs>
+        </section>
     </div>
   );
 }
