@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { RmplProjectPicker } from "@/components/Pipeline/RmplProjectPicker";
 import { LoadingState } from "@/components/common/LoadingState";
 import { useNotification } from "@/hooks/useNotification";
-import { Mail, Phone as PhoneIcon, Building, LayoutGrid, Table as TableIcon, Loader2, Phone, MapPin, Factory, MessageSquare, MoreHorizontal, Pencil, Trash2, UserPlus, MessageCircle, Plus } from "lucide-react";
+import { Mail, Phone as PhoneIcon, Building, LayoutGrid, Table as TableIcon, Loader2, Phone, MapPin, Factory, MessageSquare, MoreHorizontal, Pencil, Trash2, UserPlus, MessageCircle, Plus, Upload, Sparkles } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -37,6 +37,7 @@ import IedupPipeline from "@/pages/IedupPipeline";
 import { IEDUP_ORG_ID } from "@/hooks/useIsIedup";
 import { useUrlState } from "@/hooks/useUrlState";
 import { useGamingAccess } from "@/hooks/useGamingAccess";
+import { BulkUploadDialog } from "@/components/Contacts/BulkUpload/BulkUploadDialog";
 interface PipelineStage {
   id: string;
   name: string;
@@ -465,6 +466,8 @@ export default function PipelineBoard() {
 
   // Gaming CRM Demo shows the sub-disposition of each lead's latest call.
   const gaming = useGamingAccess();
+  const [bulkUploadOpen, setBulkUploadOpen] = useState(false);
+  const [aiQueueing, setAiQueueing] = useState(false);
   const { data: subDispositionByContact } = useQuery({
     queryKey: ['pipeline-latest-sub-dispositions', latestDispositionsByContact],
     queryFn: async () => {
@@ -1003,6 +1006,12 @@ export default function PipelineBoard() {
               <Plus className="h-4 w-4 mr-2" />
               Create Contact
             </Button>
+            {gaming.isGaming && gaming.canUpload && (
+              <Button variant="outline" onClick={() => setBulkUploadOpen(true)}>
+                <Upload className="h-4 w-4 mr-2" />
+                Upload Contacts
+              </Button>
+            )}
             <QuickDial />
           </div>
         </div>
@@ -1232,6 +1241,23 @@ export default function PipelineBoard() {
                     <UserPlus className="h-4 w-4 mr-1.5" />
                     Assign {selectedIds.size} contact{selectedIds.size === 1 ? "" : "s"}
                   </Button>
+                  {gaming.isGaming && gaming.canUpload && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={aiQueueing || selectedIds.size === 0}
+                      onClick={async () => {
+                        setAiQueueing(true);
+                        const { data, error } = await supabase.functions.invoke("ai-call-enqueue", { body: { action: "enqueue", contact_ids: [...selectedIds] } });
+                        setAiQueueing(false);
+                        if (error || data?.success === false) { notify.error("Could not queue AI calls", data?.error ?? error?.message); return; }
+                        notify.success("Queued for AI calls", `${data.queued} contact${data.queued === 1 ? "" : "s"} queued${data.already_queued ? `, ${data.already_queued} already queued` : ""}. Track them under AI Calling.`);
+                      }}
+                    >
+                      {aiQueueing ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Sparkles className="h-4 w-4 mr-1.5" />}
+                      AI call {selectedIds.size} contact{selectedIds.size === 1 ? "" : "s"}
+                    </Button>
+                  )}
                   <Button
                     size="sm"
                     onClick={openBulkCall}
@@ -1345,16 +1371,18 @@ export default function PipelineBoard() {
                                   <Phone className="h-4 w-4" />
                                 )}
                               </Button>
-                              <Button
-                                size="icon"
-                                variant="outline"
-                                className="h-8 w-8"
-                                disabled={!contact.primaryPhone && !contact.phone}
-                                onClick={(e) => handleWhatsAppClick(contact, e)}
-                                title="Send WhatsApp"
-                              >
-                                <MessageSquare className="h-4 w-4" />
-                              </Button>
+                              {gaming.whatsapp && (
+                                <Button
+                                  size="icon"
+                                  variant="outline"
+                                  className="h-8 w-8"
+                                  disabled={!contact.primaryPhone && !contact.phone}
+                                  onClick={(e) => handleWhatsAppClick(contact, e)}
+                                  title="Send WhatsApp"
+                                >
+                                  <MessageSquare className="h-4 w-4" />
+                                </Button>
+                              )}
                               <Button
                                 size="icon"
                                 variant="outline"
@@ -1713,6 +1741,15 @@ export default function PipelineBoard() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {gaming.isGaming && gaming.canUpload && effectiveOrgId && (
+          <BulkUploadDialog
+            open={bulkUploadOpen}
+            onOpenChange={setBulkUploadOpen}
+            orgId={effectiveOrgId}
+            onUploadStarted={() => queryClient.invalidateQueries({ queryKey: ['pipeline-contacts'] })}
+          />
+        )}
 
         {/* Create Contact Dialog */}
         <CreateContactDialog

@@ -18,6 +18,8 @@ export function useGamingAccess() {
     isGaming,
     canExport: !isGaming || privileged,
     canUpload: !isGaming || privileged,
+    /** WhatsApp is not offered to this org. */
+    whatsapp: !isGaming,
     masked,
     phone: (v: string | null | undefined) => (masked ? maskPhone(v) : v ?? ""),
     email: (v: string | null | undefined) => (masked ? maskEmail(v) : v ?? ""),

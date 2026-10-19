@@ -72,7 +72,7 @@ const DISPOS = [
   ['Callback Requested', 'follow_up', 'Lead asked to be called again', [['Call Later Today', 3], ['Call Tomorrow', 2], ['Specific Time Given', 1.5], ['Busy Right Now', 0.5]]],
   ['Not Interested', 'negative', 'Lead declined to register', [['Already Plays Elsewhere', 6], ['Does Not Play Online Games', 5], ['Not Eligible (Under 18 / Restricted State)', 2], ['Trust or Safety Concern', 3], ['No Time', 4]]],
   ['Already Registered', 'neutral', 'Lead already has an account', [['Existing Active Player', 2.5], ['Existing Inactive Player', 1.5]]],
-  ['Interested', 'positive', 'Lead wants to register but has not yet', [['Link Sent on WhatsApp', 5], ['Wants Welcome Reward Details', 2.5], ['Will Register Today', 1.5], ['Will Register This Week', 1]]],
+  ['Interested', 'positive', 'Lead wants to register but has not yet', [['Registration Link Sent', 5], ['Wants Welcome Reward Details', 2.5], ['Will Register Today', 1.5], ['Will Register This Week', 1]]],
   ['Registered', 'positive', 'Lead created an account during the call', [['New Signup', 4.5], ['Registered via Link Sent', 2], ['Returning Player Re-registered', 1]]],
   ['Activated', 'positive', 'Registered player took a first meaningful action', [['Played First Game', 1], ['Claimed Welcome Reward', 1], ['Invited a Friend', 1]]],
 ];

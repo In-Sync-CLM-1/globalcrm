@@ -395,6 +395,17 @@ function DashboardLayout({ children }: DashboardLayoutProps) {
                 </Link>
               )}
 
+              {isAdmin && canAccessFeature("ai_calling") && (
+                <Link
+                  to="/ai-calling"
+                  className="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-primary transition-colors"
+                  onClick={() => setSidebarOpen(false)}
+                >
+                  <Sparkles size={16} className="shrink-0 text-sidebar-muted" />
+                  <span>AI Calling</span>
+                </Link>
+              )}
+
               {(canAccessFeature("campaigns_whatsapp") || canAccessFeature("campaigns_email")) && (
                 <>
                   <div className="pt-3 pb-1 px-2">
@@ -654,17 +665,6 @@ function DashboardLayout({ children }: DashboardLayoutProps) {
                     >
                       <Building2 size={16} className="shrink-0 text-sidebar-muted" />
                       <span>Settings</span>
-                    </Link>
-                  )}
-
-                  {userRole === "admin" && canAccessFeature("ai_calling") && (
-                    <Link
-                      to="/ai-calling"
-                      className="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-primary transition-colors"
-                      onClick={() => setSidebarOpen(false)}
-                    >
-                      <Sparkles size={16} className="shrink-0 text-sidebar-muted" />
-                      <span>AI Calling</span>
                     </Link>
                   )}
 

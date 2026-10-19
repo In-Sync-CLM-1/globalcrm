@@ -634,16 +634,18 @@ Jane,Smith,jane.smith@example.com,+0987654321,Tech Inc,CEO,contacted,Referral`;
                                 <PhoneIcon className="h-4 w-4" />
                               )}
                             </Button>
-                            <Button
-                              size="icon"
-                              variant="outline"
-                              className="h-8 w-8"
-                              disabled={!contact.phone}
-                              onClick={(e) => handleWhatsAppClick(contact, e)}
-                              title="Send WhatsApp"
-                            >
-                              <MessageSquare className="h-4 w-4" />
-                            </Button>
+                            {gaming.whatsapp && (
+                              <Button
+                                size="icon"
+                                variant="outline"
+                                className="h-8 w-8"
+                                disabled={!contact.phone}
+                                onClick={(e) => handleWhatsAppClick(contact, e)}
+                                title="Send WhatsApp"
+                              >
+                                <MessageSquare className="h-4 w-4" />
+                              </Button>
+                            )}
                             <Button
                               size="icon"
                               variant="outline"
