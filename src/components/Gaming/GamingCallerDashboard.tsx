@@ -11,6 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { LoadingState } from "@/components/common/LoadingState";
 import { useUrlState } from "@/hooks/useUrlState";
 import { CallsByDateHour } from "./CallsByDateHour";
+import { CallsOverTime } from "./CallsOverTime";
 import { DAILY_TARGETS, fmtClock, fmtHM, pct, sumStats, useCallers, useDayStats, useDispoCounts, useDispositionCatalog, useHourlyCounts, useLatestCallDay } from "./gamingStats";
 
 function Tile({ label, value, hint }: { label: string; value: string | number; hint?: string }) {
@@ -37,6 +38,7 @@ export function GamingCallerDashboard({ orgId }: { orgId: string }) {
 
   const dayStats = useDayStats(orgId, day, day, userId);
   const teamWeek = useDayStats(orgId, format(addDays(parseISO(day), -6), "yyyy-MM-dd"), day);
+  const myDays = useDayStats(orgId, weekFrom, day, userId);
   const hourly = useHourlyCounts(orgId, weekFrom, day, userId);
   const dispoCounts = useDispoCounts(orgId, day, day, userId);
   const catalog = useDispositionCatalog(orgId);
@@ -126,6 +128,8 @@ export function GamingCallerDashboard({ orgId }: { orgId: string }) {
         <Tile label="Registrations" value={`${today.registrations} / ${DAILY_TARGETS.registrations}`} hint={`${pct(today.registrations, today.clean_calls)}% of clean calls`} />
         <Tile label="Activations" value={`${today.activations} / ${DAILY_TARGETS.activations}`} hint={`${pct(today.activations, today.registrations)}% of registrations`} />
       </div>
+
+      <CallsOverTime rows={myDays.data ?? []} note="Your calls, last 14 days." />
 
       <CallsByDateHour rows={hourly.data ?? []} note="Your calls, last 14 days." />
 
