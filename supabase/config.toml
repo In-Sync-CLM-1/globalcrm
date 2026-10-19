@@ -189,3 +189,6 @@ verify_jwt = false
 
 [functions.ai-call-enqueue]
 verify_jwt = false
+
+[functions.set-encryption-key]
+verify_jwt = false
