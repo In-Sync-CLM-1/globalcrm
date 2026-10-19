@@ -1,15 +1,14 @@
 import type { EChartsOption } from "echarts";
 
-// The dashboards' single graph: Dialled, Connected and Clean calls per date, absolute counts only.
-// Colour rule: one blue hue. The three measures are nested (every clean call was connected, every
-// connected call was dialled), so they share the hue and differ in depth: darkest = dialled,
-// lightest = clean. Lines are labelled directly at their right-hand end.
+// The dashboards' main graph: Dialled, Connected and Clean calls per date, absolute counts only.
+// Three distinct, colour-blind-safe hues (blue, green, amber) so the lines can be told apart at a glance;
+// each line is also named directly at its right-hand end. The heat-map below uses a blue ramp for magnitude.
 
 export const INK = "#1f2937";
 export const MUTED = "#6b7280";
 export const GRID = "#e5e7eb";
 export const RAMP = ["#eef3fb", "#c4d8f2", "#7fa9e0", "#2f6fc4", "#17468a"];
-export const SERIES = { dialled: "#17468a", connected: "#2f6fc4", clean: "#7fa9e0" } as const;
+export const SERIES = { dialled: "#2a78d6", connected: "#1baf7a", clean: "#eda100" } as const;
 
 const TEXT = { fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif', color: MUTED };
 const num = (n: number) => n.toLocaleString("en-IN");
