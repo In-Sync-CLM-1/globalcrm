@@ -67,10 +67,25 @@ serve(async (req) => {
     contact = ins.data;
   }
 
-  const wa = await sendWhatsAppTemplate(supabase, {
-    orgId: IEDUP_ORG_ID, sender: WA_SENDER_BY_ORG[IEDUP_ORG_ID], contact, phone, templateName: WA_TEMPLATE, languageCode: "en", floor,
-    bodyParams: [name, course, applicationNo], headerDocument: { link: BROCHURE_URL, filename: "IEDUP-Brochure.pdf" },
-  });
+  // The other two RAMP templates are WhatsApp-only follow-ups (no email, no brochure).
+  const kind = String(body.kind ?? "registration_confirmed");
+  const detail = String(body.detail ?? "").trim().slice(0, 100);
+  const next = String(body.next_step ?? "").trim().slice(0, 150);
+  const wa = kind === "application_pending"
+    ? await sendWhatsAppTemplate(supabase, {
+      orgId: IEDUP_ORG_ID, sender: WA_SENDER_BY_ORG[IEDUP_ORG_ID], contact, phone, templateName: "iedup_application_pending_v3", languageCode: "en", floor,
+      bodyParams: [name, course, detail || "Pending step", applicationNo],
+    })
+    : kind === "application_status"
+    ? await sendWhatsAppTemplate(supabase, {
+      orgId: IEDUP_ORG_ID, sender: WA_SENDER_BY_ORG[IEDUP_ORG_ID], contact, phone, templateName: "iedup_application_status_v3", languageCode: "en", floor,
+      bodyParams: [name, applicationNo, course, detail || "Update", next || "We will keep you posted"],
+    })
+    : await sendWhatsAppTemplate(supabase, {
+      orgId: IEDUP_ORG_ID, sender: WA_SENDER_BY_ORG[IEDUP_ORG_ID], contact, phone, templateName: WA_TEMPLATE, languageCode: "en", floor,
+      bodyParams: [name, course, applicationNo], headerDocument: { link: BROCHURE_URL, filename: "IEDUP-Brochure.pdf" },
+    });
+  if (kind !== "registration_confirmed") return json(200, { whatsapp: wa });
 
   let mail: { ok: boolean; error?: string } = { ok: false, error: "no email" };
   const senderCfg = EMAIL_SENDER_BY_ORG[IEDUP_ORG_ID];
