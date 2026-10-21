@@ -125,9 +125,9 @@ export async function refundFunds(
 // the DLR webhook advances) and charges the wallet.
 export async function sendWhatsAppTemplate(
   supabase: any,
-  args: { orgId: string; sender: string; contact: any; phone: string; templateName: string; languageCode: string; floor: number | null },
+  args: { orgId: string; sender: string; contact: any; phone: string; templateName: string; languageCode: string; floor: number | null; bodyParams?: string[]; headerDocument?: { link: string; filename: string } },
 ): Promise<{ ok: boolean; error?: string; insufficientFunds?: boolean }> {
-  const { orgId, sender, contact, phone, templateName, languageCode, floor } = args;
+  const { orgId, sender, contact, phone, templateName, languageCode, floor, bodyParams, headerDocument } = args;
   const apiKey = Deno.env.get("EXOTEL_API_KEY");
   const apiToken = Deno.env.get("EXOTEL_API_TOKEN");
   const sid = Deno.env.get("EXOTEL_SID");
@@ -153,7 +153,10 @@ export async function sendWhatsAppTemplate(
   const hasBodyMappings = !!fieldMappings?.body && Object.keys(fieldMappings.body).length > 0;
 
   let params: string[];
-  if (hasBodyMappings) {
+  if (bodyParams) {
+    // Caller supplies the values directly (e.g. the RAMP portal), so no contact field mapping is needed.
+    params = bodyParams;
+  } else if (hasBodyMappings) {
     const resolved = await resolveWhatsAppFieldMappings(fieldMappings, contact, supabase);
     params = Object.entries(resolved.bodyValues)
       .sort(([a], [b]) => Number(a) - Number(b))
@@ -164,9 +167,9 @@ export async function sendWhatsAppTemplate(
     const NAME_PARAM_PREFIXES = ["iedup_cmyuva_training_helpdesk", "iedup_cmyuva_assessment_link"];
     params = NAME_PARAM_PREFIXES.some((p) => templateName.startsWith(p)) ? [name] : [];
   }
-  const components = params.length > 0
-    ? [{ type: "body", parameters: params.map((p) => ({ type: "text", text: p })) }]
-    : [];
+  const components: any[] = [];
+  if (headerDocument) components.push({ type: "header", parameters: [{ type: "document", document: headerDocument }] });
+  if (params.length > 0) components.push({ type: "body", parameters: params.map((p) => ({ type: "text", text: p })) });
 
   const { data: waLogRow } = await supabase
     .from("whatsapp_logs")

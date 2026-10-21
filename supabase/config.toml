@@ -36,6 +36,9 @@ verify_jwt = true
 [functions.delete-exotel-whatsapp-template]
 verify_jwt = true
 
+[functions.iedup-ramp-notify]
+verify_jwt = false
+
 [functions.iedup-fire-action]
 verify_jwt = true
 
