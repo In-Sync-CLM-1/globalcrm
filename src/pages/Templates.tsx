@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useOrgContext } from "@/hooks/useOrgContext";
 import { useNotification } from "@/hooks/useNotification";
@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { LoadingState } from "@/components/common/LoadingState";
 import { EmptyState } from "@/components/common/EmptyState";
-import { MessageSquare, RefreshCw, Plus, Mail } from "lucide-react";
+import { MessageSquare, RefreshCw, Plus, Mail, Trash2 } from "lucide-react";
 import { format } from "date-fns";
 import { StandardEmailTemplateDialog } from "@/components/Templates/StandardEmailTemplateDialog";
 import { useUrlState } from "@/hooks/useUrlState";
@@ -42,6 +42,8 @@ interface EmailTemplate {
 const Templates = () => {
   const { effectiveOrgId } = useOrgContext();
   const notify = useNotification();
+  const queryClient = useQueryClient();
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [queuedJobId, setQueuedJobId] = useState<string | null>(null);
   const [queueStatus, setQueueStatus] = useState<string | null>(null);
@@ -157,6 +159,27 @@ const Templates = () => {
     } catch (error: any) {
       console.error("Error deleting template:", error);
       notify.error("Error", "Failed to delete template");
+    }
+  };
+
+  const handleDeleteWhatsApp = async (template: WhatsAppTemplate) => {
+    if (!notify.confirm(`Delete the WhatsApp template "${template.template_name}"? It is also removed from WhatsApp, and WhatsApp will not allow a new template with the same name for about 4 weeks.`)) return;
+    setDeletingId(template.id);
+    try {
+      const { data, error } = await supabase.functions.invoke("delete-exotel-whatsapp-template", { body: { template_id: template.id } });
+      if (error) {
+        let detail = "";
+        try { detail = (await (error as any).context?.json?.())?.error ?? ""; } catch { /* no body */ }
+        throw new Error(detail || error.message);
+      }
+      if (data?.error) throw new Error(data.error);
+      notify.success("Success", "Template deleted");
+      queryClient.invalidateQueries({ queryKey: ['whatsapp-templates', effectiveOrgId] });
+    } catch (error: any) {
+      console.error("Error deleting WhatsApp template:", error);
+      notify.error("Error", error?.message || "Could not delete the template");
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -297,6 +320,16 @@ const Templates = () => {
                       <div className="text-xs text-muted-foreground">
                         Last synced: {format(new Date(template.last_synced_at), "PPp")}
                       </div>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={() => handleDeleteWhatsApp(template)}
+                        disabled={deletingId === template.id}
+                        className="w-full"
+                      >
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        {deletingId === template.id ? "Deleting..." : "Delete"}
+                      </Button>
                     </CardContent>
                   </Card>
                 ))}
