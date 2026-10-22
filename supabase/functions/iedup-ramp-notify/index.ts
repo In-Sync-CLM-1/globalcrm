@@ -43,6 +43,39 @@ serve(async (req) => {
   if (!secret || req.headers.get("x-ramp-secret") !== secret) return json(401, { error: "Unauthorized" });
 
   const body = await req.json().catch(() => ({}));
+
+  // Status updates for many people at once (staff approving or rejecting registrations): answer straight away and send in the background.
+  if (body.kind === "application_status" && Array.isArray(body.items)) {
+    const items = (body.items as Record<string, unknown>[]).slice(0, 200);
+    const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    const gate = await orgServiceGate(db, IEDUP_ORG_ID);
+    if (!gate.allowed) return json(402, { error: gate.reason });
+    const floor = typeof gate.floor === "number" ? gate.floor : null;
+    const work = (async () => {
+      for (const it of items) {
+        try {
+          const m = String(it.mobile ?? "").replace(/\D/g, "").slice(-10);
+          const nm = String(it.name ?? "").replace(/\s+/g, " ").trim().slice(0, 60) || "Participant";
+          const appNo = String(it.application_no ?? "").trim().slice(0, 40);
+          if (m.length !== 10 || !appNo) continue;
+          const ph = `+91${m}`;
+          let { data: c } = await db.from("contacts").select("id, first_name, email, phone").eq("org_id", IEDUP_ORG_ID).eq("phone", ph).limit(1).maybeSingle();
+          if (!c) {
+            const ins = await db.from("contacts").insert({ org_id: IEDUP_ORG_ID, first_name: nm, phone: ph, source: "ramp_portal" }).select("id, first_name, email, phone").single();
+            if (ins.error) continue;
+            c = ins.data;
+          }
+          await sendWhatsAppTemplate(db, {
+            orgId: IEDUP_ORG_ID, sender: WA_SENDER_BY_ORG[IEDUP_ORG_ID], contact: c, phone: ph, templateName: "iedup_application_status_v3", languageCode: "en", floor,
+            bodyParams: [nm, appNo, String(it.course ?? "").trim().slice(0, 100) || "UP RAMP programme", String(it.detail ?? "").trim().slice(0, 100) || "Update", String(it.next_step ?? "").trim().slice(0, 150) || "We will keep you posted"],
+          });
+        } catch (e) { console.error("status send failed", String(e)); }
+      }
+    })();
+    // @ts-ignore EdgeRuntime is provided by the Supabase edge runtime
+    if (typeof EdgeRuntime !== "undefined") EdgeRuntime.waitUntil(work); else await work;
+    return json(202, { queued: items.length });
+  }
   const mobile = String(body.mobile ?? "").replace(/\D/g, "").slice(-10);
   const email = String(body.email ?? "").trim();
   const name = String(body.name ?? "").replace(/\s+/g, " ").trim().slice(0, 60) || "Participant";
