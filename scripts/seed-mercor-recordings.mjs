@@ -1,5 +1,5 @@
 // Seeds the "Mercor Recordings" org: pipeline stages from "Jan-Mar 2027 Stage Calibration.xlsx"
-// (probabilities 10/20/30/40/50 plus Won and Lost) and 1,000 contacts spread across them.
+// (probabilities 10/20/40/60/80 plus Won and Lost) and 1,000 contacts spread across them.
 // Run: node scripts/seed-mercor-recordings.mjs [--reset]
 import { randomBytes, randomUUID } from 'node:crypto';
 import { appendFileSync } from 'node:fs';
@@ -30,8 +30,8 @@ const pick = (a) => a[Math.floor(rnd() * a.length)];
 // Open stages follow the workbook's reached counts (100/110/110/100/100) over 700 records;
 // the 300 closed records follow its overall win rate (123 won / 397 lost of 520).
 const STAGES = [
-  ['New', 1, 10, '#8AD4EB', 133], ['Contacted', 2, 20, '#01B8AA', 148], ['Qualified', 3, 30, '#F2C80F', 148],
-  ['Proposal', 4, 40, '#A66999', 135], ['Negotiation', 5, 50, '#E66C37', 136],
+  ['New', 1, 10, '#8AD4EB', 133], ['Contacted', 2, 20, '#01B8AA', 148], ['Qualified', 3, 40, '#F2C80F', 148],
+  ['Proposal', 4, 60, '#A66999', 135], ['Negotiation', 5, 80, '#E66C37', 136],
   ['Won', 6, 100, '#168980', 71], ['Lost', 7, 0, '#FD625E', 229],
 ];
 const FIRST = ['Aarav', 'Aditya', 'Ananya', 'Arjun', 'Divya', 'Gaurav', 'Ishaan', 'Karan', 'Kavya', 'Manish', 'Meera', 'Nisha', 'Priya', 'Rahul', 'Rohit', 'Sanjay', 'Sneha', 'Suresh', 'Varun', 'Vikram', 'Imran', 'Gurpreet', 'Lakshmi', 'Murali', 'Hetal', 'Mihir'];
