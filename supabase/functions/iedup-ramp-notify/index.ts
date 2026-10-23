@@ -24,16 +24,18 @@ function emailHtml(name: string, course: string, applicationNo: string) {
 <table role="presentation" width="100%" style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:10px;overflow:hidden" cellspacing="0" cellpadding="0">
 <tr><td style="background:#0c2d5e;color:#ffffff;padding:18px 28px;font-size:13px;letter-spacing:.08em">IEDUP · UP RAMP</td></tr>
 <tr><td style="padding:28px">
-<h1 style="margin:0 0 6px;font-size:22px;color:#0c2d5e">Registration confirmed</h1>
-<p style="margin:0 0 20px;font-size:15px;color:#5b6877">Dear ${esc(name)}, your registration for the ${esc(course)} is confirmed.</p>
+<h1 style="margin:0 0 6px;font-size:22px;color:#0c2d5e">Thank you for your interest</h1>
+<p style="margin:0 0 20px;font-size:15px;color:#5b6877">Dear ${esc(name)}, we have received your registration for the ${esc(course)} programme at the Institute of Entrepreneurship Development, U.P. (IEDUP), an autonomous organisation under the Department of MSME &amp; Export Promotion, Govt. of Uttar Pradesh.</p>
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#e8f1fb;border-radius:8px"><tr><td style="padding:14px 18px">
 <div style="font-size:12px;color:#5b6877;text-transform:uppercase;letter-spacing:.08em">Application number</div>
 <div style="font-size:24px;font-weight:700;color:#0c2d5e">${esc(applicationNo)}</div></td></tr></table>
-<p style="margin:20px 0 4px;font-size:15px"><b>What next</b></p>
-<p style="margin:0 0 22px;font-size:15px;line-height:1.5">Applications are screened for suitability. We will update you by email and WhatsApp.</p>
-${btn(SITE, "Registration page", true)}${btn(BROCHURE_URL, "Download brochure", false)}
+<p style="margin:20px 0 4px;font-size:15px"><b>Programme details</b></p>
+<p style="margin:0 0 16px;font-size:14px;line-height:1.6">Organised by IEDUP under RAMP (Raising and Accelerating MSME Performance), a collaboration of the Government of Uttar Pradesh and the World Bank.<br>Duration: 3 months, with 1 hour of online classes daily for 2 months, followed by a bootcamp and exposure visits.<br>Curriculum: developed by IITians and vetted by IIT Kanpur.<br>Certification: government-recognised.</p>
+<p style="margin:0 0 4px;font-size:15px"><b>What happens next</b></p>
+<p style="margin:0 0 22px;font-size:14px;line-height:1.6">Your application will be screened for suitability. The final decision rests with IEDUP. We will inform you of the result by email and WhatsApp, on the contact details you gave us. You can log in with your registered mobile number at ramp.in-sync.co.in to see your application. The programme brochure is attached.</p>
+${btn(`${SITE}/register/upramp`, "Register / log in", true)}${btn(BROCHURE_URL, "Download brochure", false)}
 </td></tr>
-<tr><td style="padding:16px 28px;background:#f3f6fb;font-size:12px;line-height:1.5;color:#5b6877">Institute of Entrepreneurship Development, U.P. (IEDUP), Dept. of MSME &amp; Export Promotion, Govt. of U.P.<br>Queries: Mr. Vibhu Dixit, +91 7607359820 · www.iedup.in</td></tr>
+<tr><td style="padding:16px 28px;background:#f3f6fb;font-size:12px;line-height:1.5;color:#5b6877">Institute of Entrepreneurship Development, U.P. (IEDUP), Dept. of MSME &amp; Export Promotion, Govt. of U.P.<br>Queries: Mr. Vibhu Dixit, +91 7607359820 · www.iedup.in<br>A-1 &amp; 2, Industrial Area, Sarojini Nagar, Lucknow – 226008<br><br>You are receiving this message because you expressed interest in this programme.</td></tr>
 </table></div>`;
 }
 
