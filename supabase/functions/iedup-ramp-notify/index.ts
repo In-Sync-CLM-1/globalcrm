@@ -1,3 +1,4 @@
+// (client copy 2026-10-24)
 // Called by the UP RAMP portal (ramp.in-sync.co.in) right after someone registers.
 // Sends the registration-confirmed WhatsApp and email on behalf of the IEDUP org,
 // so both are logged against a contact and charged to the IEDUP wallet at the
