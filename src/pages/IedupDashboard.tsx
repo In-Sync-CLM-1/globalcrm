@@ -38,17 +38,6 @@ const templateLabel = (n: string | null) =>
 
 const C = { sent: "#3b82f6", delivered: "#10b981", opened: "#8b5cf6", placed: "#6366f1", connected: "#10b981", emailSent: "#f59e0b", emailFailed: "#ef4444" };
 
-// The API returns at most 1000 rows per request, so a busy period is read page by page.
-async function fetchAllRows(build: (from: number, to: number) => PromiseLike<{ data: any[] | null }>) {
-  const rows: any[] = [];
-  for (let from = 0; ; from += 1000) {
-    const { data } = await build(from, from + 999);
-    rows.push(...(data ?? []));
-    if (!data || data.length < 1000) break;
-  }
-  return rows;
-}
-
 export default function IedupDashboard() {
   const { isLoading: orgLoading } = useIsIedup();
   const [datePreset, setDatePreset, dateRange, setDateRange] = useUrlDateRange("this_month");
@@ -67,44 +56,16 @@ export default function IedupDashboard() {
     refetchInterval: REFRESH_MS,
   });
 
-  // Calls within the selected period
-  const { data: callRows } = useQuery({
-    queryKey: ["iedup-calls", rangeKey],
+  // Every figure for the selected period is aggregated inside the database (one small response,
+  // no row cap), so busy periods are never under-counted.
+  const { data: stats } = useQuery({
+    queryKey: ["iedup-dashboard-stats", rangeKey],
     queryFn: async () => {
-      return fetchAllRows((f, t) => supabase
-        .from("call_logs")
-        .select("status, conversation_duration, started_at, created_at")
-        .eq("org_id", IEDUP_ORG_ID).eq("caller_type", "ai")
-        .gte("created_at", fromIso).lte("created_at", toIso)
-        .order("id").range(f, t));
-    },
-    refetchInterval: REFRESH_MS,
-  });
-
-  // WhatsApp within the selected period
-  const { data: waRows } = useQuery({
-    queryKey: ["iedup-wa", rangeKey],
-    queryFn: async () => {
-      return fetchAllRows((f, t) => supabase
-        .from("whatsapp_logs")
-        .select("status, template_name, sent_at, delivered_at, read_at, created_at, cost_charged")
-        .eq("org_id", IEDUP_ORG_ID)
-        .gte("created_at", fromIso).lte("created_at", toIso)
-        .order("id").range(f, t));
-    },
-    refetchInterval: REFRESH_MS,
-  });
-
-  // Emails within the selected period
-  const { data: emailRows } = useQuery({
-    queryKey: ["iedup-email", rangeKey],
-    queryFn: async () => {
-      return fetchAllRows((f, t) => supabase
-        .from("pipeline_email_log")
-        .select("status, subject, sent_at, failed_at, created_at, cost_charged")
-        .eq("org_id", IEDUP_ORG_ID)
-        .gte("created_at", fromIso).lte("created_at", toIso)
-        .order("id").range(f, t));
+      const { data, error } = await supabase.rpc("get_iedup_dashboard_stats" as any, {
+        p_org: IEDUP_ORG_ID, p_from: fromIso, p_to: toIso,
+      });
+      if (error) throw error;
+      return data as any;
     },
     refetchInterval: REFRESH_MS,
   });
@@ -117,41 +78,33 @@ export default function IedupDashboard() {
 
   // ---- Derived metrics ------------------------------------------------------
   const calls = useMemo(() => {
-    const all = callRows || [];
-    const placed = all.length;
-    const connected = all.filter((r: any) => Number(r.conversation_duration || 0) >= 5).length;
-    const noAnswer = all.filter((r: any) => ["no-answer", "busy", "canceled"].includes(String(r.status))).length;
-    const failed = all.filter((r: any) => ["failed", "error"].includes(String(r.status))).length;
-    const totalSec = all.reduce((a: number, r: any) => a + Number(r.conversation_duration || 0), 0);
-    return { placed, connected, noAnswer, failed, avgSec: placed ? Math.round(totalSec / placed) : 0, costRupees: Math.ceil(totalSec / 60) * 3 };
-  }, [callRows]);
+    const c = stats?.calls || {};
+    const placed = Number(c.placed || 0);
+    const totalSec = Number(c.total_sec || 0);
+    return { placed, connected: Number(c.connected || 0), avgSec: placed ? Math.round(totalSec / placed) : 0, costRupees: Math.ceil(totalSec / 60) * 3 };
+  }, [stats]);
 
   const wa = useMemo(() => {
-    const all = waRows || [];
-    const sent = all.filter((r: any) => ["sent", "delivered", "read"].includes(String(r.status))).length;
-    const delivered = all.filter((r: any) => ["delivered", "read"].includes(String(r.status)) || r.delivered_at).length;
-    const opened = all.filter((r: any) => String(r.status) === "read" || r.read_at).length;
-    const failed = all.filter((r: any) => String(r.status) === "failed").length;
-    const cost = all.reduce((a: number, r: any) => a + Number(r.cost_charged || 0), 0);
-    const openRate = sent ? Math.round((opened / sent) * 100) : 0;
-    const deliveryRate = sent ? Math.round((delivered / sent) * 100) : 0;
-    return { sent, delivered, opened, failed, cost, openRate, deliveryRate };
-  }, [waRows]);
+    const w = stats?.wa || {};
+    const sent = Number(w.sent || 0), delivered = Number(w.delivered || 0), opened = Number(w.opened || 0);
+    return {
+      sent, delivered, opened, failed: Number(w.failed || 0), cost: Number(w.cost || 0),
+      openRate: sent ? Math.round((opened / sent) * 100) : 0,
+      deliveryRate: sent ? Math.round((delivered / sent) * 100) : 0,
+    };
+  }, [stats]);
 
   const email = useMemo(() => {
-    const all = emailRows || [];
-    const sent = all.filter((r: any) => r.status === "sent").length;
-    const failed = all.filter((r: any) => r.status === "failed").length;
-    const cost = all.reduce((a: number, r: any) => a + Number(r.cost_charged || 0), 0);
-    return { sent, failed, cost, total: sent + failed };
-  }, [emailRows]);
+    const e = stats?.email || {};
+    const sent = Number(e.sent || 0), failed = Number(e.failed || 0);
+    return { sent, failed, cost: Number(e.cost || 0), total: sent + failed };
+  }, [stats]);
 
   // Per-bucket time series (daily, or weekly for long ranges)
   const trend = useMemo(() => {
     const spanDays = Math.max(1, differenceInCalendarDays(dateRange.to, dateRange.from) + 1);
     const weekly = spanDays > 45;
     const keyOf = (d: Date) => (weekly ? startOfWeek(d, { weekStartsOn: 1 }) : startOfDay(d));
-    const labelFmt = weekly ? "MMM d" : "MMM d";
 
     const buckets = new Map<string, any>();
     const days = eachDayOfInterval({ start: dateRange.from, end: dateRange.to });
@@ -160,49 +113,35 @@ export default function IedupDashboard() {
       : days;
     for (const d of seeds) {
       const k = keyOf(d).toISOString();
-      buckets.set(k, { key: k, label: format(new Date(k), labelFmt), sent: 0, delivered: 0, opened: 0, placed: 0, connected: 0, emailSent: 0, emailFailed: 0 });
+      buckets.set(k, { key: k, label: format(new Date(k), "MMM d"), sent: 0, delivered: 0, opened: 0, placed: 0, connected: 0, emailSent: 0, emailFailed: 0 });
     }
-    const bump = (iso: string | null, fn: (b: any) => void) => {
-      if (!iso) return;
-      const k = keyOf(new Date(iso)).toISOString();
-      const b = buckets.get(k);
-      if (b) fn(b);
-    };
-    (waRows || []).forEach((r: any) => {
-      const status = String(r.status);
-      if (["sent", "delivered", "read"].includes(status)) bump(r.sent_at || r.created_at, (b) => b.sent++);
-      if (["delivered", "read"].includes(status) || r.delivered_at) bump(r.delivered_at || r.sent_at || r.created_at, (b) => b.delivered++);
-      if (status === "read" || r.read_at) bump(r.read_at || r.sent_at || r.created_at, (b) => b.opened++);
-    });
-    (callRows || []).forEach((r: any) => {
-      bump(r.started_at || r.created_at, (b) => b.placed++);
-      if (Number(r.conversation_duration || 0) >= 5) bump(r.started_at || r.created_at, (b) => b.connected++);
-    });
-    (emailRows || []).forEach((r: any) => {
-      if (r.status === "sent") bump(r.sent_at || r.created_at, (b) => b.emailSent++);
-      if (r.status === "failed") bump(r.failed_at || r.created_at, (b) => b.emailFailed++);
+    (stats?.daily || []).forEach((r: any) => {
+      const b = buckets.get(keyOf(new Date(`${r.day}T00:00:00`)).toISOString());
+      if (!b) return;
+      b.sent += r.wa_sent || 0; b.delivered += r.wa_delivered || 0; b.opened += r.wa_opened || 0;
+      b.placed += r.placed || 0; b.connected += r.connected || 0;
+      b.emailSent += r.email_sent || 0; b.emailFailed += r.email_failed || 0;
     });
     return Array.from(buckets.values());
-  }, [waRows, callRows, emailRows, dateRange]);
+  }, [stats, dateRange]);
 
   const byTemplate = useMemo(() => {
     const m = new Map<string, { name: string; sent: number; opened: number }>();
-    (waRows || []).forEach((r: any) => {
-      const label = templateLabel(r.template_name);
+    (stats?.by_template || []).forEach((r: any) => {
+      const label = templateLabel(r.template);
       if (!m.has(label)) m.set(label, { name: label, sent: 0, opened: 0 });
       const e = m.get(label)!;
-      if (["sent", "delivered", "read"].includes(String(r.status))) e.sent++;
-      if (String(r.status) === "read" || r.read_at) e.opened++;
+      e.sent += r.sent || 0; e.opened += r.opened || 0;
     });
     return Array.from(m.values()).sort((a, b) => b.sent - a.sent);
-  }, [waRows]);
+  }, [stats]);
 
   useEffect(() => {}, []); // refetch handled by react-query intervals
 
   if (orgLoading) return <DashboardLayout><div className="p-6">Loading…</div></DashboardLayout>;
 
-  const hasWaData = (waRows || []).length > 0;
-  const hasCallData = (callRows || []).length > 0;
+  const hasWaData = wa.sent + wa.failed > 0;
+  const hasCallData = calls.placed > 0;
 
   return (
     <DashboardLayout>
