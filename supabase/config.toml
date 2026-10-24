@@ -201,3 +201,6 @@ verify_jwt = false
 
 [functions.iedup-ramp-interest-send]
 verify_jwt = false
+
+[functions.iedup-ramp-interest-wa]
+verify_jwt = false
