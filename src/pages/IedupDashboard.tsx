@@ -38,6 +38,17 @@ const templateLabel = (n: string | null) =>
 
 const C = { sent: "#3b82f6", delivered: "#10b981", opened: "#8b5cf6", placed: "#6366f1", connected: "#10b981", emailSent: "#f59e0b", emailFailed: "#ef4444" };
 
+// The API returns at most 1000 rows per request, so a busy period is read page by page.
+async function fetchAllRows(build: (from: number, to: number) => PromiseLike<{ data: any[] | null }>) {
+  const rows: any[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data } = await build(from, from + 999);
+    rows.push(...(data ?? []));
+    if (!data || data.length < 1000) break;
+  }
+  return rows;
+}
+
 export default function IedupDashboard() {
   const { isLoading: orgLoading } = useIsIedup();
   const [datePreset, setDatePreset, dateRange, setDateRange] = useUrlDateRange("this_month");
@@ -60,12 +71,12 @@ export default function IedupDashboard() {
   const { data: callRows } = useQuery({
     queryKey: ["iedup-calls", rangeKey],
     queryFn: async () => {
-      const { data } = await supabase
+      return fetchAllRows((f, t) => supabase
         .from("call_logs")
         .select("status, conversation_duration, started_at, created_at")
         .eq("org_id", IEDUP_ORG_ID).eq("caller_type", "ai")
-        .gte("created_at", fromIso).lte("created_at", toIso);
-      return data || [];
+        .gte("created_at", fromIso).lte("created_at", toIso)
+        .order("id").range(f, t));
     },
     refetchInterval: REFRESH_MS,
   });
@@ -74,12 +85,12 @@ export default function IedupDashboard() {
   const { data: waRows } = useQuery({
     queryKey: ["iedup-wa", rangeKey],
     queryFn: async () => {
-      const { data } = await supabase
+      return fetchAllRows((f, t) => supabase
         .from("whatsapp_logs")
         .select("status, template_name, sent_at, delivered_at, read_at, created_at, cost_charged")
         .eq("org_id", IEDUP_ORG_ID)
-        .gte("created_at", fromIso).lte("created_at", toIso);
-      return data || [];
+        .gte("created_at", fromIso).lte("created_at", toIso)
+        .order("id").range(f, t));
     },
     refetchInterval: REFRESH_MS,
   });
@@ -88,12 +99,12 @@ export default function IedupDashboard() {
   const { data: emailRows } = useQuery({
     queryKey: ["iedup-email", rangeKey],
     queryFn: async () => {
-      const { data } = await supabase
+      return fetchAllRows((f, t) => supabase
         .from("pipeline_email_log")
         .select("status, subject, sent_at, failed_at, created_at, cost_charged")
         .eq("org_id", IEDUP_ORG_ID)
-        .gte("created_at", fromIso).lte("created_at", toIso);
-      return data || [];
+        .gte("created_at", fromIso).lte("created_at", toIso)
+        .order("id").range(f, t));
     },
     refetchInterval: REFRESH_MS,
   });
