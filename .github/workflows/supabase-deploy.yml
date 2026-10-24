@@ -68,7 +68,7 @@ jobs:
       - name: Deploy edge functions
         run: |
           case "${{ steps.changed.outputs.mode }}" in
-            all) echo "Deploying all"; supabase functions deploy --project-ref "$SUPABASE_PROJECT_ID" ;;
-            changed) for s in ${{ steps.changed.outputs.slugs }}; do echo "Deploying $s"; supabase functions deploy "$s" --project-ref "$SUPABASE_PROJECT_ID"; done ;;
+            all) echo "Deploying all"; supabase functions deploy --use-api --project-ref "$SUPABASE_PROJECT_ID" ;;
+            changed) for s in ${{ steps.changed.outputs.slugs }}; do echo "Deploying $s"; supabase functions deploy "$s" --use-api --project-ref "$SUPABASE_PROJECT_ID"; done ;;
             none) echo "No edge functions changed" ;;
           esac
