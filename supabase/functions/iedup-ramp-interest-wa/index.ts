@@ -1,4 +1,4 @@
-// WhatsApp "Thank you for your interest" (template iedup_ramp_interest_v1) to the IEDUP contacts
+// WhatsApp "Thank you for your interest" (utility template iedup_ramp_interest_v2) to the IEDUP contacts
 // uploaded from the FIEO exporter list (source 'fieo_exporters'), one number at a time.
 // Safe by default: it only reports what it would do unless the body says { "send": true },
 // and it refuses to send until Meta has approved the template. One message per distinct
@@ -10,7 +10,7 @@ import { WA_SENDER_BY_ORG, sendWhatsAppTemplate } from "../_shared/pipelineActio
 
 const IEDUP_ORG_ID = "6dcf4229-6902-4cd4-9c7f-2d6ed4a6045d";
 const SOURCE = "fieo_exporters";
-const TEMPLATE = "iedup_ramp_interest_v1";
+const TEMPLATE = "iedup_ramp_interest_v2";
 const COURSE = "Supply Chain Management (SCM)";
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -28,6 +28,31 @@ serve(async (req) => {
   const { data: tpl } = await db.from("communication_templates").select("status")
     .eq("org_id", IEDUP_ORG_ID).eq("template_name", TEMPLATE).maybeSingle();
   const approved = String(tpl?.status ?? "").toLowerCase() === "approved";
+
+  // Test mode: { "send": true, "test_phones": ["9876543210"] } sends to just those numbers (once each).
+  if (send && Array.isArray(body.test_phones) && body.test_phones.length > 0) {
+    if (!approved) return json(409, { error: "template not approved yet", status: tpl?.status ?? null });
+    const gate = await orgServiceGate(db, IEDUP_ORG_ID);
+    if (!gate.allowed) return json(402, { error: gate.reason });
+    const floor = typeof gate.floor === "number" ? gate.floor : null;
+    const results: unknown[] = [];
+    for (const raw of body.test_phones.slice(0, 5)) {
+      const m = String(raw).replace(/\D/g, "").slice(-10);
+      if (!/^[6-9]\d{9}$/.test(m)) { results.push({ phone: m, ok: false, error: "not a mobile number" }); continue; }
+      let { data: c } = await db.from("contacts").select("id, first_name, phone").eq("org_id", IEDUP_ORG_ID).eq("phone", `+91${m}`).limit(1).maybeSingle();
+      if (!c) {
+        const ins = await db.from("contacts").insert({ org_id: IEDUP_ORG_ID, first_name: String(body.test_name ?? "Test").slice(0, 60), phone: `+91${m}`, source: "ramp_test", do_not_call: true }).select("id, first_name, phone").single();
+        if (ins.error) { results.push({ phone: m, ok: false, error: ins.error.message }); continue; }
+        c = ins.data;
+      }
+      const r = await sendWhatsAppTemplate(db, {
+        orgId: IEDUP_ORG_ID, sender: WA_SENDER_BY_ORG[IEDUP_ORG_ID], contact: c, phone: `+91${m}`,
+        templateName: TEMPLATE, languageCode: "en", floor, bodyParams: [String(c.first_name ?? "Test"), COURSE],
+      });
+      results.push({ phone: m, ok: r.ok, error: r.error ?? null });
+    }
+    return json(200, { test: results });
+  }
 
   const page = async (build: (from: number, to: number) => any) => {
     const rows: any[] = [];
