@@ -55,14 +55,24 @@ serve(async (req) => {
   const apiKey = Deno.env.get(senderCfg.resendKeyEnv);
   if (!apiKey) return json(500, { error: "email key missing" });
 
+  // The API returns at most 1000 rows a call, so read both lists page by page.
+  const page = async (build: (from: number, to: number) => any) => {
+    const rows: any[] = [];
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await build(from, from + 999);
+      if (error) throw new Error(error.message);
+      rows.push(...(data ?? []));
+      if (!data || data.length < 1000) break;
+    }
+    return rows;
+  };
   // Contacts not yet emailed with this subject (sent, queued or failed all count as handled).
-  const { data: done } = await db.from("pipeline_email_log").select("contact_id").eq("org_id", IEDUP_ORG_ID).eq("subject", SUBJECT).limit(20000);
-  const handled = new Set((done ?? []).map((r: { contact_id: string }) => r.contact_id));
-  const { data: pool, error } = await db.from("contacts")
+  const done = await page((f, t) => db.from("pipeline_email_log").select("id, contact_id").eq("org_id", IEDUP_ORG_ID).eq("subject", SUBJECT).order("id").range(f, t));
+  const handled = new Set(done.map((r: { contact_id: string }) => r.contact_id));
+  const pool = await page((f, t) => db.from("contacts")
     .select("id, first_name, email, do_not_email, opted_out").eq("org_id", IEDUP_ORG_ID).eq("source", SOURCE)
-    .not("email", "is", null).order("created_at").order("id").limit(6000);
-  if (error) return json(500, { error: error.message });
-  const todo = (pool ?? []).filter((c: any) => !handled.has(c.id) && !c.do_not_email && !c.opted_out);
+    .not("email", "is", null).order("created_at").order("id").range(f, t));
+  const todo = pool.filter((c: any) => !handled.has(c.id) && !c.do_not_email && !c.opted_out);
   if (dry) return json(200, { remaining: todo.length, wallet_floor: floor });
 
   const started = Date.now();
