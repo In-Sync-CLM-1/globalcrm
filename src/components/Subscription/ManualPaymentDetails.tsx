@@ -25,7 +25,7 @@ const BANK = {
   branch: "Gurgaon — Sector 4",
 };
 
-const UPI_ID = "7738919680-4@ybl";
+const UPI_ID = "prosyncaisolutions@idfcbank";
 
 const OPS_WHATSAPP = "917738919680";
 const OPS_WHATSAPP_DISPLAY = "+91 77389 19680";
