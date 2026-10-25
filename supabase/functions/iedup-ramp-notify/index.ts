@@ -118,7 +118,7 @@ serve(async (req) => {
             ? [nm, cut(it.course, 100) || "UP RAMP", cut(it.topic, 100) || "Live class", cut(it.date, 60), cut(it.time, 60), cut(it.expert, 80) || "Our expert"]
             : [nm, appNo, cut(it.course, 100) || "UP RAMP programme", cut(it.detail, 100) || "Update", cut(it.next_step, 150) || "We will keep you posted"];
           await sendWhatsAppTemplate(db, {
-            orgId: IEDUP_ORG_ID, sender: WA_SENDER_BY_ORG[IEDUP_ORG_ID], contact: c, phone: ph, templateName: isClass ? "iedup_ramp_class_scheduled_v2" : "iedup_application_status_v3", languageCode: "en", floor,
+            orgId: IEDUP_ORG_ID, sender: WA_SENDER_BY_ORG[IEDUP_ORG_ID], contact: c, phone: ph, templateName: isClass ? "iedup_ramp_class_scheduled_v2" : "iedup_application_status_v4", languageCode: "en", floor,
             bodyParams,
           });
           const lines = Array.isArray(it.email_lines) ? (it.email_lines as unknown[]).map((l) => cut(l, 600)).filter(Boolean).slice(0, 8) : [];
@@ -169,7 +169,7 @@ serve(async (req) => {
     })
     : kind === "application_status"
     ? await sendWhatsAppTemplate(supabase, {
-      orgId: IEDUP_ORG_ID, sender: WA_SENDER_BY_ORG[IEDUP_ORG_ID], contact, phone, templateName: "iedup_application_status_v3", languageCode: "en", floor,
+      orgId: IEDUP_ORG_ID, sender: WA_SENDER_BY_ORG[IEDUP_ORG_ID], contact, phone, templateName: "iedup_application_status_v4", languageCode: "en", floor,
       bodyParams: [name, applicationNo, course, detail || "Update", next || "We will keep you posted"],
     })
     : await sendWhatsAppTemplate(supabase, {
