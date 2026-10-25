@@ -38,6 +38,50 @@ function emailHtml(name: string, course: string, _applicationNo: string) {
 </table></div>`;
 }
 
+
+// Plain notification email: greeting, a few lines, an optional button. Used for the stage and class messages (same text as the WhatsApp).
+function plainEmailHtml(name: string, lines: string[], button?: { text: string; url: string }) {
+  const paras = lines.map((l) => `<p style="margin:0 0 14px;font-size:15px;line-height:1.55">${esc(l)}</p>`).join("");
+  const btn = button ? `<p style="margin:22px 0 6px"><a href="${esc(button.url)}" style="background:#0c2d5e;color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;padding:12px 22px;border-radius:8px;display:inline-block">${esc(button.text)}</a></p>` : "";
+  return `<div style="background:#f3f6fb;padding:24px 12px;font-family:Arial,Helvetica,sans-serif;color:#1d2733">
+<table role="presentation" width="100%" style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:10px;overflow:hidden" cellspacing="0" cellpadding="0">
+<tr><td style="background:#0c2d5e;color:#ffffff;padding:18px 28px;font-size:13px;letter-spacing:.08em">IEDUP · UP RAMP</td></tr>
+<tr><td style="padding:28px"><p style="margin:0 0 16px;font-size:15px;color:#5b6877">Dear ${esc(name)},</p>${paras}${btn}</td></tr>
+<tr><td style="padding:16px 28px;background:#f3f6fb;font-size:12px;line-height:1.5;color:#5b6877">Institute of Entrepreneurship Development, U.P. (IEDUP), Dept. of MSME &amp; Export Promotion, Govt. of U.P.<br>Helpline: 7607359820 · edpavg@gmail.com</td></tr>
+</table></div>`;
+}
+
+// One email through the IEDUP sender, logged and charged to the IEDUP wallet (refunded if the send fails).
+// deno-lint-ignore no-explicit-any
+async function sendIedupEmail(db: any, o: { contactId: string; to: string; subject: string; html: string; floor: number | null }) {
+  const senderCfg = EMAIL_SENDER_BY_ORG[IEDUP_ORG_ID];
+  const apiKey = Deno.env.get(senderCfg.resendKeyEnv);
+  if (!o.to || !apiKey) return { ok: false, error: o.to ? "no email key" : "no email" };
+  const { data: logRow } = await db.from("pipeline_email_log")
+    .insert({ org_id: IEDUP_ORG_ID, contact_id: o.contactId, to_email: o.to, subject: o.subject, status: "queued" }).select("id").single();
+  const logId = logRow?.id as string | undefined;
+  if (!logId) return { ok: false, error: "log" };
+  const reserved = await reserveFunds(db, { orgId: IEDUP_ORG_ID, serviceType: "email", referenceId: logId, quantity: 1, cost: EMAIL_COST_PER_MSG, floor: o.floor, description: `Email "${o.subject}" → ${o.to}` });
+  if (!reserved.ok) {
+    await db.from("pipeline_email_log").update({ status: "failed", failed_at: new Date().toISOString(), error_text: "insufficient wallet balance (floor)" }).eq("id", logId);
+    return { ok: false, error: "insufficient wallet balance" };
+  }
+  const resp = await fetch("https://api.resend.com/emails", {
+    method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({ from: "IEDUP RAMP <ramp@iedup.in-sync.co.in>", to: [o.to], reply_to: "edpavg@gmail.com", subject: o.subject, html: o.html }),
+  }).catch((e) => ({ ok: false, text: async () => String(e) } as Response));
+  const text = await resp.text();
+  if (resp.ok) {
+    let id: string | null = null;
+    try { id = JSON.parse(text)?.id ?? null; } catch { /* keep null */ }
+    await db.from("pipeline_email_log").update({ status: "sent", sent_at: new Date().toISOString(), resend_message_id: id, cost_charged: EMAIL_COST_PER_MSG }).eq("id", logId);
+    return { ok: true };
+  }
+  await refundFunds(db, { orgId: IEDUP_ORG_ID, serviceType: "email", referenceId: logId, cost: EMAIL_COST_PER_MSG, description: `Refund — email send failed (${o.subject})` });
+  await db.from("pipeline_email_log").update({ status: "failed", failed_at: new Date().toISOString(), error_text: text.slice(0, 500) }).eq("id", logId);
+  return { ok: false, error: text.slice(0, 200) };
+}
+
 serve(async (req) => {
   if (req.method !== "POST") return json(405, { error: "POST only" });
   const secret = Deno.env.get("RAMP_NOTIFY_SECRET");
@@ -45,32 +89,45 @@ serve(async (req) => {
 
   const body = await req.json().catch(() => ({}));
 
-  // Status updates for many people at once (staff approving or rejecting registrations): answer straight away and send in the background.
-  if (body.kind === "application_status" && Array.isArray(body.items)) {
+  // Messages for many people at once (stage changes and new classes): answer straight away and send in the background.
+  // Each person gets the WhatsApp and, when an email address and text are given, the same message by email.
+  if ((body.kind === "application_status" || body.kind === "class_scheduled") && Array.isArray(body.items)) {
     const items = (body.items as Record<string, unknown>[]).slice(0, 200);
     const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const gate = await orgServiceGate(db, IEDUP_ORG_ID);
     if (!gate.allowed) return json(402, { error: gate.reason });
     const floor = typeof gate.floor === "number" ? gate.floor : null;
+    const isClass = body.kind === "class_scheduled";
     const work = (async () => {
       for (const it of items) {
         try {
           const m = String(it.mobile ?? "").replace(/\D/g, "").slice(-10);
           const nm = String(it.name ?? "").replace(/\s+/g, " ").trim().slice(0, 60) || "Participant";
           const appNo = String(it.application_no ?? "").trim().slice(0, 40);
-          if (m.length !== 10 || !appNo) continue;
+          if (m.length !== 10 || (!isClass && !appNo)) continue;
           const ph = `+91${m}`;
+          const em = String(it.email ?? "").trim();
           let { data: c } = await db.from("contacts").select("id, first_name, email, phone").eq("org_id", IEDUP_ORG_ID).eq("phone", ph).limit(1).maybeSingle();
           if (!c) {
-            const ins = await db.from("contacts").insert({ org_id: IEDUP_ORG_ID, first_name: nm, phone: ph, source: "ramp_portal" }).select("id, first_name, email, phone").single();
+            const ins = await db.from("contacts").insert({ org_id: IEDUP_ORG_ID, first_name: nm, phone: ph, email: em || null, source: "ramp_portal" }).select("id, first_name, email, phone").single();
             if (ins.error) continue;
             c = ins.data;
           }
+          const cut = (v: unknown, n: number) => String(v ?? "").trim().slice(0, n);
+          const bodyParams = isClass
+            ? [nm, cut(it.course, 100) || "UP RAMP", cut(it.topic, 100) || "Live class", cut(it.date, 60), cut(it.time, 60), cut(it.expert, 80) || "Our expert"]
+            : [nm, appNo, cut(it.course, 100) || "UP RAMP programme", cut(it.detail, 100) || "Update", cut(it.next_step, 150) || "We will keep you posted"];
           await sendWhatsAppTemplate(db, {
-            orgId: IEDUP_ORG_ID, sender: WA_SENDER_BY_ORG[IEDUP_ORG_ID], contact: c, phone: ph, templateName: "iedup_application_status_v3", languageCode: "en", floor,
-            bodyParams: [nm, appNo, String(it.course ?? "").trim().slice(0, 100) || "UP RAMP programme", String(it.detail ?? "").trim().slice(0, 100) || "Update", String(it.next_step ?? "").trim().slice(0, 150) || "We will keep you posted"],
+            orgId: IEDUP_ORG_ID, sender: WA_SENDER_BY_ORG[IEDUP_ORG_ID], contact: c, phone: ph, templateName: isClass ? "iedup_ramp_class_scheduled_v2" : "iedup_application_status_v3", languageCode: "en", floor,
+            bodyParams,
           });
-        } catch (e) { console.error("status send failed", String(e)); }
+          const lines = Array.isArray(it.email_lines) ? (it.email_lines as unknown[]).map((l) => cut(l, 600)).filter(Boolean).slice(0, 8) : [];
+          const subject = cut(it.email_subject, 150);
+          if (em && subject && lines.length) {
+            const btn = it.email_button as { text?: string; url?: string } | undefined;
+            await sendIedupEmail(db, { contactId: c.id, to: em, subject, floor, html: plainEmailHtml(nm, lines, btn?.text && btn?.url ? { text: cut(btn.text, 40), url: cut(btn.url, 300) } : undefined) });
+          }
+        } catch (e) { console.error("notify send failed", String(e)); }
       }
     })();
     // @ts-ignore EdgeRuntime is provided by the Supabase edge runtime
