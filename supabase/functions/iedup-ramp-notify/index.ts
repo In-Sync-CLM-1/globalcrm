@@ -89,6 +89,37 @@ serve(async (req) => {
 
   const body = await req.json().catch(() => ({}));
 
+  // Email-only messages to trainers (for example "your trainer account is approved"): no WhatsApp, charged at the email rate.
+  if (body.kind === "trainer_email" && Array.isArray(body.items)) {
+    const items = (body.items as Record<string, unknown>[]).slice(0, 20);
+    const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    const gate = await orgServiceGate(db, IEDUP_ORG_ID);
+    if (!gate.allowed) return json(402, { error: gate.reason });
+    const floor = typeof gate.floor === "number" ? gate.floor : null;
+    const cut = (v: unknown, n: number) => String(v ?? "").trim().slice(0, n);
+    const results: { ok: boolean; error?: string }[] = [];
+    for (const it of items) {
+      try {
+        const m = cut(it.mobile, 20).replace(/\D/g, "").slice(-10);
+        const em = cut(it.email, 200);
+        const nm = cut(it.name, 60).replace(/\s+/g, " ") || "Trainer";
+        const subject = cut(it.email_subject, 150);
+        const lines = Array.isArray(it.email_lines) ? (it.email_lines as unknown[]).map((l) => cut(l, 600)).filter(Boolean).slice(0, 8) : [];
+        if (m.length !== 10 || !em || !subject || !lines.length) { results.push({ ok: false, error: "mobile, email, subject and text are required" }); continue; }
+        const ph = `+91${m}`;
+        let { data: c } = await db.from("contacts").select("id, first_name, email, phone").eq("org_id", IEDUP_ORG_ID).eq("phone", ph).limit(1).maybeSingle();
+        if (!c) {
+          const ins = await db.from("contacts").insert({ org_id: IEDUP_ORG_ID, first_name: nm, phone: ph, email: em, source: "ramp_trainer" }).select("id, first_name, email, phone").single();
+          if (ins.error) { results.push({ ok: false, error: "contact" }); continue; }
+          c = ins.data;
+        }
+        const btn = it.email_button as { text?: string; url?: string } | undefined;
+        results.push(await sendIedupEmail(db, { contactId: c.id, to: em, subject, floor, html: plainEmailHtml(nm, lines, btn?.text && btn?.url ? { text: cut(btn.text, 40), url: cut(btn.url, 300) } : undefined) }));
+      } catch (e) { results.push({ ok: false, error: String(e).slice(0, 150) }); }
+    }
+    return json(200, { results });
+  }
+
   // Messages for many people at once (stage changes and new classes): answer straight away and send in the background.
   // Each person gets the WhatsApp and, when an email address and text are given, the same message by email.
   if ((body.kind === "application_status" || body.kind === "class_scheduled") && Array.isArray(body.items)) {
