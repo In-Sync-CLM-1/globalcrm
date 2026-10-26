@@ -8,7 +8,7 @@ import { AI_CALLING_ENABLED, AI_CALLING_DISABLED_REASON, logBlockedCall } from "
 
 // Per-org Exotel WhatsApp sender (WABA from-number).
 export const WA_SENDER_BY_ORG: Record<string, string> = {
-  "6dcf4229-6902-4cd4-9c7f-2d6ed4a6045d": "+918178798930", // IEDUP
+  "6dcf4229-6902-4cd4-9c7f-2d6ed4a6045d": "+918808359820", // IEDUP (WABA 2019709875359103)
 };
 
 const WHATSAPP_UTILITY_COST_PER_MSG = 0.20;
