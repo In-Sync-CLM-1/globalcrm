@@ -11,7 +11,7 @@ import {
 } from "../_shared/pipelineActions.ts";
 
 const IEDUP_ORG_ID = "6dcf4229-6902-4cd4-9c7f-2d6ed4a6045d";
-const WA_TEMPLATE = "iedup_registration_confirmed_v1";
+const WA_TEMPLATE = "iedup_registration_programme_info_v2"; // no attachment; the brochure goes by email
 const SITE = "https://ramp.in-sync.co.in";
 const BROCHURE_URL = `${SITE}/IEDUP-Brochure.pdf`;
 const json = (status: number, body: unknown) =>
@@ -205,7 +205,7 @@ serve(async (req) => {
     })
     : await sendWhatsAppTemplate(supabase, {
       orgId: IEDUP_ORG_ID, sender: WA_SENDER_BY_ORG[IEDUP_ORG_ID], contact, phone, templateName: WA_TEMPLATE, languageCode: "en", floor,
-      bodyParams: [name, course, applicationNo], headerDocument: { link: BROCHURE_URL, filename: "IEDUP-Brochure.pdf" },
+      bodyParams: [name, course, applicationNo],
     });
   if (kind !== "registration_confirmed") return json(200, { whatsapp: wa });
 
