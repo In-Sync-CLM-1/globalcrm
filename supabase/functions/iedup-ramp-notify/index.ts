@@ -120,6 +120,41 @@ serve(async (req) => {
     return json(200, { results });
   }
 
+  // Any approved WhatsApp template of the IEDUP org, sent to many people (the RAMP staff "Send message" button): answer straight away, send in the background.
+  // body.template is the template name; each item has a mobile and name, and optional params (default: just the name).
+  if (body.kind === "template_message" && Array.isArray(body.items)) {
+    const items = (body.items as Record<string, unknown>[]).slice(0, 200);
+    const templateName = String(body.template ?? "").trim();
+    const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    const { data: tpl } = await db.from("communication_templates").select("language")
+      .eq("org_id", IEDUP_ORG_ID).eq("template_type", "whatsapp").eq("template_name", templateName).eq("status", "approved").limit(1).maybeSingle();
+    if (!tpl) return json(400, { error: `template ${templateName} is not an approved IEDUP template` });
+    const gate = await orgServiceGate(db, IEDUP_ORG_ID);
+    if (!gate.allowed) return json(402, { error: gate.reason });
+    const floor = typeof gate.floor === "number" ? gate.floor : null;
+    const work = (async () => {
+      for (const it of items) {
+        try {
+          const m = String(it.mobile ?? "").replace(/\D/g, "").slice(-10);
+          const nm = String(it.name ?? "").replace(/\s+/g, " ").trim().slice(0, 60) || "Participant";
+          if (m.length !== 10) continue;
+          const ph = `+91${m}`;
+          let { data: c } = await db.from("contacts").select("id, first_name, email, phone").eq("org_id", IEDUP_ORG_ID).eq("phone", ph).limit(1).maybeSingle();
+          if (!c) {
+            const ins = await db.from("contacts").insert({ org_id: IEDUP_ORG_ID, first_name: nm, phone: ph, email: null, source: "ramp_portal" }).select("id, first_name, email, phone").single();
+            if (ins.error) continue;
+            c = ins.data;
+          }
+          const params = Array.isArray(it.params) ? (it.params as unknown[]).map((v) => String(v ?? "").trim().slice(0, 150)) : [nm];
+          await sendWhatsAppTemplate(db, { orgId: IEDUP_ORG_ID, sender: WA_SENDER_BY_ORG[IEDUP_ORG_ID], contact: c, phone: ph, templateName, languageCode: tpl.language || "en", floor, bodyParams: params });
+        } catch (e) { console.error("template send failed", String(e)); }
+      }
+    })();
+    // @ts-ignore EdgeRuntime is provided by the Supabase edge runtime
+    if (typeof EdgeRuntime !== "undefined") EdgeRuntime.waitUntil(work); else await work;
+    return json(202, { queued: items.length });
+  }
+
   // Messages for many people at once (stage changes and new classes): answer straight away and send in the background.
   // Each person gets the WhatsApp and, when an email address and text are given, the same message by email.
   if ((body.kind === "application_status" || body.kind === "class_scheduled") && Array.isArray(body.items)) {
