@@ -185,10 +185,19 @@ export function useCalendarActivities({ currentDate, filters, viewMode = 'all', 
     enabled: !!effectiveOrgId && userIdsToFetch.length > 0 && viewMode !== 'activities',
   });
 
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+
   // Normalize activities to CalendarEvent format
   // Convert UTC dates from database to IST for display
   const normalizedActivities: CalendarEvent[] = activities.map((activity: any) => {
     const dateTimeUtc = activity.scheduled_at || activity.next_action_date;
+    // A call activity carries the NEXT call the agent promised in next_action_date
+    // (a callback) while completed_at records the call that just ended. The
+    // calendar entry stands for the upcoming callback, so it stays open (and
+    // visible) until its day has passed.
+    const isCallback = !activity.scheduled_at && !!activity.next_action_date;
+    const callbackStillDue = isCallback && new Date(activity.next_action_date).getTime() >= startOfToday.getTime();
     // Convert UTC to IST for display
     const dateTimeIST = toZonedTime(new Date(dateTimeUtc), IST_TIMEZONE);
     const contactName = activity.contacts 
@@ -201,12 +210,12 @@ export function useCalendarActivities({ currentDate, filters, viewMode = 'all', 
     return {
       id: activity.id,
       type: mapActivityType(activity.activity_type),
-      title: activity.subject || activity.activity_type,
+      title: isCallback ? `Callback${contactName ? ` – ${contactName}` : ''}` : (activity.subject || activity.activity_type),
       dateTime: dateTimeIST,
       duration: activity.duration_minutes,
       contactId: activity.contact_id,
       contactName,
-      isCompleted: !!activity.completed_at,
+      isCompleted: !!activity.completed_at && !callbackStillDue,
       source: 'activity' as const,
       description: activity.description,
       meetingLink: activity.meeting_link,
