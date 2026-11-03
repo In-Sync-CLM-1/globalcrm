@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { getSupabaseClient } from '../_shared/supabaseClient.ts';
 import { logEdgeError, logStep, logBatchProgress, logValidationError } from '../_shared/errorLogger.ts';
 import { normalizeEmployeeSize, parseTurnoverUsdMillion, formatTurnoverUsdMillion } from '../_shared/ferventFieldNormalization.ts';
+import { cleanContactChunk, type CleanupVocab } from '../_shared/contactImportCleanup.ts';
 import { buildFerventMapping, applyFerventMapping, isSalvageable, buildContactsMapping, applyContactsMapping, isContactsSalvageable, type FerventMapping } from '../_shared/ferventSmartMapping.ts';
 
 const OPERATION_TIMEOUT = 20 * 60 * 1000; // 20 minutes
@@ -408,12 +409,26 @@ serve(async (req) => {
     // file arrived in gets mapped onto the contacts schema the same way Fervent's
     // repository uploads are mapped.
     let contactsMapping: FerventMapping | undefined;
+    let cleanupVocab: CleanupVocab | undefined;
     if (importJob.import_type === 'contacts') {
       const { data: org } = await supabase
         .from('organizations')
-        .select('smart_import_enabled')
+        .select('smart_import_enabled, settings')
         .eq('id', importJob.org_id)
         .single();
+
+      // Opt-in per org (organizations.settings.import_cleanup): clean names/phones/
+      // emails, and map the file's stage/source/game/city text onto the org's own
+      // lists with Groq (Cerebras backup), at staging time.
+      const cleanupCfg = org?.settings?.import_cleanup;
+      if (cleanupCfg?.enabled) {
+        const { data: stg } = await supabase.from('pipeline_stages').select('id, name').eq('org_id', importJob.org_id).eq('is_active', true);
+        cleanupVocab = {
+          stages: stg || [],
+          sources: Array.isArray(cleanupCfg.sources) ? cleanupCfg.sources : [],
+          products: Array.isArray(cleanupCfg.products) ? cleanupCfg.products : [],
+        };
+      }
 
       if (org?.smart_import_enabled) {
         const sampleRows: string[][] = [];
@@ -422,7 +437,7 @@ serve(async (req) => {
           if (l) sampleRows.push(parseCSVLine(l));
         }
         await updateJobStage(supabase, importJobId, 'validating', { message: 'Understanding your file…', file_size_kb: fileSizeKB });
-        const mapResult = await buildContactsMapping(rawHeadersOriginal, sampleRows);
+        const mapResult = await buildContactsMapping(rawHeadersOriginal, sampleRows, !!cleanupVocab);
         if (mapResult.reject || !mapResult.mapping) {
           throw new Error(mapResult.rejectReason || 'The file could not be understood as a contact list.');
         }
@@ -484,6 +499,14 @@ serve(async (req) => {
     let errorCount = 0;
     const errors: Array<{row?: number; field?: string; message: string; sample?: string}> = [];
     const staged: Array<{ row_index: number; record: any }> = [];
+    // Cleans a chunk (when the org opted in) and writes it to import_staging.
+    const stageChunk = async (chunk: Array<{ row_index: number; record: any }>) => {
+      if (cleanupVocab && importJob.import_type === 'contacts') {
+        const st = await cleanContactChunk(chunk, cleanupVocab, { groq: Deno.env.get('GROQ_API_KEY') || undefined, cerebras: Deno.env.get('CEREBRAS_API_KEY') || undefined });
+        console.log('[IMPORT-CLEANUP]', JSON.stringify(st));
+      }
+      await stageRecords(supabase, importJobId!, chunk);
+    };
     const skippedForEmail: Array<{ row_index: number; values: any; reason: string }> = [];
     let lastProgressUpdate = Date.now();
 
@@ -536,6 +559,10 @@ serve(async (req) => {
             status: row.status || 'new',
             source: row.source || 'bulk_import',
             pipeline_stage_id: stageNameToId[String(row.action || row.pipeline_stage || row.stage || '').trim().toLowerCase()] || null,
+            ...(cleanupVocab ? {
+              product: row.product || null,
+              _raw: { stage: row.action || row.pipeline_stage || row.stage || '', source: row.source || '', product: row.product || '' },
+            } : {}),
             address: row.address || null,
             city: row.city || row.location_city || null,
             state: row.state || row.location_state || null,
@@ -573,7 +600,7 @@ serve(async (req) => {
 
         staged.push({ row_index: currentRowNumber, record });
         if (staged.length >= STAGE_INSERT_CHUNK) {
-          await stageRecords(supabase, importJobId, staged.splice(0, staged.length));
+          await stageChunk(staged.splice(0, staged.length));
         }
 
       } catch (error) {
@@ -583,7 +610,7 @@ serve(async (req) => {
         console.log(`[ERROR] Row ${currentRowNumber}: ${errorMessage}`);
       }
     }
-    if (staged.length > 0) await stageRecords(supabase, importJobId, staged);
+    if (staged.length > 0) await stageChunk(staged);
     if (skippedForEmail.length > 0) await stageSkippedRows(supabase, importJobId, skippedForEmail);
 
     const stagedCount = totalRows - errorCount;
