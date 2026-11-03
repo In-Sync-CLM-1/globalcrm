@@ -50,6 +50,7 @@ import { useModuleTracking } from "@/hooks/useModuleTracking";
 import { useTopModules } from "@/hooks/useTopModules";
 import { NotificationBell } from "./NotificationBell";
 import { OrgSwitcher } from "@/components/OrgSwitcher";
+import { WorksyncLaunchButton } from "./WorksyncLaunchButton";
 import { QuickDial } from "@/components/Contact/QuickDial";
 import { CallbackReminderAlert } from "@/components/Contact/CallbackReminderAlert";
 import { useAuth } from "@/contexts/AuthProvider";
@@ -765,6 +766,7 @@ function DashboardLayout({ children }: DashboardLayoutProps) {
                 </>
               )}
 
+              <WorksyncLaunchButton onNavigate={() => setSidebarOpen(false)} />
             </nav>
 
             {/* Sign out - Compact */}
