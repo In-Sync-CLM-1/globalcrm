@@ -158,7 +158,7 @@ function DashboardLayout({ children }: DashboardLayoutProps) {
   const showOperationsSection = canAccessFeature("campaigns_email") || canAccessFeature("contacts") || 
     canAccessFeature("pipeline_stages") || canAccessFeature("calling");
   
-  const showAdminCommunicationSection = isAdmin && (
+  const showAdminCommunicationSection = isAdmin && canAccessFeature("communications") && (
     canAccessFeature("campaigns_whatsapp") || 
     canAccessFeature("email_settings") ||
     canAccessFeature("calling") || 
@@ -455,6 +455,7 @@ function DashboardLayout({ children }: DashboardLayoutProps) {
                 </>
               )}
 
+               {canAccessFeature("communications") && (
                <Link
                  to="/chat"
                  className={`flex items-center gap-2 px-2 py-1.5 rounded-md text-sm transition-colors ${
@@ -475,6 +476,7 @@ function DashboardLayout({ children }: DashboardLayoutProps) {
                    </span>
                  )}
                </Link>
+               )}
 
               {canAccessFeature("templates") && (
                 <Link
@@ -700,7 +702,7 @@ function DashboardLayout({ children }: DashboardLayoutProps) {
                     </div>
                   )}
 
-                  {(canAccessFeature("campaigns_whatsapp") || canAccessFeature("email_settings") || canAccessFeature("calling")) && (
+                  {canAccessFeature("communications") && (canAccessFeature("campaigns_whatsapp") || canAccessFeature("email_settings") || canAccessFeature("calling")) && (
                     <Link
                       to="/admin/communication-settings"
                       className="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-primary transition-colors"
