@@ -819,7 +819,7 @@ function DashboardLayout({ children }: DashboardLayoutProps) {
       {!isPlatformAdmin && <CallbackReminderAlert />}
 
        {/* Floating Chat Widget */}
-       {!isPlatformAdmin && <FloatingChatWidget />}
+       {!isPlatformAdmin && canAccessFeature("communications") && <FloatingChatWidget />}
     </div>
   );
 }

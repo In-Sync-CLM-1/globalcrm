@@ -13,6 +13,7 @@ import { useUrlState } from "@/hooks/useUrlState";
 import { CallsByDateHour } from "./CallsByDateHour";
 import { Fig, NUM, CELL, Person, ROW, TH, TableCard } from "./GamingTable";
 import { CallsOverTime } from "./CallsOverTime";
+import { useFeatureAccess } from "@/hooks/useFeatureAccess";
 import { DAILY_TARGETS, fmtClock, fmtHM, pct, sumStats, useCallers, useDayStats, useDispoCounts, useDispositionCatalog, useHourlyCounts, useLatestCallDay } from "./gamingStats";
 
 function Tile({ label, value, hint }: { label: string; value: string | number; hint?: string }) {
@@ -26,6 +27,8 @@ function Tile({ label, value, hint }: { label: string; value: string | number; h
 }
 
 export function GamingCallerDashboard({ orgId }: { orgId: string }) {
+  const { canAccessFeature } = useFeatureAccess();
+  const showAttendance = canAccessFeature("attendance");
   const [userId, setUserId] = useState<string | null>(null);
   useEffect(() => { supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null)); }, []);
 
@@ -113,12 +116,12 @@ export function GamingCallerDashboard({ orgId }: { orgId: string }) {
       </div>
 
       <Card className="flex flex-wrap items-center gap-x-8 gap-y-2 p-4">
-        <div><p className="text-xs text-muted-foreground">Attendance</p><Badge variant={status === "present" ? "default" : "secondary"}>{attLabel}</Badge></div>
+        {showAttendance && <div><p className="text-xs text-muted-foreground">Attendance</p><Badge variant={status === "present" ? "default" : "secondary"}>{attLabel}</Badge></div>}
         <div><p className="text-xs text-muted-foreground">Login</p><p className="font-medium tabular-nums">{fmtClock(row?.login_at ?? attendance.data?.sign_in_time ?? null)}</p></div>
         <div><p className="text-xs text-muted-foreground">Logout</p><p className="font-medium tabular-nums">{fmtClock(row?.logout_at ?? attendance.data?.sign_out_time ?? null)}</p></div>
         <div><p className="text-xs text-muted-foreground">Work hours</p><p className="font-medium tabular-nums">{fmtHM(today.work_secs)}</p></div>
         <div><p className="text-xs text-muted-foreground">Idle hours</p><p className="font-medium tabular-nums">{fmtHM(today.idle_secs)}</p></div>
-        <Link to="/attendance" className="ml-auto text-sm text-primary underline">My attendance</Link>
+        {showAttendance && <Link to="/attendance" className="ml-auto text-sm text-primary underline">My attendance</Link>}
       </Card>
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">

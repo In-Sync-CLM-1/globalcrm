@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { LoadingState } from "@/components/common/LoadingState";
 import { useUrlState } from "@/hooks/useUrlState";
+import { useFeatureAccess } from "@/hooks/useFeatureAccess";
 import { CallsByDateHour } from "./CallsByDateHour";
 import { CELL, DayChip, Fig, NUM, Person, ROW, StatusChip, TH, TableCard, type Tone } from "./GamingTable";
 import { CallsOverTime } from "./CallsOverTime";
@@ -64,6 +65,8 @@ const ATT_TONE: Record<AttCode, Tone> = { P: "good", L: "warn", H: "info", A: "b
 const ATT_LABEL: Record<AttCode, string> = { P: "Present", L: "Late", H: "Half day", A: "Absent", "-": "No record" };
 
 export function GamingManagerDashboard({ orgId }: { orgId: string }) {
+  const { canAccessFeature } = useFeatureAccess();
+  const showAttendance = canAccessFeature("attendance");
   const { data: latest, isLoading: latestLoading } = useLatestCallDay(orgId);
   const [dayParam, setDayParam] = useUrlState("day", "");
   const [fromParam, setFromParam] = useUrlState("from", "");
@@ -175,7 +178,7 @@ export function GamingManagerDashboard({ orgId }: { orgId: string }) {
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
-                <TH>Caller</TH><TH>Attendance</TH><TH>Login</TH><TH>Logout</TH>
+                <TH>Caller</TH>{showAttendance && <TH>Attendance</TH>}<TH>Login</TH><TH>Logout</TH>
                 <TH right>Work hrs</TH><TH right>Idle hrs</TH><TH right>Calls</TH><TH right>New dials</TH><TH right>Clean calls</TH><TH right>Registrations</TH><TH right>Activations</TH>
               </TableRow>
             </TableHeader>
@@ -186,7 +189,7 @@ export function GamingManagerDashboard({ orgId }: { orgId: string }) {
                 return (
                   <TableRow key={c.id} className={ROW}>
                     <TableCell className={CELL}><Person name={c.name} /></TableCell>
-                    <TableCell className={CELL}><StatusChip tone={ATT_TONE[code]}>{ATT_LABEL[code]}</StatusChip></TableCell>
+                    {showAttendance && <TableCell className={CELL}><StatusChip tone={ATT_TONE[code]}>{ATT_LABEL[code]}</StatusChip></TableCell>}
                     <TableCell className={`${CELL} tabular-nums`}>{fmtClock(r?.login_at ?? null)}</TableCell>
                     <TableCell className={`${CELL} tabular-nums`}>{fmtClock(r?.logout_at ?? null)}</TableCell>
                     <TableCell className={NUM}>{r ? fmtHM(r.work_secs) : <Fig v={0} />}</TableCell>
@@ -251,6 +254,7 @@ export function GamingManagerDashboard({ orgId }: { orgId: string }) {
           </Table>
         </TableCard>
 
+        {showAttendance && (
         <TableCard
           title="Attendance"
           subtitle={<>Shift starts 10:00 with a 15 minute grace. Late = login after 10:15. Half day = under 8 hours logged in. Sundays and the 2nd and 4th Saturdays are off. <Link to="/admin/attendance-report" className="text-primary underline">Full attendance report</Link></>}
@@ -281,6 +285,7 @@ export function GamingManagerDashboard({ orgId }: { orgId: string }) {
             </TableBody>
           </Table>
         </TableCard>
+        )}
     </div>
   );
 }
