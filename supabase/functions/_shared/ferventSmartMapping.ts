@@ -473,8 +473,20 @@ const CONTACTS_NO_IDENTITY_MESSAGE =
   'The file has no name, email, or phone column we could recognise, so its records can\'t be identified. ' +
   'Please make sure it includes at least a name, an email, or a phone number and upload again.';
 
-export async function buildContactsMapping(rawHeaders: string[], sampleRows: string[][]): Promise<FerventMappingResult> {
-  return buildSmartMapping(CONTACTS_CANONICAL_FIELDS, CONTACTS_SYNONYMS, CONTACTS_IDENTITY_FIELDS, rawHeaders, sampleRows, CONTACTS_MAPPING_SYSTEM_PROMPT, CONTACTS_NO_IDENTITY_MESSAGE);
+// Orgs with staging cleanup on also map the lead's source and product (game).
+const CONTACTS_CLEANUP_EXTRA_FIELDS: { key: string; desc: string }[] = [
+  { key: 'source', desc: 'Where the lead came from: lead source / channel / campaign / referral source' },
+  { key: 'product', desc: 'The product / game / offering the lead is interested in or plays' },
+];
+const CONTACTS_CLEANUP_EXTRA_SYNONYMS: Record<string, string[]> = {
+  source: ['source', 'lead_source', 'channel', 'lead_channel', 'utm_source', 'campaign_source'],
+  product: ['product', 'game', 'favourite_game', 'favorite_game', 'game_interest', 'interested_in'],
+};
+
+export async function buildContactsMapping(rawHeaders: string[], sampleRows: string[][], withCleanupFields = false): Promise<FerventMappingResult> {
+  const fields = withCleanupFields ? [...CONTACTS_CANONICAL_FIELDS, ...CONTACTS_CLEANUP_EXTRA_FIELDS] : CONTACTS_CANONICAL_FIELDS;
+  const synonyms = withCleanupFields ? { ...CONTACTS_SYNONYMS, ...CONTACTS_CLEANUP_EXTRA_SYNONYMS } : CONTACTS_SYNONYMS;
+  return buildSmartMapping(fields, synonyms, CONTACTS_IDENTITY_FIELDS, rawHeaders, sampleRows, CONTACTS_MAPPING_SYSTEM_PROMPT, CONTACTS_NO_IDENTITY_MESSAGE);
 }
 
 // Contacts equivalent of applyFerventMapping: same full-name-split and

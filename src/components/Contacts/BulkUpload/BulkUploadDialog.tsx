@@ -31,16 +31,34 @@ export function BulkUploadDialog({ open, onOpenChange, orgId, onUploadStarted }:
   const [isUploading, setIsUploading] = useState(false);
   const [validationError, setValidationError] = useState<string>("");
   const [smartImportEnabled, setSmartImportEnabled] = useState(false);
+  // Orgs with staging cleanup on (organizations.settings.import_cleanup): their
+  // template carries source + game columns and the dialog lists the values the
+  // CRM maps uploads onto (stages, sources, games, call outcomes).
+  const [cleanup, setCleanup] = useState<{ stages: string[]; sources: string[]; products: string[]; dispositions: string[] } | null>(null);
   const notification = useNotification();
 
   useEffect(() => {
     if (!open || !orgId) return;
     supabase
       .from('organizations')
-      .select('smart_import_enabled')
+      .select('smart_import_enabled, settings')
       .eq('id', orgId)
       .single()
-      .then(({ data }) => setSmartImportEnabled(!!data?.smart_import_enabled));
+      .then(async ({ data }) => {
+        setSmartImportEnabled(!!data?.smart_import_enabled);
+        const cfg = (data?.settings as any)?.import_cleanup;
+        if (!cfg?.enabled) { setCleanup(null); return; }
+        const [{ data: stages }, { data: disps }] = await Promise.all([
+          supabase.from('pipeline_stages').select('name, stage_order').eq('org_id', orgId).eq('is_active', true).order('stage_order'),
+          supabase.from('call_dispositions').select('name').eq('org_id', orgId).eq('is_active', true).order('name'),
+        ]);
+        setCleanup({
+          stages: (stages || []).map((s: any) => s.name),
+          sources: Array.isArray(cfg.sources) ? cfg.sources : [],
+          products: Array.isArray(cfg.products) ? cfg.products : [],
+          dispositions: (disps || []).map((d: any) => d.name),
+        });
+      });
   }, [open, orgId]);
 
   // Error logging helper
@@ -146,7 +164,9 @@ export function BulkUploadDialog({ open, onOpenChange, orgId, onUploadStarted }:
     // IEDUP runs an action-driven flow: surface the trigger column as "Action"
     // and drop the generic lead "status" column (the status the client tracks —
     // Call made / Message Sent / Delivered / Opened — is auto-filled, not uploaded).
-    const headers = orgId === IEDUP_ORG_ID
+    const headers = cleanup
+      ? ['first_name', 'last_name', 'phone', 'email', 'city', 'state', 'source', 'game', 'pipeline_stage', 'notes']
+      : orgId === IEDUP_ORG_ID
       ? baseHeaders.filter((h) => h !== 'status').map((h) => (h === 'pipeline_stage' ? 'Action' : h))
       : baseHeaders;
     const csvContent = headers.join(',') + '\n';
@@ -396,6 +416,19 @@ export function BulkUploadDialog({ open, onOpenChange, orgId, onUploadStarted }:
               <li>Maximum file size: 45MB</li>
             </ul>
           </div>
+
+          {cleanup && (
+            <div className="bg-muted p-3 rounded-lg text-xs space-y-1">
+              <p className="font-medium">What the upload understands (AI tidies the rest while importing):</p>
+              <ul className="list-disc list-inside space-y-1 text-muted-foreground">
+                <li><span className="font-medium text-foreground">pipeline_stage:</span> {cleanup.stages.join(', ')}</li>
+                {cleanup.sources.length > 0 && <li><span className="font-medium text-foreground">source:</span> {cleanup.sources.join(', ')}</li>}
+                {cleanup.products.length > 0 && <li><span className="font-medium text-foreground">game:</span> {cleanup.products.join(', ')}</li>}
+                <li>Names, phone numbers and cities are tidied automatically; invalid phone numbers are dropped and noted on the lead</li>
+                <li>Call outcomes ({cleanup.dispositions.join(', ')}) are recorded on each call, not uploaded</li>
+              </ul>
+            </div>
+          )}
 
           <div className="flex justify-end gap-2">
             <Button
