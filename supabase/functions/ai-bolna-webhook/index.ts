@@ -550,7 +550,7 @@ async function autoDisposition(
       outcomeKey = (args.status === "no-answer" || args.status === "busy") ? "no_answer" : "not_connected";
     } else {
       const { data: c } = await supabase.from("contacts").select("product").eq("id", args.contactId).maybeSingle();
-      const productLabel = String(c?.product || "").toLowerCase() === "vendorverification" ? "Vendor Verification" : "WorkSync";
+      const productLabel = String(c?.product || "").toLowerCase() === "vendorsync" ? "Vendorsync" : "WorkSync";
       const { data: keyRows } = await supabase.from("ai_outcome_disposition_map").select("outcome_key").eq("org_id", args.orgId);
       const keys = (keyRows || []).map((r: any) => r.outcome_key);
       const cls = await classifyCall({ transcript, productLabel, outcomeKeys: keys });
@@ -618,7 +618,7 @@ async function handleReminderResult(
       .order("scheduled_at", { ascending: false }).limit(1).maybeSingle();
 
     const prospect = contact?.first_name || "The prospect";
-    const productLabel = String(contact?.product || "").toLowerCase() === "vendorverification" ? "Vendor Verification" : "WorkSync";
+    const productLabel = String(contact?.product || "").toLowerCase() === "vendorsync" ? "Vendorsync" : "WorkSync";
     const fmt = (iso: string) => new Date(iso).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Kolkata" });
 
     // RSVP + auto-reschedule

@@ -820,7 +820,7 @@ async function processBatch(
 // =============================================================================
 
 // llama-3.3-70b-versatile was retired by Groq (404 model_not_found) -- same
-// deprecation hit Vendor-Sync's PI/document parsing 2026-09-03, fixed there
+// deprecation hit Vendorsync's PI/document parsing 2026-09-03, fixed there
 // with this model. Cerebras stays as the second-line fallback.
 const GROQ_MODEL = 'openai/gpt-oss-120b';
 const CEREBRAS_MODEL = 'gemma-4-31b';

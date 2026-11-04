@@ -156,19 +156,19 @@ serve(async (req) => {
     let demoDateStr = formatDemoDate(activity?.demo_date);
     let demoTimeStr = formatDemoTime(activity?.demo_time);
 
-    // Product-aware template selection (worksync vs vendorverification).
+    // Product-aware template selection (worksync vs vendorsync).
     const product = String((contact as any).product || "").toLowerCase().trim();
-    const isVV = product === "vendorverification";
+    const isVendorsync = product === "vendorsync";
     let emailTemplateName = isDemo
-      ? (isVV ? "Vendor Verification: Demo Confirmation" : "Work-Sync: Demo Confirmation")
+      ? (isVendorsync ? "Vendorsync: Demo Confirmation" : "Work-Sync: Demo Confirmation")
       : isMissed
-        ? (isVV ? "Vendor Verification: Missed Call" : "Work-Sync: Missed Call")
-        : (isVV ? "Vendor Verification: Post-Call Introduction" : "Work-Sync: Post-Call Introduction");
+        ? (isVendorsync ? "Vendorsync: Missed Call" : "Work-Sync: Missed Call")
+        : (isVendorsync ? "Vendorsync: Post-Call Introduction" : "Work-Sync: Post-Call Introduction");
     let waTemplateName = isDemo
-      ? (isVV ? "vendorverification_demo_confirmation" : "worksync_demo_confirmation_v2")
+      ? (isVendorsync ? "vendorverification_demo_confirmation" : "worksync_demo_confirmation_v2")
       : isMissed
-        ? (isVV ? "vendorverification_missed_call" : "worksync_missed_call")
-        : (isVV ? "vendorverification_intro_post_call" : "worksync_intro_post_call");
+        ? (isVendorsync ? "vendorverification_missed_call" : "worksync_missed_call")
+        : (isVendorsync ? "vendorverification_intro_post_call" : "worksync_intro_post_call");
 
     // Who's named in the message: for a DEMO confirmation it's the demo HOST
     // (e.g. Amit) — they actually run the demo; for intro/missed it's the lead
@@ -211,7 +211,7 @@ serve(async (req) => {
     }
 
     // Demo agreed but no date yet -> send the slot-request instead of a confirmation.
-    const productLabel = isVV ? "Vendor Verification" : "WorkSync";
+    const productLabel = isVendorsync ? "Vendorsync" : "WorkSync";
     const needsSlot = isDemo && !datedMeetingFound;
     const slotLink = `${Deno.env.get("SUPABASE_URL")}/functions/v1/demo-slot-pick?c=${contact.id}`;
     if (needsSlot) {

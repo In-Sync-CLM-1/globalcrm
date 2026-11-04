@@ -1,13 +1,13 @@
 // Shared mapping from a product to its friendly label + dedicated AI agent.
-// Product names reach us in two casings: compact ("Worksync", "Vendorverification")
-// from contacts / ai_daily_insights, and display ("WorkSync", "Vendor Verification")
+// Product names reach us in two casings: compact ("Worksync", "Vendorsync")
+// from contacts / ai_daily_insights, and display ("WorkSync", "Vendorsync")
 // from ai_call_scripts. Both normalise to the same key via normProduct.
 //
 // New products fall back to the raw name + "—" agent, so panels keep working as
 // the remaining agents come online without code changes.
 export const PRODUCT_META: Record<string, { label: string; agent: string }> = {
   worksync: { label: "WorkSync", agent: "Riya" },
-  vendorverification: { label: "Vendor Verification", agent: "Anushree" },
+  vendorsync: { label: "Vendorsync", agent: "Anushree" },
   globalcrm: { label: "GlobalCRM", agent: "—" },
   whatsapp: { label: "WhatsApp", agent: "—" },
   email: { label: "Email", agent: "—" },

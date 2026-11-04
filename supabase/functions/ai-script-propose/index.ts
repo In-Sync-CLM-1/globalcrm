@@ -9,8 +9,8 @@ const corsHeaders = {
 const SCRIPT_COLS =
   "id, org_id, product_name, opening, objective, key_points, closing, objection_handling, behavioral_guidelines, language";
 
-// Compact a product name to a join key. "Vendor Verification" (ai_call_scripts)
-// and "Vendorverification" (contacts / ai_daily_insights) both collapse to the
+// Compact a product name to a join key. "Vendorsync" (ai_call_scripts)
+// and "Vendorsync" (contacts / ai_daily_insights) both collapse to the
 // same key, so each script pairs with its OWN product's learnings.
 const norm = (p: string | null | undefined) => (p || "").toLowerCase().replace(/\s+/g, "");
 
