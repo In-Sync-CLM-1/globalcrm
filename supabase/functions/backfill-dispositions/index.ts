@@ -43,7 +43,7 @@ Deno.serve(async () => {
       let productLabel = "WorkSync";
       if (c.contact_id) {
         const { data: cc } = await supabase.from("contacts").select("product").eq("id", c.contact_id).maybeSingle();
-        if (String(cc?.product || "").toLowerCase() === "vendorverification") productLabel = "Vendor Verification";
+        if (String(cc?.product || "").toLowerCase() === "vendorsync") productLabel = "Vendorsync";
       }
       const cls = await classifyCall({ transcript, productLabel, outcomeKeys: keys });
       if (cls) {
