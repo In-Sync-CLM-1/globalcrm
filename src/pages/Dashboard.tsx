@@ -34,7 +34,7 @@ const INSYNC_DEMO_ORG_ID = "61f7f96d-e80c-4d9b-a765-8eb32bd3c70d";
 
 export default function Dashboard() {
   const { effectiveOrgId, isLoading: orgLoading } = useOrgContext();
-  const { isAdmin, isSuperAdmin, loading: roleLoading } = useUserRole();
+  const { isAdmin, isSuperAdmin, isSalesManager, loading: roleLoading } = useUserRole();
 
   const queryClient = useQueryClient();
   const { triggerEdgeFunctionCheck, checkReminders } = useCallbackReminders();
@@ -235,7 +235,7 @@ export default function Dashboard() {
     return <FerventDashboard />;
   }
 
-  // Gaming CRM Demo: managers see every caller's day; callers see their own targets
+  // Gaming org: admins and calling managers see every caller's day; callers see their own targets
   if (effectiveOrgId === GAMING_ORG_ID) {
     if (roleLoading) {
       return (
@@ -246,7 +246,7 @@ export default function Dashboard() {
     }
     return (
       <DashboardLayout>
-        {isAdmin || isSuperAdmin ? (
+        {isAdmin || isSuperAdmin || isSalesManager ? (
           <GamingManagerDashboard orgId={effectiveOrgId} />
         ) : (
           <GamingCallerDashboard orgId={effectiveOrgId} />

@@ -39,7 +39,7 @@ const hm = (min: number) => `${String(Math.floor(min / 60)).padStart(2, "0")}:${
 const toMin = (v: string) => { const [h, m] = v.split(":").map(Number); return (h || 0) * 60 + (m || 0); };
 
 const QUEUE_TONE: Record<string, Tone> = { pending: "neutral", calling: "info", done: "good", skipped: "warn", failed: "bad", cancelled: "neutral" };
-const OUTCOME_TONE: Record<string, Tone> = { Interested: "good", "Callback Requested": "warn", "Not Interested": "bad", "Do Not Call": "bad" };
+const OUTCOME_TONE: Record<string, Tone> = { Interested: "good", "Callback Requested": "warn", "Follow-up": "warn", Registration: "good", Deposit: "good", "Do Not Contact": "bad", "Not Interested": "bad", "Do Not Call": "bad" };
 const STATUS_STYLE: Record<string, string> = {
   pending: "bg-slate-100 text-slate-700", calling: "bg-blue-100 text-blue-800", done: "bg-emerald-100 text-emerald-800",
   skipped: "bg-amber-100 text-amber-800", failed: "bg-rose-100 text-rose-800", cancelled: "bg-slate-100 text-slate-500",
@@ -134,7 +134,7 @@ export default function AiCalling() {
   const stats = useMemo(() => {
     const connected = calls.filter((c) => (c.conversation_duration ?? 0) > 0).length;
     const name = (c: (typeof calls)[number]) => (c.call_dispositions as { name: string } | null)?.name ?? "";
-    return { total: calls.length, connected, interested: calls.filter((c) => name(c) === "Interested").length, callbacks: calls.filter((c) => name(c) === "Callback Requested").length };
+    return { total: calls.length, connected, interested: calls.filter((c) => name(c) === "Interested").length, callbacks: calls.filter((c) => ["Callback Requested", "Follow-up"].includes(name(c))).length };
   }, [calls]);
 
   const outcomes = useMemo(() => {
