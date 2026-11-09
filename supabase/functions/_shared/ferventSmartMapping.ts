@@ -477,10 +477,12 @@ const CONTACTS_NO_IDENTITY_MESSAGE =
 const CONTACTS_CLEANUP_EXTRA_FIELDS: { key: string; desc: string }[] = [
   { key: 'source', desc: 'Where the lead came from: lead source / channel / campaign / referral source' },
   { key: 'product', desc: 'The product / game / offering the lead is interested in or plays' },
+  { key: 'assigned_to', desc: 'The CRM user (caller / agent / owner) the lead should be assigned to, given as a person name or login email' },
 ];
 const CONTACTS_CLEANUP_EXTRA_SYNONYMS: Record<string, string[]> = {
   source: ['source', 'lead_source', 'channel', 'lead_channel', 'utm_source', 'campaign_source'],
   product: ['product', 'game', 'favourite_game', 'favorite_game', 'game_interest', 'interested_in'],
+  assigned_to: ['assigned_to', 'assigned', 'assign_to', 'assignee', 'owner', 'lead_owner', 'agent', 'caller', 'telecaller'],
 };
 
 export async function buildContactsMapping(rawHeaders: string[], sampleRows: string[][], withCleanupFields = false): Promise<FerventMappingResult> {
@@ -491,7 +493,10 @@ export async function buildContactsMapping(rawHeaders: string[], sampleRows: str
 
 // Contacts equivalent of applyFerventMapping: same full-name-split and
 // name-from-email derivation, targeted at the contacts row shape.
-export function applyContactsMapping(values: string[], mapping: FerventMapping): Record<string, string> {
+// keepFullNameWhole: put the whole full-name value into first_name instead of
+// splitting it (orgs with import_cleanup on, whose "Full Name" is often a
+// username or a name the client wants kept exactly as given).
+export function applyContactsMapping(values: string[], mapping: FerventMapping, keepFullNameWhole = false): Record<string, string> {
   const row: Record<string, string> = {};
   for (const [field, idx] of Object.entries(mapping.fieldToIndex)) {
     row[field] = (values[idx] ?? '').trim();
@@ -500,7 +505,7 @@ export function applyContactsMapping(values: string[], mapping: FerventMapping):
   if (mapping.fullNameIndex !== null && !row.first_name && !row.last_name) {
     const full = (values[mapping.fullNameIndex] ?? '').trim();
     if (full) {
-      const { first, last } = splitFullName(full);
+      const { first, last } = keepFullNameWhole ? { first: full.replace(/\s+/g, ' '), last: '' } : splitFullName(full);
       row.first_name = first;
       row.last_name = last;
     }
