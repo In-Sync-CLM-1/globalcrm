@@ -34,7 +34,7 @@ export function BulkUploadDialog({ open, onOpenChange, orgId, onUploadStarted }:
   // Orgs with staging cleanup on (organizations.settings.import_cleanup): their
   // template carries source + game columns and the dialog lists the values the
   // CRM maps uploads onto (stages, sources, games, call outcomes).
-  const [cleanup, setCleanup] = useState<{ stages: string[]; sources: string[]; products: string[]; dispositions: string[] } | null>(null);
+  const [cleanup, setCleanup] = useState<{ users: string[] } | null>(null);
   const notification = useNotification();
 
   useEffect(() => {
@@ -48,15 +48,16 @@ export function BulkUploadDialog({ open, onOpenChange, orgId, onUploadStarted }:
         setSmartImportEnabled(!!data?.smart_import_enabled);
         const cfg = (data?.settings as any)?.import_cleanup;
         if (!cfg?.enabled) { setCleanup(null); return; }
-        const [{ data: stages }, { data: disps }] = await Promise.all([
-          supabase.from('pipeline_stages').select('name, stage_order').eq('org_id', orgId).eq('is_active', true).order('stage_order'),
-          supabase.from('call_dispositions').select('name').eq('org_id', orgId).eq('is_active', true).order('name'),
-        ]);
+        const { data: users } = await supabase
+          .from('profiles')
+          .select('first_name, last_name, is_active')
+          .eq('org_id', orgId)
+          .order('first_name');
         setCleanup({
-          stages: (stages || []).map((s: any) => s.name),
-          sources: Array.isArray(cfg.sources) ? cfg.sources : [],
-          products: Array.isArray(cfg.products) ? cfg.products : [],
-          dispositions: (disps || []).map((d: any) => d.name),
+          users: (users || [])
+            .filter((u: any) => u.is_active !== false)
+            .map((u: any) => `${u.first_name ?? ''} ${u.last_name ?? ''}`.trim())
+            .filter(Boolean),
         });
       });
   }, [open, orgId]);
@@ -165,7 +166,7 @@ export function BulkUploadDialog({ open, onOpenChange, orgId, onUploadStarted }:
     // and drop the generic lead "status" column (the status the client tracks —
     // Call made / Message Sent / Delivered / Opened — is auto-filled, not uploaded).
     const headers = cleanup
-      ? ['first_name', 'last_name', 'phone', 'email', 'city', 'state', 'source', 'game', 'pipeline_stage', 'notes']
+      ? ['Full Name', 'Phone', 'Assigned to']
       : orgId === IEDUP_ORG_ID
       ? baseHeaders.filter((h) => h !== 'status').map((h) => (h === 'pipeline_stage' ? 'Action' : h))
       : baseHeaders;
@@ -402,6 +403,7 @@ export function BulkUploadDialog({ open, onOpenChange, orgId, onUploadStarted }:
             )}
           </div>
 
+          {!cleanup && (
           <div className="bg-muted p-3 rounded-lg text-xs space-y-1">
             <p className="font-medium">Requirements:</p>
             <ul className="list-disc list-inside space-y-1 text-muted-foreground">
@@ -416,16 +418,17 @@ export function BulkUploadDialog({ open, onOpenChange, orgId, onUploadStarted }:
               <li>Maximum file size: 45MB</li>
             </ul>
           </div>
+          )}
 
           {cleanup && (
             <div className="bg-muted p-3 rounded-lg text-xs space-y-1">
-              <p className="font-medium">What the upload understands (AI tidies the rest while importing):</p>
+              <p className="font-medium">The file needs three columns:</p>
               <ul className="list-disc list-inside space-y-1 text-muted-foreground">
-                <li><span className="font-medium text-foreground">pipeline_stage:</span> {cleanup.stages.join(', ')}</li>
-                {cleanup.sources.length > 0 && <li><span className="font-medium text-foreground">source:</span> {cleanup.sources.join(', ')}</li>}
-                {cleanup.products.length > 0 && <li><span className="font-medium text-foreground">game:</span> {cleanup.products.join(', ')}</li>}
-                <li>Names, phone numbers and cities are tidied automatically; invalid phone numbers are dropped and noted on the lead</li>
-                <li>Call outcomes ({cleanup.dispositions.join(', ')}) are recorded on each call, not uploaded</li>
+                <li><span className="font-medium text-foreground">Full Name:</span> saved as the first name exactly as given; left blank, the lead is saved as "Unknown"</li>
+                <li><span className="font-medium text-foreground">Phone:</span> Indian mobile number, with or without +91; numbers that are not valid mobiles are dropped and noted on the lead</li>
+                <li><span className="font-medium text-foreground">Assigned to:</span> the user's name or login email{cleanup.users.length > 0 ? ` (${cleanup.users.join(', ')})` : ''}; left blank, the lead stays unassigned</li>
+                <li>Numbers already in the CRM are not added again; an unassigned one is given to the user named in the file</li>
+                <li>CSV file, up to 45MB</li>
               </ul>
             </div>
           )}

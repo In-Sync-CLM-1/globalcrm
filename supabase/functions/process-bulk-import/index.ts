@@ -68,6 +68,34 @@ async function stageSkippedRows(supabase: any, importJobId: string, skipped: Arr
   }
 }
 
+// Resolves an uploaded "Assigned to" value to an active user of the org:
+// login email, full name, or first name when exactly one user has it.
+// Case and spacing are ignored.
+async function loadAssigneeLookup(supabase: any, orgId: string): Promise<(v: string) => string | null> {
+  const { data } = await supabase
+    .from('profiles')
+    .select('id, first_name, last_name, email, is_active')
+    .eq('org_id', orgId);
+  const key = (v: string) => String(v ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const exact = new Map<string, string>();
+  const byFirst = new Map<string, string[]>();
+  for (const u of data || []) {
+    if (u.is_active === false) continue;
+    if (u.email) exact.set(key(u.email), u.id);
+    const full = key(`${u.first_name ?? ''} ${u.last_name ?? ''}`);
+    if (full) exact.set(full, u.id);
+    const first = key(u.first_name ?? '');
+    if (first) byFirst.set(first, [...(byFirst.get(first) ?? []), u.id]);
+  }
+  return (v: string) => {
+    const k = key(v);
+    if (!k) return null;
+    if (exact.has(k)) return exact.get(k)!;
+    const f = byFirst.get(k);
+    return f && f.length === 1 ? f[0] : null;
+  };
+}
+
 type BatchProcessor = (supabase: any, importJob: ImportJob, batch: any[], batchNumber: number) => Promise<{
   inserted: number; updated: number; skipped: number; dbErrors?: number;
   duplicateSamples?: Array<{ matched_on: string; value: string }>;
@@ -410,6 +438,8 @@ serve(async (req) => {
     // repository uploads are mapped.
     let contactsMapping: FerventMapping | undefined;
     let cleanupVocab: CleanupVocab | undefined;
+    let assigneeLookup: ((v: string) => string | null) | undefined;
+    let defaultStageId: string | null = null;
     if (importJob.import_type === 'contacts') {
       const { data: org } = await supabase
         .from('organizations')
@@ -422,7 +452,9 @@ serve(async (req) => {
       // lists with Groq (Cerebras backup), at staging time.
       const cleanupCfg = org?.settings?.import_cleanup;
       if (cleanupCfg?.enabled) {
-        const { data: stg } = await supabase.from('pipeline_stages').select('id, name').eq('org_id', importJob.org_id).eq('is_active', true);
+        assigneeLookup = await loadAssigneeLookup(supabase, importJob.org_id);
+        const { data: stg } = await supabase.from('pipeline_stages').select('id, name, stage_order').eq('org_id', importJob.org_id).eq('is_active', true).order('stage_order');
+        defaultStageId = stg?.[0]?.id ?? null; // leads without a stage column start in the first stage
         cleanupVocab = {
           stages: stg || [],
           sources: Array.isArray(cleanupCfg.sources) ? cleanupCfg.sources : [],
@@ -527,7 +559,7 @@ serve(async (req) => {
       try {
         const values = parseCSVLine(line);
         const row: any = contactsMapping
-          ? applyContactsMapping(values, contactsMapping)
+          ? applyContactsMapping(values, contactsMapping, !!cleanupVocab)
           : {};
         if (!contactsMapping) {
           headers.forEach((header, idx) => {
@@ -558,8 +590,9 @@ serve(async (req) => {
             nature_of_business: row.nature_of_business || null,
             status: row.status || 'new',
             source: row.source || 'bulk_import',
-            pipeline_stage_id: stageNameToId[String(row.action || row.pipeline_stage || row.stage || '').trim().toLowerCase()] || null,
+            pipeline_stage_id: stageNameToId[String(row.action || row.pipeline_stage || row.stage || '').trim().toLowerCase()] || defaultStageId,
             ...(cleanupVocab ? {
+              first_name: row.first_name || (row.last_name ? row.first_name : 'Unknown'),
               product: row.product || null,
               _raw: { stage: row.action || row.pipeline_stage || row.stage || '', source: row.source || '', product: row.product || '' },
             } : {}),
@@ -580,6 +613,14 @@ serve(async (req) => {
             notes: row.notes || null,
             created_by: importJob.user_id
           };
+          // Assigned to (orgs with import_cleanup on): a CRM user's name or login
+          // email. Unrecognised values leave the lead unassigned and are noted.
+          const assignee = cleanupVocab ? String(row.assigned_to ?? '').trim() : '';
+          if (assignee) {
+            const userId = assigneeLookup?.(assignee) ?? null;
+            if (userId) record.assigned_to = userId;
+            else record.notes = [record.notes, `Assigned to in file not recognised: ${assignee}`].filter(Boolean).join(' | ');
+          }
         } else if (importJob.import_type === 'email_recipients') {
           record = {
             campaign_id: importJob.target_id,
@@ -688,6 +729,7 @@ async function processBatch(
     let tableName: string;
     let upsertOptions: any = {};
     let skippedCount = 0;
+    let updatedCount = 0;
     const duplicateSamples: Array<{ matched_on: string; value: string }> = [];
 
     if (importJob.import_type === 'contacts') {
@@ -751,6 +793,57 @@ async function processBatch(
       if (skippedCount > 0) {
         console.log(`[DB] Batch ${batchNumber}: Filtered ${skippedCount} duplicate emails, inserting ${batch.length} records`);
       }
+
+      // Orgs with import_cleanup on upload phone-only lead lists, so also skip
+      // phone numbers already in the CRM or repeated in the file. A repeat of an
+      // unassigned lead that the file assigns to someone gets that assignee.
+      const { data: orgRow } = await supabase.from('organizations').select('settings').eq('id', importJob.org_id).single();
+      if (orgRow?.settings?.import_cleanup?.enabled) {
+        const phoneKey = (p: any) => String(p ?? '').replace(/\D/g, '').slice(-10);
+        const masked = (p: any) => `••••••• ${phoneKey(p).slice(-3)}`;
+        const firstByPhone = new Map<string, any>();
+        const kept: any[] = [];
+        for (const r of batch) {
+          const k = phoneKey(r.phone);
+          if (k.length < 10) { kept.push(r); continue; }
+          const prev = firstByPhone.get(k);
+          if (prev) {
+            if (!prev.assigned_to && r.assigned_to) prev.assigned_to = r.assigned_to;
+            skippedCount++;
+            if (duplicateSamples.length < 20) duplicateSamples.push({ matched_on: 'phone (repeated in file)', value: masked(r.phone) });
+            continue;
+          }
+          firstByPhone.set(k, r);
+          kept.push(r);
+        }
+        const phones = kept.map((r) => r.phone).filter((p) => phoneKey(p).length === 10);
+        const existing = new Map<string, { contact_id: string; assigned_to: string | null }>();
+        if (phones.length > 0) {
+          const { data: hits, error: hitErr } = await supabase.rpc('pii_existing_phones', { _org: importJob.org_id, _phones: phones });
+          if (hitErr) throw hitErr;
+          for (const h of hits || []) existing.set(phoneKey(h.phone), h);
+        }
+        const assignExisting = new Map<string, string[]>();
+        batch = kept.filter((r) => {
+          const e = existing.get(phoneKey(r.phone));
+          if (!e) return true;
+          if (r.assigned_to && !e.assigned_to) {
+            assignExisting.set(r.assigned_to, [...(assignExisting.get(r.assigned_to) ?? []), e.contact_id]);
+          } else {
+            skippedCount++;
+            if (duplicateSamples.length < 20) duplicateSamples.push({ matched_on: 'phone (already in CRM)', value: masked(r.phone) });
+          }
+          return false;
+        });
+        for (const [userId, ids] of assignExisting) {
+          const { data: upd, error: updErr } = await supabase
+            .from('contacts').update({ assigned_to: userId })
+            .in('id', ids).is('assigned_to', null).select('id');
+          if (updErr) throw updErr;
+          updatedCount += (upd || []).length;
+        }
+        console.log(`[DB] Batch ${batchNumber}: phone dedupe kept ${batch.length}, assigned ${updatedCount} existing, skipped total ${skippedCount}`);
+      }
       // No upsertOptions - use simple insert for contacts
     } else if (importJob.import_type === 'email_recipients') {
       tableName = 'email_campaign_recipients';
@@ -772,7 +865,7 @@ async function processBatch(
 
     // Use insert for contacts, upsert for campaign recipients
     const { error } = (importJob.import_type === 'contacts')
-      ? await supabase.from(tableName).insert(batch)
+      ? (batch.length > 0 ? await supabase.from(tableName).insert(batch) : { error: null })
       : await supabase.from(tableName).upsert(batch, upsertOptions);
 
     if (error) {
@@ -781,7 +874,7 @@ async function processBatch(
     }
 
     console.log('[DB] Batch', batchNumber, 'inserted successfully');
-    return { inserted: batch.length, updated: 0, skipped: skippedCount, duplicateSamples };
+    return { inserted: batch.length, updated: updatedCount, skipped: skippedCount, duplicateSamples };
   } catch (error) {
     console.error('[DB] Batch processing error:', error);
     throw error;
