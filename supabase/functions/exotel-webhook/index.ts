@@ -133,20 +133,31 @@ serve(async (req) => {
 
       let notConnectedDispositionId: string | null = null;
       if (notConnected && !callLog.disposition_id) {
-        const { data: disposition } = await supabaseClient
+        // Orgs name this outcome "Not Connected" (default list) or "Unreachable" (custom lists,
+        // with "No Answer" / "Busy" sub-options). Use whichever is active, preferring Not Connected.
+        const { data: candidates } = await supabaseClient
           .from('call_dispositions')
-          .select('id')
+          .select('id, name')
           .eq('org_id', callLog.org_id)
-          .eq('name', 'Not Connected')
-          .maybeSingle();
+          .eq('is_active', true)
+          .in('name', ['Not Connected', 'Unreachable']);
+        const disposition =
+          candidates?.find((d) => d.name === 'Not Connected') ?? candidates?.find((d) => d.name === 'Unreachable');
 
         if (disposition?.id) {
           notConnectedDispositionId = disposition.id;
+          const { data: sub } = await supabaseClient
+            .from('call_sub_dispositions')
+            .select('id')
+            .eq('disposition_id', disposition.id)
+            .eq('is_active', true)
+            .eq('name', normalizedStatus === 'busy' ? 'Busy' : 'No Answer')
+            .maybeSingle();
           await supabaseClient
             .from('call_logs')
-            .update({ disposition_id: disposition.id })
+            .update({ disposition_id: disposition.id, ...(sub?.id ? { sub_disposition_id: sub.id } : {}) })
             .eq('id', callLog.id);
-          console.log('Auto-set disposition to Not Connected for call', callLog.id);
+          console.log(`Auto-set disposition to ${disposition.name} for call`, callLog.id);
         } else {
           console.warn('Not Connected disposition missing for org', callLog.org_id);
         }

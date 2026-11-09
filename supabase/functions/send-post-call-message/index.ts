@@ -13,7 +13,7 @@ const DEMO_DISPOSITION = "Demo Booked";
 const SKIP_DISPOSITIONS = new Set(["Wrong Number / DND", "Do Not Call"]);
 // No-answer dispositions get the "sorry we missed you" message instead of the
 // "thank you for your time on the call" intro, since no conversation happened.
-const MISSED_DISPOSITIONS = new Set(["Did Not Pick Up", "Not Connected", "Voicemail"]);
+const MISSED_DISPOSITIONS = new Set(["Did Not Pick Up", "Not Connected", "Unreachable", "Voicemail"]);
 
 const EMAIL_TEMPLATE_DEMO = "Work-Sync: Demo Confirmation";
 const EMAIL_TEMPLATE_INTRO = "Work-Sync: Post-Call Introduction";

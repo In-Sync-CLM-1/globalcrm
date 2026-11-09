@@ -126,7 +126,11 @@ export interface Dispo { id: string; name: string; category: string | null; desc
 export interface SubDispo { id: string; name: string; disposition_id: string }
 
 /** The org's disposition list, in the order the workflow reads (conversion outcomes first). */
-const DISPO_ORDER = ["Registered", "Activated", "Interested", "Callback Requested", "Already Registered", "Not Interested", "Not Connected", "Wrong Number", "Language Barrier", "Do Not Call"];
+const DISPO_ORDER = [
+  // Ajimos list (Nov 2026)
+  "Interested", "Registration", "Deposit", "Follow-up", "Not Interested", "Unreachable", "Wrong Contact", "Existing Customer", "Technical Issue", "Do Not Contact",
+  // Original gaming list
+  "Registered", "Activated", "Interested", "Callback Requested", "Already Registered", "Not Interested", "Not Connected", "Wrong Number", "Language Barrier", "Do Not Call"];
 
 export function useDispositionCatalog(orgId: string) {
   return useQuery({

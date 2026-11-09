@@ -35,11 +35,13 @@ Deno.serve(async (req) => {
     if (room_name) update.room_name = room_name;
     if (connected) update.answered_at = new Date().toISOString();
 
-    const lookupDispo = async (name: string, sub?: string) => {
-      const { data: d } = await supabase.from("call_dispositions").select("id").eq("org_id", orgId).eq("name", name).maybeSingle();
+    const lookupDispo = async (names: string[], sub?: string) => {
+      // First active match in the order given (orgs call the missed-call outcome "Not Connected" or "Unreachable").
+      const { data: rows } = await supabase.from("call_dispositions").select("id, name").eq("org_id", orgId).eq("is_active", true).in("name", names);
+      const d = names.map((n) => rows?.find((r) => r.name === n)).find(Boolean);
       if (!d) return { d: null as string | null, s: null as string | null };
       if (!sub) return { d: d.id as string, s: null as string | null };
-      const { data: s } = await supabase.from("call_sub_dispositions").select("id").eq("disposition_id", d.id).eq("name", sub).maybeSingle();
+      const { data: s } = await supabase.from("call_sub_dispositions").select("id").eq("disposition_id", d.id).eq("is_active", true).eq("name", sub).maybeSingle();
       return { d: d.id as string, s: (s?.id as string) ?? null };
     };
 
@@ -57,7 +59,7 @@ Deno.serve(async (req) => {
         optOut = !!map.sets_opt_out;
       }
     } else {
-      const nc = await lookupDispo("Not Connected", status === "busy" ? "Busy" : "No Answer");
+      const nc = await lookupDispo(["Not Connected", "Unreachable"], status === "busy" ? "Busy" : "No Answer");
       update.disposition_id = nc.d;
       update.sub_disposition_id = nc.s;
     }

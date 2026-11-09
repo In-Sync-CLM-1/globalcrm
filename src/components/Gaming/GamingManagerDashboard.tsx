@@ -215,7 +215,7 @@ export function GamingManagerDashboard({ orgId }: { orgId: string }) {
 
         <TableCard
           title="Dispositions and sub-dispositions"
-          subtitle={<>Every call ends with one disposition and one sub-disposition chosen by the caller. Registered and Activated drive the funnel. <Link to="/admin/call-dispositions" className="text-primary underline">Edit the list</Link></>}
+          subtitle={<>Every call ends with one disposition and one sub-disposition chosen by the caller. Registration Completed (or Registered) counts as a registration and Deposit Completed (or Activated) as an activation. <Link to="/admin/call-dispositions" className="text-primary underline">Edit the list</Link></>}
         >
           <Table>
             <TableHeader>
