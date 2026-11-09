@@ -174,6 +174,12 @@ async function claimAndProcessStagedBatches(
 async function finalizeImportJob(supabase: any, importJob: ImportJob, startTime: number): Promise<Response> {
   await updateJobStage(supabase, importJob.id, 'finalizing', { message: 'Finalizing…' });
 
+  // Re-read the job: callers may pass a row fetched before the claim loop
+  // wrote the counts (the first invocation does), which reported every
+  // upload as 0 imported.
+  const { data: freshJob } = await supabase.from('import_jobs').select('*').eq('id', importJob.id).single();
+  if (freshJob) importJob = freshJob as ImportJob;
+
   const totalRows = importJob.total_rows || 0;
   const successCount = importJob.success_count || 0;
   const updatedCount = importJob.updated_count || 0;
