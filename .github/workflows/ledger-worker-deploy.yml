@@ -14,7 +14,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  gate:
+    runs-on: ubuntu-24.04
+    name: Test agent gate (may this commit go live?)
+    steps:
+      - name: Ask the test ledger
+        env:
+          GATE_TOKEN: ${{ secrets.TEST_GATE_TOKEN }}
+        run: |
+          r=$(curl -sS -X POST https://test-ledger.echocommunicator.workers.dev/gate \
+            -H "Authorization: Bearer $GATE_TOKEN" -H "content-type: application/json" \
+            -d "{\"repo\":\"${{ github.repository }}\",\"sha\":\"${{ github.sha }}\",\"workflow\":\"${{ github.workflow }}\"}")
+          echo "$r"
+          echo "$r" | grep -q '"allow": true' || { echo "::error::Not allowed to go live: $(echo "$r" | sed -n 's/.*"reason": "\(.*\)".*/\1/p')"; exit 1; }
+
   deploy:
+    needs: gate
     runs-on: ubuntu-latest
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

@@ -16,7 +16,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  gate:
+    runs-on: ubuntu-24.04
+    name: Test agent gate (may this commit go live?)
+    steps:
+      - name: Ask the test ledger
+        env:
+          GATE_TOKEN: ${{ secrets.TEST_GATE_TOKEN }}
+        run: |
+          r=$(curl -sS -X POST https://test-ledger.echocommunicator.workers.dev/gate \
+            -H "Authorization: Bearer $GATE_TOKEN" -H "content-type: application/json" \
+            -d "{\"repo\":\"${{ github.repository }}\",\"sha\":\"${{ github.sha }}\",\"workflow\":\"${{ github.workflow }}\"}")
+          echo "$r"
+          echo "$r" | grep -q '"allow": true' || { echo "::error::Not allowed to go live: $(echo "$r" | sed -n 's/.*"reason": "\(.*\)".*/\1/p')"; exit 1; }
+
   deploy:
+    needs: gate
     runs-on: ubuntu-latest
     name: Build and deploy frontend
     env:
@@ -37,3 +52,10 @@ jobs:
         run: npm run build
       - name: Deploy to Cloudflare Pages
         run: npx wrangler@latest pages deploy dist --project-name=globalcrm-sync --branch=main --commit-dirty=true
+
+      - name: Ask the test agent to check the live site
+        env:
+          GH_TOKEN: ${{ secrets.TEST_AGENT_TOKEN }}
+        run: |
+          gh api repos/In-Sync-CLM-1/test-agent/dispatches -f event_type=live-check \
+            -F "client_payload[repo]=${{ github.repository }}" -F "client_payload[sha]=${{ github.sha }}"
