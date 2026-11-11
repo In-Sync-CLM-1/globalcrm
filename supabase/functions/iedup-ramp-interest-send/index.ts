@@ -94,7 +94,7 @@ serve(async (req) => {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
-        from: "IEDUP RAMP <ramp@iedup.in-sync.co.in>", to: [c.email], reply_to: "edpavg@gmail.com", subject: SUBJECT,
+        from: "IEDUP UP RAMP <training@ramp.avgroups.in>", to: [c.email], reply_to: "edpavg@gmail.com", subject: SUBJECT,
         html: emailHtml(name), attachments: [{ filename: "IEDUP-Brochure.pdf", path: BROCHURE_URL }],
       }),
     }).catch((e) => ({ ok: false, status: 0, text: async () => String(e) } as Response));

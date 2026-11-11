@@ -68,7 +68,7 @@ async function sendIedupEmail(db: any, o: { contactId: string; to: string; subje
   }
   const resp = await fetch("https://api.resend.com/emails", {
     method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({ from: "IEDUP RAMP <ramp@iedup.in-sync.co.in>", to: [o.to], reply_to: "edpavg@gmail.com", subject: o.subject, html: o.html }),
+    body: JSON.stringify({ from: "IEDUP UP RAMP <training@ramp.avgroups.in>", to: [o.to], reply_to: "edpavg@gmail.com", subject: o.subject, html: o.html }),
   }).catch((e) => ({ ok: false, text: async () => String(e) } as Response));
   const text = await resp.text();
   if (resp.ok) {
@@ -263,7 +263,7 @@ serve(async (req) => {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
         body: JSON.stringify({
-          from: "IEDUP RAMP <ramp@iedup.in-sync.co.in>", to: [email], reply_to: "edpavg@gmail.com", subject,
+          from: "IEDUP UP RAMP <training@ramp.avgroups.in>", to: [email], reply_to: "edpavg@gmail.com", subject,
           html: emailHtml(name, course, applicationNo), attachments: [{ filename: "IEDUP-Brochure.pdf", path: BROCHURE_URL }],
         }),
       }).catch((e) => ({ ok: false, text: async () => String(e) } as Response));
