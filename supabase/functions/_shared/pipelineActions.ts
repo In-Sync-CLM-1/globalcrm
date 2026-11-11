@@ -16,12 +16,12 @@ const WHATSAPP_MARKETING_COST_PER_MSG = 1.00;
 // Legacy fallback for templates created before the `category` column was backfilled.
 export const MARKETING_TEMPLATES = new Set<string>(["iedup_ramp_round1_selection_v1"]);
 
-// Per-org email sender. Mirrors the IEDUP training domain (separate Resend
+// Per-org email sender. IEDUP CM YUVA sends from cmyuva.avgroups.in since 2026-11-11 (separate Resend
 // account from the shared "fmamit" one — that account was already at its
 // domain cap).
 export const EMAIL_SENDER_BY_ORG: Record<string, { localPart: string; resendKeyEnv: string; fromName: string }> = {
   "6dcf4229-6902-4cd4-9c7f-2d6ed4a6045d": {
-    localPart: "training@iedup.in-sync.co.in",
+    localPart: "training@cmyuva.avgroups.in",
     resendKeyEnv: "IEDUP_RESEND_API_KEY",
     fromName: "IEDUP CM YUVA",
   },
