@@ -18,16 +18,21 @@ Deno.serve(async (req) => {
 
     console.log('Webhook received from Razorpay');
 
-    // Verify webhook signature using Web Crypto API
-    const RAZORPAY_KEY_SECRET = Deno.env.get('RAZORPAY_KEY_SECRET');
-    if (!RAZORPAY_KEY_SECRET) {
-      throw new Error('Razorpay secret not configured');
+    // Verify webhook signature using Web Crypto API. This MUST be the
+    // separate webhook secret entered when creating the webhook in the
+    // Razorpay dashboard (Settings -> Webhooks) -- Razorpay signs webhook
+    // payloads with that secret, not with the API key secret used to
+    // authenticate outbound API calls. Using RAZORPAY_KEY_SECRET here meant
+    // every real webhook would fail signature verification.
+    const RAZORPAY_WEBHOOK_SECRET = Deno.env.get('RAZORPAY_WEBHOOK_SECRET');
+    if (!RAZORPAY_WEBHOOK_SECRET) {
+      throw new Error('Razorpay webhook secret not configured');
     }
 
     const encoder = new TextEncoder();
     const key = await crypto.subtle.importKey(
       'raw',
-      encoder.encode(RAZORPAY_KEY_SECRET),
+      encoder.encode(RAZORPAY_WEBHOOK_SECRET),
       { name: 'HMAC', hash: 'SHA-256' },
       false,
       ['sign']

@@ -204,3 +204,8 @@ verify_jwt = false
 
 [functions.iedup-ramp-interest-wa]
 verify_jwt = false
+
+# External payment webhook: Razorpay POSTs with no Supabase JWT, so the gateway check must be off.
+# The x-razorpay-signature check in the function (RAZORPAY_WEBHOOK_SECRET) is what authenticates the caller.
+[functions.razorpay-webhook]
+verify_jwt = false
