@@ -21,6 +21,7 @@ import { RevenueAnalytics } from "./RevenueAnalytics";
 import { SmartInvoiceUploadDialog } from "./SmartInvoiceUploadDialog";
 import { MonthlyTaxSummary } from "@/components/Clients/MonthlyTaxSummary";
 import { format } from "date-fns";
+import { useUrlState } from "@/hooks/useUrlState";
 
 const invoiceStatuses = [
   { value: "draft", label: "Draft", variant: "outline" as const },
@@ -34,10 +35,10 @@ export function InvoicesTab() {
   const { effectiveOrgId } = useOrgContext();
   const queryClient = useQueryClient();
   const notify = useNotification();
-  const [searchTerm, setSearchTerm] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [typeFilter, setTypeFilter] = useState<string>("all");
-  const [entityTypeFilter, setEntityTypeFilter] = useState<string>("all");
+  const [searchTerm, setSearchTerm] = useUrlState("iq", "");
+  const [statusFilter, setStatusFilter] = useUrlState<string>("istatus", "all");
+  const [typeFilter, setTypeFilter] = useUrlState<string>("itype", "all");
+  const [entityTypeFilter, setEntityTypeFilter] = useUrlState<string>("ientity", "all");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isSmartUploadOpen, setIsSmartUploadOpen] = useState(false);
   const [viewingFile, setViewingFile] = useState<string | null>(null);

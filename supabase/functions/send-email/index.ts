@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getSupabaseClient } from '../_shared/supabaseClient.ts';
 import { orgServiceGate } from '../_shared/billingGate.ts';
+import { ORG_EMAIL_IDENTITY_OVERRIDE, resolveResendApiKey } from '../_shared/orgEmailIdentity.ts';
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -9,15 +10,19 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
-const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
+interface Attachment { filename: string; content: string }
 
-const sendEmail = async (to: string, subject: string, html: string, fromEmail: string, fromName: string, replyToEmail?: string, unsubscribeUrl?: string) => {
+const sendEmail = async (apiKey: string | undefined, to: string, subject: string, html: string, fromEmail: string, fromName: string, replyToEmail?: string, unsubscribeUrl?: string, inReplyTo?: string, attachments?: Attachment[]) => {
   const emailPayload: any = {
     from: `${fromName} <${fromEmail}>`,
     to: [to],
     subject: subject,
     html: html,
   };
+
+  if (attachments?.length) {
+    emailPayload.attachments = attachments;
+  }
 
   // Add reply_to if provided and different from sender
   if (replyToEmail && replyToEmail !== fromEmail) {
@@ -32,11 +37,23 @@ const sendEmail = async (to: string, subject: string, html: string, fromEmail: s
     };
   }
 
+  // Thread this send onto an earlier message. inReplyTo is the RFC 5322
+  // Message-ID of the parent (angle brackets included) -- Resend returns it
+  // as `message_id` on GET /emails/:id. Both headers are needed: Gmail keys
+  // off References, Outlook off In-Reply-To.
+  if (inReplyTo) {
+    emailPayload.headers = {
+      ...(emailPayload.headers || {}),
+      'In-Reply-To': inReplyTo,
+      'References': inReplyTo,
+    };
+  }
+
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${RESEND_API_KEY}`,
+      Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify(emailPayload),
   });
@@ -58,6 +75,26 @@ interface SendEmailRequest {
   conversationId?: string;
   trackingPixelId?: string;
   unsubscribeToken?: string;
+  fromName?: string;
+  bareEmail?: boolean;
+  inReplyTo?: string;
+  attachmentUrl?: string;
+  attachmentFilename?: string;
+}
+
+/** Fetch a file (e.g. from R2) and base64-encode it for Resend's attachments param. */
+async function fetchAttachment(url: string, filename: string): Promise<Attachment> {
+  const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+  if (!res.ok) throw new Error(`Failed to fetch attachment ${url}: ${res.status}`);
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  // btoa needs a binary string; chunk to avoid a call-stack blowout on a
+  // large file (String.fromCharCode(...bytes) with 100k+ args throws).
+  let binary = '';
+  const CHUNK = 8192;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return { filename, content: btoa(binary) };
 }
 
 // Decodes a JWT payload without verifying the signature (the gateway already
@@ -120,7 +157,12 @@ serve(async (req) => {
       contactId,
       conversationId,
       trackingPixelId,
-      unsubscribeToken
+      unsubscribeToken,
+      fromName: fromNameOverride,
+      bareEmail,
+      inReplyTo,
+      attachmentUrl,
+      attachmentFilename
     }: SendEmailRequest = await req.json();
 
     const emailHtml = htmlContent || html || '';
@@ -274,13 +316,19 @@ serve(async (req) => {
       throw new Error("Email domain verification pending. Please go to Email Settings and click 'Verify Domain' to complete verification.");
     }
 
+    // Some orgs' sending domains are verified on a different Resend account
+    // than the shared default (e.g. RMPL's redefine.in) -- resolve the right
+    // key before checking or sending, or a 404/400 masks a domain that's
+    // actually fine.
+    const resendApiKey = resolveResendApiKey(orgId);
+
     // Double-check domain status with Resend API to avoid stale data issues
     console.log('Checking domain status with Resend API...');
     const domainCheckResponse = await fetch(
       `https://api.resend.com/domains/${emailSettings.resend_domain_id}`,
       {
         headers: {
-          'Authorization': `Bearer ${RESEND_API_KEY}`,
+          'Authorization': `Bearer ${resendApiKey}`,
         },
       }
     );
@@ -302,10 +350,34 @@ serve(async (req) => {
 
     // Use verified domain as sender, user's email as reply-to (service-role
     // callers have no user email, so they reply-to themselves)
-    const fromEmail = `noreply@${emailSettings.sending_domain}`;
-    if (!replyToEmail) replyToEmail = fromEmail;
+    const identityOverride = ORG_EMAIL_IDENTITY_OVERRIDE[orgId];
+    const fromEmail = identityOverride?.fromEmail ?? `noreply@${emailSettings.sending_domain}`;
+    replyToEmail = identityOverride?.replyToEmail ?? (replyToEmail || fromEmail);
+    if (fromNameOverride) fromName = fromNameOverride;
 
-    console.log("Sending email to:", to, "from:", fromEmail, "reply-to:", replyToEmail);
+    // Protected orgs store only a masked email in contacts.email, so a recipient that arrives masked is
+    // resolved here from the encrypted copy. The conversation log below keeps the masked form.
+    let recipient = to;
+    let loggedTo = to;
+    let protectedRecipient = false;
+    if (contactId) {
+      const svc = getSupabaseClient();
+      const { data: isProtected } = await svc.rpc('pii_protected', { _org: orgId });
+      if (isProtected) {
+        protectedRecipient = true;
+        if (!String(to).includes('•')) {
+          const { data: maskedTo } = await svc.rpc('pii_mask_email', { _t: to });
+          loggedTo = (maskedTo as string) ?? to;
+        }
+        if (String(to).includes('•')) {
+          const { data: realEmail } = await svc.rpc('pii_contact_email', { _contact_id: contactId });
+          if (!realEmail || String(realEmail).includes('•')) throw new Error('This contact has no email address on file');
+          recipient = realEmail as string;
+        }
+      }
+    }
+
+    console.log("Sending email to:", protectedRecipient ? '(protected)' : to, "from:", fromEmail, "reply-to:", replyToEmail);
 
     // Generate unsubscribe token if not provided
     const unsubToken = unsubscribeToken || crypto.randomUUID();
@@ -321,12 +393,24 @@ serve(async (req) => {
         </p>
       </div>
     `;
-    const finalHtml = emailHtml.includes('</body>')
-      ? emailHtml.replace('</body>', `${unsubscribeFooter}</body>`)
-      : emailHtml + unsubscribeFooter;
+    const finalHtml = bareEmail
+      ? emailHtml
+      : (emailHtml.includes('</body>')
+          ? emailHtml.replace('</body>', `${unsubscribeFooter}</body>`)
+          : emailHtml + unsubscribeFooter);
 
-    // Send email via Resend
-    const emailData = await sendEmail(to, subject, finalHtml, fromEmail, fromName, replyToEmail, unsubscribeUrl);
+    // Attachment is fetched server-side (never trust a client-supplied
+    // base64 blob) -- a failure here fails the whole send rather than
+    // silently going out without the file it was supposed to carry.
+    const attachments = attachmentUrl
+      ? [await fetchAttachment(attachmentUrl, attachmentFilename || 'attachment.pdf')]
+      : undefined;
+
+    // Send email via Resend. bareEmail sends look like a personal one-on-one
+    // note, not a newsletter -- the List-Unsubscribe header is what makes
+    // Gmail/Outlook show an "Unsubscribe" chip next to the sender even with
+    // no visible footer, so skip it for those.
+    const emailData = await sendEmail(resendApiKey, recipient, subject, finalHtml, fromEmail, fromName, replyToEmail, bareEmail ? undefined : unsubscribeUrl, inReplyTo, attachments);
 
     console.log("Email sent successfully:", emailData);
 
@@ -359,7 +443,7 @@ serve(async (req) => {
         conversation_id: conversationId || emailData?.id || crypto.randomUUID(),
         from_email: fromEmail,
         from_name: fromName,
-        to_email: to,
+        to_email: loggedTo,
         reply_to_email: replyToEmail,
         subject: subject,
         email_content: emailHtml,

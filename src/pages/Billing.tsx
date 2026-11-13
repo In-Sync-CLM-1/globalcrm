@@ -15,6 +15,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { format, addDays, differenceInCalendarDays } from "date-fns";
 import { Wallet, Users, CalendarClock, Loader2, CheckCircle2, IndianRupee, Receipt, TrendingUp, FileText } from "lucide-react";
+import { UrlTabs } from "@/components/UrlTabs";
 
 declare global { interface Window { Razorpay?: any } }
 
@@ -285,7 +286,7 @@ export default function Billing() {
         </Card>
 
         {/* Detail tabs */}
-        <Tabs defaultValue="usage">
+        <UrlTabs param="tab" defaultValue="usage">
           <TabsList>
             <TabsTrigger value="usage" className="gap-1.5"><TrendingUp className="h-4 w-4" /> Usage</TabsTrigger>
             <TabsTrigger value="transactions" className="gap-1.5"><Receipt className="h-4 w-4" /> Transactions</TabsTrigger>
@@ -344,7 +345,7 @@ export default function Billing() {
               )}
             </CardContent></Card>
           </TabsContent>
-        </Tabs>
+        </UrlTabs>
       </div>
 
       <TopUpWalletDialog open={topUpOpen} onOpenChange={setTopUpOpen} orgId={effectiveOrgId || ""} />

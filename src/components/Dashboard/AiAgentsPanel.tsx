@@ -10,6 +10,8 @@ import { RefreshCw, Phone, PhoneCall, UserCheck, CalendarCheck, Clock, TrendingU
 import { useNotification } from "@/hooks/useNotification";
 import { RiyaDailyLearnings } from "@/components/Dashboard/RiyaDailyLearnings";
 import { metaFor } from "@/lib/aiAgents";
+import { UrlTabs } from "@/components/UrlTabs";
+import { useUrlState } from "@/hooks/useUrlState";
 
 // One row per product (= one AI agent), straight from get_ai_agent_analytics.
 interface AgentRow {
@@ -85,7 +87,7 @@ const WINDOWS = [
 export function AiAgentsPanel() {
   const notify = useNotification();
   const [loading, setLoading] = useState(true);
-  const [days, setDays] = useState("1");
+  const [days, setDays] = useUrlState("agentdays", "1");
   const [rows, setRows] = useState<EnrichedRow[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
 
@@ -137,7 +139,7 @@ export function AiAgentsPanel() {
         <Card><CardContent className="py-10 text-center text-muted-foreground">No AI calls in this window yet.</CardContent></Card>
       )}
 
-      <Tabs defaultValue="comparison">
+      <UrlTabs param="aiagentspanel_tab" defaultValue="comparison">
         <TabsList>
           <TabsTrigger value="comparison">Comparison</TabsTrigger>
           <TabsTrigger value="agent">By agent</TabsTrigger>
@@ -261,7 +263,7 @@ export function AiAgentsPanel() {
             </>
           )}
         </TabsContent>
-      </Tabs>
+      </UrlTabs>
     </div>
   );
 }

@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/select";
 import { formatDistanceToNow } from "date-fns";
 import { Search, ExternalLink } from "lucide-react";
+import { useUrlState } from "@/hooks/useUrlState";
 
 interface ExecutionHistoryTableProps {
   ruleId?: string;
@@ -31,8 +32,8 @@ interface ExecutionHistoryTableProps {
 
 export function ExecutionHistoryTable({ ruleId, limit = 50 }: ExecutionHistoryTableProps) {
   const { effectiveOrgId } = useOrgContext();
-  const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useUrlState<string>("xstatus", "all");
+  const [searchQuery, setSearchQuery] = useUrlState("xq", "");
 
   const { data: executions, isLoading } = useQuery({
     queryKey: ["automation_executions", effectiveOrgId, ruleId, statusFilter],

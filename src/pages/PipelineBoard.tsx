@@ -6,9 +6,10 @@ import DashboardLayout from "@/components/Layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { RmplProjectPicker } from "@/components/Pipeline/RmplProjectPicker";
 import { LoadingState } from "@/components/common/LoadingState";
 import { useNotification } from "@/hooks/useNotification";
-import { Mail, Phone as PhoneIcon, Building, LayoutGrid, Table as TableIcon, Loader2, Phone, MapPin, Factory, MessageSquare, MoreHorizontal, Pencil, Trash2, UserPlus, MessageCircle, Plus } from "lucide-react";
+import { Mail, Phone as PhoneIcon, Building, LayoutGrid, Table as TableIcon, Loader2, Phone, MapPin, Factory, MessageSquare, MoreHorizontal, Pencil, Trash2, UserPlus, MessageCircle, Plus, Upload, Sparkles } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -34,6 +35,9 @@ import { BulkCallDialog } from "@/components/Pipeline/BulkCallDialog";
 import { PostCallDispositionDialog } from "@/components/Contact/PostCallDispositionDialog";
 import IedupPipeline from "@/pages/IedupPipeline";
 import { IEDUP_ORG_ID } from "@/hooks/useIsIedup";
+import { useUrlState } from "@/hooks/useUrlState";
+import { useGamingAccess } from "@/hooks/useGamingAccess";
+import { BulkUploadDialog } from "@/components/Contacts/BulkUpload/BulkUploadDialog";
 interface PipelineStage {
   id: string;
   name: string;
@@ -142,7 +146,7 @@ export default function PipelineBoard() {
     setFilters(urlFilters);
     // Don't manipulate filteredContacts here - let the auto-apply effect handle it
   }, [urlFilters]);
-  const [activeTab, setActiveTab] = useState("table");
+  const [activeTab, setActiveTab] = useUrlState("view", "table");
   const [callingContactId, setCallingContactId] = useState<string | null>(null);
 
   // Post-call disposition flow (for calls dialed from the pipeline table)
@@ -209,6 +213,75 @@ export default function PipelineBoard() {
       return data as PipelineStage[];
     },
   });
+
+  // Orgs that must record a project number when a deal is moved to Won (RMPL)
+  const { data: requireProjectNumberOnWon } = useQuery({
+    queryKey: ['require-project-number-on-won', effectiveOrgId],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("organization_settings")
+        .select("require_project_number_on_won")
+        .eq("org_id", effectiveOrgId!)
+        .maybeSingle();
+      return !!(data as any)?.require_project_number_on_won;
+    },
+    enabled: !!effectiveOrgId,
+  });
+  const [wonPrompt, setWonPrompt] = useState<{ contactId: string; stageId: string } | null>(null);
+  const [wonProjectNumber, setWonProjectNumber] = useState("");
+  const [wonSaving, setWonSaving] = useState(false);
+
+  // Single path for every stage move: asks for the project number first when
+  // the target is the Won stage of an org that requires it.
+  const moveContactToStage = async (contactId: string, stageId: string, successMsg: [string, string]) => {
+    const target = (stagesData || []).find(s => s.id === stageId);
+    if (requireProjectNumberOnWon && target?.name?.trim().toLowerCase() === 'won') {
+      setWonProjectNumber("");
+      setWonPrompt({ contactId, stageId });
+      return;
+    }
+    const { error } = await supabase
+      .from("contacts")
+      .update({ pipeline_stage_id: stageId })
+      .eq("id", contactId);
+    if (error) throw error;
+    queryClient.invalidateQueries({ queryKey: ['pipeline-contacts'] });
+    notify.success(successMsg[0], successMsg[1]);
+  };
+
+  const confirmWon = async () => {
+    if (!wonPrompt) return;
+    const number = wonProjectNumber.trim().toUpperCase();
+    if (!/^RMPL-\d{2}-\d+$/.test(number)) {
+      notify.error("Invalid project number", "Use the format RMPL-26-123.");
+      return;
+    }
+    setWonSaving(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const link = await fetch("/api/rmpl-won", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${session?.access_token ?? ""}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ contact_id: wonPrompt.contactId, project_number: number }),
+      });
+      if (!link.ok) {
+        const err = await link.json().catch(() => ({}));
+        throw new Error(err.error || "Could not record the project with RMPL");
+      }
+      const { error } = await supabase
+        .from("contacts")
+        .update({ pipeline_stage_id: wonPrompt.stageId, won_project_number: number } as any)
+        .eq("id", wonPrompt.contactId);
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ['pipeline-contacts'] });
+      notify.success("Moved to Won", `Project number ${number} recorded`);
+      setWonPrompt(null);
+    } catch (error: any) {
+      notify.error("Error", error.message);
+    } finally {
+      setWonSaving(false);
+    }
+  };
 
   // Fetch contact IDs that have been converted to clients
   const { data: clientContactIds } = useQuery({
@@ -375,20 +448,42 @@ export default function PipelineBoard() {
   const { data: latestDispositionsByContact } = useQuery({
     queryKey: ['pipeline-latest-dispositions', contactsData?.data?.map(c => c.id)],
     queryFn: async () => {
-      if (!contactsData?.data?.length) return {} as Record<string, { name: string; category: string | null }>;
+      if (!contactsData?.data?.length) return {} as Record<string, { name: string; category: string | null; callLogId: string | null }>;
       const ids = contactsData.data.map(c => c.id);
       const { data, error } = await supabase
         .from("contact_latest_disposition")
-        .select("contact_id, disposition_name, disposition_category")
+        .select("contact_id, disposition_name, disposition_category, call_log_id")
         .in("contact_id", ids);
       if (error) throw error;
-      const map: Record<string, { name: string; category: string | null }> = {};
+      const map: Record<string, { name: string; category: string | null; callLogId: string | null }> = {};
       (data || []).forEach((r: any) => {
-        map[r.contact_id] = { name: r.disposition_name, category: r.disposition_category };
+        map[r.contact_id] = { name: r.disposition_name, category: r.disposition_category, callLogId: r.call_log_id };
       });
       return map;
     },
     enabled: !!contactsData?.data?.length,
+  });
+
+  // Gaming CRM Demo shows the sub-disposition of each lead's latest call.
+  const gaming = useGamingAccess();
+  const [bulkUploadOpen, setBulkUploadOpen] = useState(false);
+  const [aiQueueing, setAiQueueing] = useState(false);
+  const { data: subDispositionByContact } = useQuery({
+    queryKey: ['pipeline-latest-sub-dispositions', latestDispositionsByContact],
+    queryFn: async () => {
+      const byLog = new Map<string, string>(); // call_log_id -> contact_id
+      Object.entries(latestDispositionsByContact ?? {}).forEach(([contactId, d]) => { if (d.callLogId) byLog.set(d.callLogId, contactId); });
+      if (!byLog.size) return {} as Record<string, string>;
+      const { data: logs } = await supabase.from("call_logs").select("id, sub_disposition_id").in("id", [...byLog.keys()]).not("sub_disposition_id", "is", null);
+      const subIds = [...new Set((logs ?? []).map((l) => l.sub_disposition_id as string))];
+      if (!subIds.length) return {} as Record<string, string>;
+      const { data: subs } = await supabase.from("call_sub_dispositions").select("id, name").in("id", subIds);
+      const nameById = new Map((subs ?? []).map((s) => [s.id, s.name]));
+      const out: Record<string, string> = {};
+      (logs ?? []).forEach((l) => { const c = byLog.get(l.id); const n = nameById.get(l.sub_disposition_id as string); if (c && n) out[c] = n; });
+      return out;
+    },
+    enabled: gaming.isGaming && !!latestDispositionsByContact && Object.keys(latestDispositionsByContact).length > 0,
   });
 
   // Fetch primary phones for all contacts
@@ -460,17 +555,7 @@ export default function PipelineBoard() {
     if (!draggedContact) return;
 
     try {
-      const { error } = await supabase
-        .from("contacts")
-        .update({ pipeline_stage_id: stageId })
-        .eq("id", draggedContact);
-
-      if (error) throw error;
-
-      // Invalidate query to refresh data
-      queryClient.invalidateQueries({ queryKey: ['pipeline-contacts'] });
-
-      notify.success("Contact moved", "Contact has been moved to new stage");
+      await moveContactToStage(draggedContact, stageId, ["Contact moved", "Contact has been moved to new stage"]);
     } catch (error: any) {
       notify.error("Error", error);
     } finally {
@@ -804,15 +889,7 @@ export default function PipelineBoard() {
   // Handle inline stage change from table view
   const handleStageChange = async (contactId: string, newStageId: string) => {
     try {
-      const { error } = await supabase
-        .from("contacts")
-        .update({ pipeline_stage_id: newStageId })
-        .eq("id", contactId);
-
-      if (error) throw error;
-
-      queryClient.invalidateQueries({ queryKey: ['pipeline-contacts'] });
-      notify.success("Stage updated", "Contact stage has been updated");
+      await moveContactToStage(contactId, newStageId, ["Stage updated", "Contact stage has been updated"]);
     } catch (error: any) {
       notify.error("Error", error.message);
     }
@@ -929,6 +1006,12 @@ export default function PipelineBoard() {
               <Plus className="h-4 w-4 mr-2" />
               Create Contact
             </Button>
+            {gaming.isGaming && gaming.canUpload && (
+              <Button variant="outline" onClick={() => setBulkUploadOpen(true)}>
+                <Upload className="h-4 w-4 mr-2" />
+                Upload Contacts
+              </Button>
+            )}
             <QuickDial />
           </div>
         </div>
@@ -1158,6 +1241,23 @@ export default function PipelineBoard() {
                     <UserPlus className="h-4 w-4 mr-1.5" />
                     Assign {selectedIds.size} contact{selectedIds.size === 1 ? "" : "s"}
                   </Button>
+                  {gaming.isGaming && gaming.canUpload && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={aiQueueing || selectedIds.size === 0}
+                      onClick={async () => {
+                        setAiQueueing(true);
+                        const { data, error } = await supabase.functions.invoke("ai-call-enqueue", { body: { action: "enqueue", contact_ids: [...selectedIds] } });
+                        setAiQueueing(false);
+                        if (error || data?.success === false) { notify.error("Could not queue AI calls", data?.error ?? error?.message); return; }
+                        notify.success("Queued for AI calls", `${data.queued} contact${data.queued === 1 ? "" : "s"} queued${data.already_queued ? `, ${data.already_queued} already queued` : ""}. Track them under AI Calling.`);
+                      }}
+                    >
+                      {aiQueueing ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Sparkles className="h-4 w-4 mr-1.5" />}
+                      AI call {selectedIds.size} contact{selectedIds.size === 1 ? "" : "s"}
+                    </Button>
+                  )}
                   <Button
                     size="sm"
                     onClick={openBulkCall}
@@ -1205,13 +1305,14 @@ export default function PipelineBoard() {
                       </TableHead>
                       <TableHead className="py-2 text-xs h-8">Name / Title</TableHead>
                       <TableHead className="py-2 text-xs h-8">Quick Actions</TableHead>
-                      <TableHead className="py-2 text-xs h-8">Company</TableHead>
+                      {!gaming.isGaming && <TableHead className="py-2 text-xs h-8">Company</TableHead>}
                       {showEnhancedFields && <TableHead className="py-2 text-xs h-8">Industry</TableHead>}
-                      <TableHead className="py-2 text-xs h-8">Targeted Product</TableHead>
+                      {!gaming.isGaming && <TableHead className="py-2 text-xs h-8">Targeted Product</TableHead>}
                       <TableHead className="py-2 text-xs h-8">Assigned To</TableHead>
                       <TableHead className="py-2 text-xs h-8">Latest Disposition</TableHead>
-                      <TableHead className="py-2 text-xs h-8">Email Outreach</TableHead>
-                      <TableHead className="py-2 text-xs h-8">WhatsApp Outreach</TableHead>
+                      {gaming.isGaming && <TableHead className="py-2 text-xs h-8">Sub-disposition</TableHead>}
+                      {!gaming.isGaming && <TableHead className="py-2 text-xs h-8">Email Outreach</TableHead>}
+                      {!gaming.isGaming && <TableHead className="py-2 text-xs h-8">WhatsApp Outreach</TableHead>}
                       <TableHead className="py-2 text-xs h-8">Stage</TableHead>
                       <TableHead className="py-2 text-xs h-8">Updated</TableHead>
                       <TableHead className="py-2 text-xs h-8 w-20">Actions</TableHead>
@@ -1270,16 +1371,18 @@ export default function PipelineBoard() {
                                   <Phone className="h-4 w-4" />
                                 )}
                               </Button>
-                              <Button
-                                size="icon"
-                                variant="outline"
-                                className="h-8 w-8"
-                                disabled={!contact.primaryPhone && !contact.phone}
-                                onClick={(e) => handleWhatsAppClick(contact, e)}
-                                title="Send WhatsApp"
-                              >
-                                <MessageSquare className="h-4 w-4" />
-                              </Button>
+                              {gaming.whatsapp && (
+                                <Button
+                                  size="icon"
+                                  variant="outline"
+                                  className="h-8 w-8"
+                                  disabled={!contact.primaryPhone && !contact.phone}
+                                  onClick={(e) => handleWhatsAppClick(contact, e)}
+                                  title="Send WhatsApp"
+                                >
+                                  <MessageSquare className="h-4 w-4" />
+                                </Button>
+                              )}
                               <Button
                                 size="icon"
                                 variant="outline"
@@ -1292,9 +1395,11 @@ export default function PipelineBoard() {
                               </Button>
                             </div>
                           </TableCell>
-                          <TableCell onClick={() => navigate(`/contacts/${contact.id}`)} className="py-1.5 cursor-pointer text-xs">
-                            {contact.company || '-'}
-                          </TableCell>
+                          {!gaming.isGaming && (
+                            <TableCell onClick={() => navigate(`/contacts/${contact.id}`)} className="py-1.5 cursor-pointer text-xs">
+                              {contact.company || '-'}
+                            </TableCell>
+                          )}
                           {showEnhancedFields && (
                             <TableCell onClick={() => navigate(`/contacts/${contact.id}`)} className="py-1.5 cursor-pointer text-xs">
                               <span className="truncate max-w-[100px] block" title={contact.industry_type || ''}>
@@ -1302,9 +1407,11 @@ export default function PipelineBoard() {
                               </span>
                             </TableCell>
                           )}
-                          <TableCell onClick={() => navigate(`/contacts/${contact.id}`)} className="py-1.5 cursor-pointer text-xs">
-                            {contact.product || '-'}
-                          </TableCell>
+                          {!gaming.isGaming && (
+                            <TableCell onClick={() => navigate(`/contacts/${contact.id}`)} className="py-1.5 cursor-pointer text-xs">
+                              {contact.product || '-'}
+                            </TableCell>
+                          )}
                           <TableCell className="py-1.5 text-xs">
                             {contact.assigned_to ? (
                               <span title={userNameById.get(contact.assigned_to) || 'User'}>
@@ -1335,6 +1442,12 @@ export default function PipelineBoard() {
                               );
                             })()}
                           </TableCell>
+                          {gaming.isGaming ? (
+                            <TableCell className="py-1.5 text-xs">
+                              {subDispositionByContact?.[contact.id] ?? <span className="text-[10px] text-muted-foreground">-</span>}
+                            </TableCell>
+                          ) : (
+                            <>
                           <TableCell onClick={() => navigate(`/contacts/${contact.id}`)} className="py-1.5 cursor-pointer">
                             {(() => {
                               const eo = parseEmailOutreach(contact.source);
@@ -1359,6 +1472,8 @@ export default function PipelineBoard() {
                               );
                             })()}
                           </TableCell>
+                            </>
+                          )}
                           <TableCell className="py-1.5">
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>
@@ -1567,6 +1682,23 @@ export default function PipelineBoard() {
           variant="destructive"
         />
 
+        {/* Won: project number */}
+        <Dialog open={!!wonPrompt} onOpenChange={(o) => { if (!o) setWonPrompt(null); }}>
+          <DialogContent className="sm:max-w-[400px]">
+            <DialogHeader>
+              <DialogTitle>Project number</DialogTitle>
+              <DialogDescription>
+                Pick the RMPL project for this won deal.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="min-w-0"><RmplProjectPicker value={wonProjectNumber} onChange={setWonProjectNumber} /></div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setWonPrompt(null)}>Cancel</Button>
+              <Button onClick={confirmWon} disabled={wonSaving || !wonProjectNumber.trim()}>Move to Won</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
         {/* Assign Dialog */}
         <Dialog open={assignDialogOpen} onOpenChange={setAssignDialogOpen}>
           <DialogContent className="sm:max-w-[400px]">
@@ -1609,6 +1741,15 @@ export default function PipelineBoard() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {gaming.isGaming && gaming.canUpload && effectiveOrgId && (
+          <BulkUploadDialog
+            open={bulkUploadOpen}
+            onOpenChange={setBulkUploadOpen}
+            orgId={effectiveOrgId}
+            onUploadStarted={() => queryClient.invalidateQueries({ queryKey: ['pipeline-contacts'] })}
+          />
+        )}
 
         {/* Create Contact Dialog */}
         <CreateContactDialog

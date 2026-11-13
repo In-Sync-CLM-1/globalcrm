@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { getSupabaseClient } from "../_shared/supabaseClient.ts";
+import { ORG_EMAIL_IDENTITY_OVERRIDE } from "../_shared/orgEmailIdentity.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -12,7 +13,7 @@ const DEMO_DISPOSITION = "Demo Booked";
 const SKIP_DISPOSITIONS = new Set(["Wrong Number / DND", "Do Not Call"]);
 // No-answer dispositions get the "sorry we missed you" message instead of the
 // "thank you for your time on the call" intro, since no conversation happened.
-const MISSED_DISPOSITIONS = new Set(["Did Not Pick Up", "Not Connected", "Voicemail"]);
+const MISSED_DISPOSITIONS = new Set(["Did Not Pick Up", "Not Connected", "Unreachable", "Voicemail"]);
 
 const EMAIL_TEMPLATE_DEMO = "Work-Sync: Demo Confirmation";
 const EMAIL_TEMPLATE_INTRO = "Work-Sync: Post-Call Introduction";
@@ -155,19 +156,19 @@ serve(async (req) => {
     let demoDateStr = formatDemoDate(activity?.demo_date);
     let demoTimeStr = formatDemoTime(activity?.demo_time);
 
-    // Product-aware template selection (worksync vs vendorverification).
+    // Product-aware template selection (worksync vs vendorsync).
     const product = String((contact as any).product || "").toLowerCase().trim();
-    const isVV = product === "vendorverification";
+    const isVendorsync = product === "vendorsync";
     let emailTemplateName = isDemo
-      ? (isVV ? "Vendor Verification: Demo Confirmation" : "Work-Sync: Demo Confirmation")
+      ? (isVendorsync ? "Vendorsync: Demo Confirmation" : "Work-Sync: Demo Confirmation")
       : isMissed
-        ? (isVV ? "Vendor Verification: Missed Call" : "Work-Sync: Missed Call")
-        : (isVV ? "Vendor Verification: Post-Call Introduction" : "Work-Sync: Post-Call Introduction");
+        ? (isVendorsync ? "Vendorsync: Missed Call" : "Work-Sync: Missed Call")
+        : (isVendorsync ? "Vendorsync: Post-Call Introduction" : "Work-Sync: Post-Call Introduction");
     let waTemplateName = isDemo
-      ? (isVV ? "vendorverification_demo_confirmation" : "worksync_demo_confirmation_v2")
+      ? (isVendorsync ? "vendorverification_demo_confirmation" : "worksync_demo_confirmation_v2")
       : isMissed
-        ? (isVV ? "vendorverification_missed_call" : "worksync_missed_call")
-        : (isVV ? "vendorverification_intro_post_call" : "worksync_intro_post_call");
+        ? (isVendorsync ? "vendorverification_missed_call" : "worksync_missed_call")
+        : (isVendorsync ? "vendorverification_intro_post_call" : "worksync_intro_post_call");
 
     // Who's named in the message: for a DEMO confirmation it's the demo HOST
     // (e.g. Amit) — they actually run the demo; for intro/missed it's the lead
@@ -210,7 +211,7 @@ serve(async (req) => {
     }
 
     // Demo agreed but no date yet -> send the slot-request instead of a confirmation.
-    const productLabel = isVV ? "Vendor Verification" : "WorkSync";
+    const productLabel = isVendorsync ? "Vendorsync" : "WorkSync";
     const needsSlot = isDemo && !datedMeetingFound;
     const slotLink = `${Deno.env.get("SUPABASE_URL")}/functions/v1/demo-slot-pick?c=${contact.id}`;
     if (needsSlot) {
@@ -271,9 +272,10 @@ serve(async (req) => {
           } else {
             const subject = renderTemplate(emailTpl.subject || "", emailVars);
             const html = renderTemplate(emailTpl.html_content || emailTpl.body_content || "", emailVars);
-            const fromEmail = `noreply@${emailSettings.sending_domain}`;
+            const identityOverride = ORG_EMAIL_IDENTITY_OVERRIDE[callLog.org_id];
+            const fromEmail = identityOverride?.fromEmail ?? `noreply@${emailSettings.sending_domain}`;
             const fromName = "In-Sync";
-            const replyToEmail = agentProfile?.email || fromEmail;
+            const replyToEmail = identityOverride?.replyToEmail ?? (agentProfile?.email || fromEmail);
 
             const r = await fetch("https://api.resend.com/emails", {
               method: "POST",

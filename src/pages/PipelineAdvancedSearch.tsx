@@ -12,6 +12,7 @@ import SearchResultsTable from "@/components/Pipeline/SearchResultsTable";
 import { Plus, Search, X } from "lucide-react";
 import { usePagination } from "@/hooks/usePagination";
 import { exportToCSV, ExportColumn, formatDateForExport } from "@/utils/exportUtils";
+import { useGamingAccess } from "@/hooks/useGamingAccess";
 
 export interface SearchableField {
   id: string;
@@ -42,6 +43,7 @@ const PipelineAdvancedSearch = () => {
   const [isSearching, setIsSearching] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const gaming = useGamingAccess();
   const isInitialMount = useRef(true);
   
   const pagination = usePagination({ defaultPageSize: 25 });
@@ -569,6 +571,18 @@ const PipelineAdvancedSearch = () => {
       const today = new Date().toISOString().split('T')[0];
       const filename = `contacts-search-results-${today}`;
 
+      // Orgs with PII protection hold only masked numbers and emails in the table. An admin's export decrypts
+      // them on the server (each reveal is written to the access log).
+      if (gaming.isGaming && gaming.canExport) {
+        for (let i = 0; i < exportData.length; i += 200) {
+          const chunk = exportData.slice(i, i + 200);
+          const { data: revealed, error: revealError } = await supabase.rpc("reveal_contacts_pii" as never, { _ids: chunk.map((c: any) => c.id) } as never);
+          if (revealError) throw revealError;
+          const byId = new Map(((revealed ?? []) as { id: string; phone: string | null; email: string | null }[]).map((r) => [r.id, r]));
+          chunk.forEach((c: any) => { const r = byId.get(c.id); if (r) { c.phone = r.phone; c.email = r.email; } });
+        }
+      }
+
       // Export to CSV
       exportToCSV(exportData, exportColumns, filename);
       
@@ -672,7 +686,7 @@ const PipelineAdvancedSearch = () => {
                 onPageChange={pagination.setPage}
                 onPageSizeChange={pagination.setPageSize}
                 isLoading={isSearching}
-                onExport={handleExport}
+                onExport={gaming.canExport ? handleExport : undefined}
                 isExporting={isExporting}
               />
             </CardContent>

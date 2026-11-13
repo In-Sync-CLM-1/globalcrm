@@ -14,6 +14,9 @@ import { Search, Download, Phone, Clock, User, Calendar } from "lucide-react";
 import { format } from "date-fns";
 import { CallRecordingPlayer } from "@/components/Contact/CallRecordingPlayer";
 import { useOrgContext } from "@/hooks/useOrgContext";
+import { useUrlState } from "@/hooks/useUrlState";
+import { useGamingAccess } from "@/hooks/useGamingAccess";
+import GamingCallLogs from "@/components/Gaming/GamingCallLogs";
 
 interface CallLog {
   id: string;
@@ -40,11 +43,12 @@ interface CallLog {
   };
 }
 
-export default function CallLogs() {
+function LegacyCallLogs() {
+  const gaming = useGamingAccess();
   const { effectiveOrgId } = useOrgContext();
-  const [searchQuery, setSearchQuery] = useState("");
-  const [callTypeFilter, setCallTypeFilter] = useState("all");
-  const [dateFilter, setDateFilter] = useState("7");
+  const [searchQuery, setSearchQuery] = useUrlState("q", "");
+  const [callTypeFilter, setCallTypeFilter] = useUrlState("type", "all");
+  const [dateFilter, setDateFilter] = useUrlState("days", "7");
   const notify = useNotification();
 
   // Fetch call logs with React Query
@@ -234,7 +238,7 @@ export default function CallLogs() {
                           {log.contacts ? `${log.contacts.first_name} ${log.contacts.last_name || ''}` : 'Unknown'}
                         </TableCell>
                         <TableCell className="py-1.5 font-mono text-xs">
-                          {log.call_type === 'outbound' ? log.to_number : log.from_number}
+                          {gaming.phone(log.call_type === 'outbound' ? log.to_number : log.from_number)}
                         </TableCell>
                         <TableCell className="py-1.5 text-xs">Agent</TableCell>
                         <TableCell className="py-1.5">
@@ -279,4 +283,10 @@ export default function CallLogs() {
       </div>
     </DashboardLayout>
   );
+}
+
+/** The Gaming CRM Demo org gets its own Call Logs screen (recordings, transcripts and AI review). */
+export default function CallLogs() {
+  const { isGaming } = useGamingAccess();
+  return isGaming ? <GamingCallLogs /> : <LegacyCallLogs />;
 }
