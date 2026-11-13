@@ -16,14 +16,18 @@ select '6dcf4229-6902-4cd4-9c7f-2d6ed4a6045d', 'Email Sent', 'neutral', true
 where not exists (
   select 1 from public.call_dispositions
   where org_id = '6dcf4229-6902-4cd4-9c7f-2d6ed4a6045d' and name = 'Email Sent'
-);
+
+)
+and exists (select 1 from public.organizations where id = '6dcf4229-6902-4cd4-9c7f-2d6ed4a6045d');
 
 insert into public.call_dispositions (org_id, name, category, is_active)
 select '6dcf4229-6902-4cd4-9c7f-2d6ed4a6045d', 'Email Failed', 'message', true
 where not exists (
   select 1 from public.call_dispositions
   where org_id = '6dcf4229-6902-4cd4-9c7f-2d6ed4a6045d' and name = 'Email Failed'
-);
+
+)
+and exists (select 1 from public.organizations where id = '6dcf4229-6902-4cd4-9c7f-2d6ed4a6045d');
 
 create or replace view public.contact_latest_disposition as
 with contact_action as (
