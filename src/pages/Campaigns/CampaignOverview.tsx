@@ -13,11 +13,11 @@ import DateRangeFilter, { DateRangePreset, getDateRangeFromPreset } from "@/comp
 import PerformanceTrendChart from "@/components/Campaigns/Analytics/PerformanceTrendChart";
 import ChannelPerformanceTable from "@/components/Campaigns/Analytics/ChannelPerformanceTable";
 import { format, differenceInDays } from "date-fns";
+import { useUrlDateRange } from "@/hooks/useUrlDateRange";
 
 export default function CampaignOverview() {
   const notify = useNotification();
-  const [datePreset, setDatePreset] = useState<DateRangePreset>("last_30_days");
-  const [dateRange, setDateRange] = useState(() => getDateRangeFromPreset("last_30_days"));
+  const [datePreset, setDatePreset, dateRange, setDateRange] = useUrlDateRange("last_30_days");
 
   // Calculate days for backward compatibility with export filename
   const dateRangeDays = useMemo(() => differenceInDays(dateRange.to, dateRange.from), [dateRange]);

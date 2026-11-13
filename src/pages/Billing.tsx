@@ -15,6 +15,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { format, addDays, differenceInCalendarDays } from "date-fns";
 import { Wallet, Users, CalendarClock, Loader2, CheckCircle2, IndianRupee, Receipt, TrendingUp, FileText } from "lucide-react";
+import { UrlTabs } from "@/components/UrlTabs";
 
 declare global { interface Window { Razorpay?: any } }
 
@@ -118,6 +119,19 @@ export default function Billing() {
     return { call: calc("call"), whatsapp: calc("whatsapp") };
   }, [usage]);
 
+  // Real invoicing runs monthly regardless of the subscription's payment cadence
+  // (generate-monthly-invoices), while next_billing_date only ever advances at the
+  // moment of a payment — so a quarterly/annual payer, or anyone who simply hasn't
+  // paid again yet, can have a fresh unpaid invoice due well before that stale
+  // snapshot, or the snapshot itself can silently fall into the past. The actual
+  // "when do they next owe money" answer is the earliest pending/overdue invoice
+  // on file; only fall back to the snapshot (their prepaid-through date) when
+  // nothing is currently outstanding.
+  const nextDueInvoice = useMemo(() => {
+    const pending = (invoices || []).filter((i: any) => ["pending", "overdue"].includes(i.payment_status) && i.due_date);
+    return pending.reduce((earliest: any, i: any) => (!earliest || new Date(i.due_date) < new Date(earliest.due_date) ? i : earliest), null);
+  }, [invoices]);
+
   async function paySubscription() {
     if (!effectiveOrgId) return;
     setPaying(true);
@@ -177,12 +191,9 @@ export default function Billing() {
 
   const status = String(sub?.subscription_status || "—");
   const balance = Number(sub?.wallet_balance ?? 0);
-  // next_billing_date is seeded at org creation (created_at + 1 month) purely as an
-  // internal trial-tracking baseline (see Users.tsx's inTrial check) — nothing is
-  // actually scheduled to charge on it. It only becomes a real commitment once the
-  // org has paid at least once (record-offline-payment / verify-razorpay-payment
-  // both advance it from the payment date by the plan's cadence at that point).
-  const nextBilling = hasEverPaid && sub?.next_billing_date ? format(new Date(sub.next_billing_date), "d MMM yyyy") : "—";
+  const nextBillingDate = hasEverPaid ? (nextDueInvoice ? new Date(nextDueInvoice.due_date) : sub?.next_billing_date ? new Date(sub.next_billing_date) : null) : null;
+  const nextBilling = nextBillingDate ? format(nextBillingDate, "d MMM yyyy") : "—";
+  const nextBillingOverdue = nextDueInvoice && nextBillingDate ? nextBillingDate < new Date(new Date().toDateString()) : false;
 
   return (
     <DashboardLayout>
@@ -206,8 +217,12 @@ export default function Billing() {
               : trialEnded ? `Trial ended ${format(trialEndsAt!, "d MMM yyyy")} · subscribe below`
               : `${seats} user${seats > 1 ? "s" : ""} × ${inr(perUser)}/mo`
             } />
-          <SnapCard icon={<CalendarClock size={16} />} tone="violet" label="Next billing" value={nextBilling}
-            hint={!hasEverPaid ? "Not subscribed yet — nothing is scheduled to charge" : undefined} />
+          <SnapCard icon={<CalendarClock size={16} />} tone="violet" label={nextDueInvoice ? "Payment due" : "Next billing"} value={nextBilling}
+            hint={
+              !hasEverPaid ? "Not subscribed yet — nothing is scheduled to charge"
+              : nextDueInvoice ? `${inr(Number(nextDueInvoice.total_amount ?? 0))} ${nextBillingOverdue ? "overdue" : "outstanding"}`
+              : "Paid up — nothing due before this date"
+            } />
         </div>
 
         {/* Subscription */}
@@ -271,7 +286,7 @@ export default function Billing() {
         </Card>
 
         {/* Detail tabs */}
-        <Tabs defaultValue="usage">
+        <UrlTabs param="tab" defaultValue="usage">
           <TabsList>
             <TabsTrigger value="usage" className="gap-1.5"><TrendingUp className="h-4 w-4" /> Usage</TabsTrigger>
             <TabsTrigger value="transactions" className="gap-1.5"><Receipt className="h-4 w-4" /> Transactions</TabsTrigger>
@@ -330,7 +345,7 @@ export default function Billing() {
               )}
             </CardContent></Card>
           </TabsContent>
-        </Tabs>
+        </UrlTabs>
       </div>
 
       <TopUpWalletDialog open={topUpOpen} onOpenChange={setTopUpOpen} orgId={effectiveOrgId || ""} />

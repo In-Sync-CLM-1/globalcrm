@@ -19,6 +19,9 @@ import { Plus, Calendar as CalendarIcon } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
+import { useUrlState } from "@/hooks/useUrlState";
+import { useUrlObjectState } from "@/hooks/useUrlState";
+import { format, parseISO, isValid } from "date-fns";
 
 export default function Calendar() {
   const notify = useNotification();
@@ -26,13 +29,18 @@ export default function Calendar() {
   const isMobile = useIsMobile();
   const { effectiveOrgId } = useOrgContext();
   
-  const [currentDate, setCurrentDate] = useState(new Date());
+  const [currentDateKey, setCurrentDateKey] = useUrlState("date", format(new Date(), "yyyy-MM-dd"));
+  const currentDate = useMemo(() => {
+    const d = parseISO(currentDateKey);
+    return isValid(d) ? d : new Date();
+  }, [currentDateKey]);
+  const setCurrentDate = (d: Date) => setCurrentDateKey(format(d, "yyyy-MM-dd"));
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showMobileSidebar, setShowMobileSidebar] = useState(false);
-  const [viewMode, setViewMode] = useState<ViewMode>('all');
-  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
-  const [filters, setFilters] = useState<CalendarFilters>({
+  const [viewMode, setViewMode] = useUrlState<ViewMode>("view", 'all');
+  const [selectedUserIds, setSelectedUserIds] = useUrlState("users", [] as string[]);
+  const [filters, setFilters] = useUrlObjectState<CalendarFilters>("cf", {
     types: [],
     showCompleted: true,
   });

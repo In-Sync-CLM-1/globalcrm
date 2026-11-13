@@ -4,10 +4,11 @@
 // proven implementation of sending + wallet billing instead of drifting apart.
 import { replaceVariables } from "./templateVariables.ts";
 import { resolveWhatsAppFieldMappings } from "./whatsappFieldMappings.ts";
+import { AI_CALLING_ENABLED, AI_CALLING_DISABLED_REASON, logBlockedCall } from "./aiCallingSwitch.ts";
 
 // Per-org Exotel WhatsApp sender (WABA from-number).
 export const WA_SENDER_BY_ORG: Record<string, string> = {
-  "6dcf4229-6902-4cd4-9c7f-2d6ed4a6045d": "+918178798930", // IEDUP
+  "6dcf4229-6902-4cd4-9c7f-2d6ed4a6045d": "+918808359820", // IEDUP (WABA 2019709875359103)
 };
 
 const WHATSAPP_UTILITY_COST_PER_MSG = 0.20;
@@ -15,12 +16,12 @@ const WHATSAPP_MARKETING_COST_PER_MSG = 1.00;
 // Legacy fallback for templates created before the `category` column was backfilled.
 export const MARKETING_TEMPLATES = new Set<string>(["iedup_ramp_round1_selection_v1"]);
 
-// Per-org email sender. Mirrors the IEDUP training domain (separate Resend
+// Per-org email sender. IEDUP CM YUVA sends from cmyuva.avgroups.in since 2026-11-11 (separate Resend
 // account from the shared "fmamit" one — that account was already at its
 // domain cap).
 export const EMAIL_SENDER_BY_ORG: Record<string, { localPart: string; resendKeyEnv: string; fromName: string }> = {
   "6dcf4229-6902-4cd4-9c7f-2d6ed4a6045d": {
-    localPart: "training@iedup.in-sync.co.in",
+    localPart: "training@cmyuva.avgroups.in",
     resendKeyEnv: "IEDUP_RESEND_API_KEY",
     fromName: "IEDUP CM YUVA",
   },
@@ -124,9 +125,9 @@ export async function refundFunds(
 // the DLR webhook advances) and charges the wallet.
 export async function sendWhatsAppTemplate(
   supabase: any,
-  args: { orgId: string; sender: string; contact: any; phone: string; templateName: string; languageCode: string; floor: number | null },
+  args: { orgId: string; sender: string; contact: any; phone: string; templateName: string; languageCode: string; floor: number | null; bodyParams?: string[]; headerDocument?: { link: string; filename: string } },
 ): Promise<{ ok: boolean; error?: string; insufficientFunds?: boolean }> {
-  const { orgId, sender, contact, phone, templateName, languageCode, floor } = args;
+  const { orgId, sender, contact, phone, templateName, languageCode, floor, bodyParams, headerDocument } = args;
   const apiKey = Deno.env.get("EXOTEL_API_KEY");
   const apiToken = Deno.env.get("EXOTEL_API_TOKEN");
   const sid = Deno.env.get("EXOTEL_SID");
@@ -152,7 +153,10 @@ export async function sendWhatsAppTemplate(
   const hasBodyMappings = !!fieldMappings?.body && Object.keys(fieldMappings.body).length > 0;
 
   let params: string[];
-  if (hasBodyMappings) {
+  if (bodyParams) {
+    // Caller supplies the values directly (e.g. the RAMP portal), so no contact field mapping is needed.
+    params = bodyParams;
+  } else if (hasBodyMappings) {
     const resolved = await resolveWhatsAppFieldMappings(fieldMappings, contact, supabase);
     params = Object.entries(resolved.bodyValues)
       .sort(([a], [b]) => Number(a) - Number(b))
@@ -163,9 +167,9 @@ export async function sendWhatsAppTemplate(
     const NAME_PARAM_PREFIXES = ["iedup_cmyuva_training_helpdesk", "iedup_cmyuva_assessment_link"];
     params = NAME_PARAM_PREFIXES.some((p) => templateName.startsWith(p)) ? [name] : [];
   }
-  const components = params.length > 0
-    ? [{ type: "body", parameters: params.map((p) => ({ type: "text", text: p })) }]
-    : [];
+  const components: any[] = [];
+  if (headerDocument) components.push({ type: "header", parameters: [{ type: "document", document: headerDocument }] });
+  if (params.length > 0) components.push({ type: "body", parameters: params.map((p) => ({ type: "text", text: p })) });
 
   const { data: waLogRow } = await supabase
     .from("whatsapp_logs")
@@ -360,6 +364,13 @@ export async function triggerCall(
     fromNumber?: string | null; dispositionId: string | null; contact: any; phone: string;
   },
 ): Promise<{ ok: boolean; error?: string }> {
+  // Master switch — see _shared/aiCallingSwitch.ts. Checked before anything
+  // else: refusing further down would still have reserved wallet funds and
+  // written a call_logs row for a call that never happens.
+  if (!AI_CALLING_ENABLED) {
+    logBlockedCall("pipelineActions.triggerCall", args.phone);
+    return { ok: false, error: AI_CALLING_DISABLED_REASON };
+  }
   const { orgId, bolnaKey, agentId, scriptId, dispositionId, contact, phone } = args;
   const fromNumber = args.fromNumber || "+911169323462";
 

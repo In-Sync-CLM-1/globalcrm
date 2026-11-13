@@ -30,6 +30,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { useUrlState } from "@/hooks/useUrlState";
 
 interface OutboundWebhookLogsProps {
   open: boolean;
@@ -60,7 +61,7 @@ export const OutboundWebhookLogs = ({
 }: OutboundWebhookLogsProps) => {
   const notify = useNotification();
   const queryClient = useQueryClient();
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useUrlState("whstatus", "all");
   const [selectedLog, setSelectedLog] = useState<WebhookLog | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
 

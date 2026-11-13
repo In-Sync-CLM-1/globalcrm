@@ -52,7 +52,7 @@ Deno.serve(async (req) => {
   if (!contact) return page("Not found", `<p>We couldn't find your record. Please reply to your message and we'll help.</p>`);
   if (contact.opted_out) return page("Removed", `<p>You've been removed from our outreach. No further messages will be sent.</p>`);
 
-  const productLabel = String(contact.product || "").toLowerCase() === "vendorverification" ? "Vendor Verification" : "WorkSync";
+  const productLabel = String(contact.product || "").toLowerCase() === "vendorsync" ? "Vendorsync" : "WorkSync";
 
   // ---- POST: record the prospect's choice ----
   if (req.method === "POST" && form) {

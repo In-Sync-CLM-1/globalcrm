@@ -149,8 +149,8 @@ function detectFullNameIndex(normHeaders: string[], fieldToIndex: Record<string,
 }
 
 // --- AI refinement ---------------------------------------------------------
-const GROQ_MODEL = 'llama-3.3-70b-versatile';
-const HAIKU_MODEL = 'claude-haiku-4-5';
+const GROQ_MODEL = 'openai/gpt-oss-120b';
+const CEREBRAS_MODEL = 'gemma-4-31b';
 
 const MAPPING_SYSTEM_PROMPT =
   'You map the columns of an uploaded B2B contact spreadsheet onto a fixed set of canonical database fields. ' +
@@ -226,28 +226,31 @@ async function callGroqMapping(systemPrompt: string, userContent: string): Promi
   }
 }
 
-async function callHaikuMapping(systemPrompt: string, userContent: string): Promise<AiMapping | null> {
-  const key = Deno.env.get('ANTHROPIC_API_KEY');
+async function callCerebrasMapping(systemPrompt: string, userContent: string): Promise<AiMapping | null> {
+  const key = Deno.env.get('CEREBRAS_API_KEY');
   if (!key) return null;
   try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    const resp = await fetch('https://api.cerebras.ai/v1/chat/completions', {
       method: 'POST',
-      headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: HAIKU_MODEL,
-        max_tokens: 1024,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: userContent }],
+        model: CEREBRAS_MODEL,
+        temperature: 0,
+        response_format: { type: 'json_object' },
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userContent },
+        ],
       }),
     });
     if (!resp.ok) {
-      console.error('[SMART-MAP] Haiku mapping failed:', resp.status, await resp.text());
+      console.error('[SMART-MAP] Cerebras mapping failed:', resp.status, await resp.text());
       return null;
     }
     const data = await resp.json();
-    return parseAiMapping(data.content?.[0]?.text ?? '');
+    return parseAiMapping(data.choices?.[0]?.message?.content ?? '');
   } catch (e) {
-    console.error('[SMART-MAP] Haiku mapping error:', e);
+    console.error('[SMART-MAP] Cerebras mapping error:', e);
     return null;
   }
 }
@@ -261,13 +264,39 @@ function headerIndex(rawHeaders: string[], normHeaders: string[], wanted: string
   return normHeaders.indexOf(wn);
 }
 
+// A real-world file (43,427-row incident, 2026-08-14) had non-blank header
+// text for its first 4 columns ("Sr.No.", "Year", "DB Source", "Region") but
+// every single data row's first 4 cells were blank — the row data was
+// physically written 4 columns to the right of where its own header row
+// claimed it would be. Both the deterministic and AI mapping trust
+// header-to-column POSITION, so every field silently read the wrong column:
+// company_name got a bare numeric ID, designation got a data-source label,
+// country got a company name, and so on — all internally consistent-looking
+// values, just each one column-shifted, so nothing downstream caught it.
+// Detected and rejected here (not auto-corrected): this codebase's standing
+// rule is "leave uncertain fields out rather than guessing" — silently
+// shifting could just as easily corrupt a file where the first columns are
+// legitimately unused, so a human needs to confirm and re-export instead.
+const LEADING_BLANK_REJECT_THRESHOLD = 2;
+
+function detectLeadingBlankColumnBug(rawHeaders: string[], sampleRows: string[][]): number {
+  if (sampleRows.length < 3) return 0; // too little evidence to trust
+  let k = 0;
+  while (k < rawHeaders.length && rawHeaders[k] && rawHeaders[k].trim() !== '') {
+    const allBlank = sampleRows.every((row) => !row[k] || row[k].trim() === '');
+    if (!allBlank) break;
+    k++;
+  }
+  return k;
+}
+
 // Build the full mapping for a file: deterministic synonyms first, AI to
 // refine leftovers and settle ambiguity, then the structural accept/reject
 // decision. Fails open to the deterministic map if AI is unavailable.
 // Generic engine behind buildFerventMapping/buildContactsMapping — parameterised
 // on the canonical field list + synonyms + identity fields so other import
 // types can reuse the same AI-assisted column-mapping without duplicating the
-// Groq/Haiku plumbing.
+// Groq/Cerebras plumbing.
 async function buildSmartMapping(
   canonicalFields: { key: string; desc: string }[],
   synonyms: Record<string, string[]>,
@@ -277,11 +306,22 @@ async function buildSmartMapping(
   systemPrompt: string,
   noIdentityMessage: string,
 ): Promise<FerventMappingResult> {
+  const leadingBlankCols = detectLeadingBlankColumnBug(rawHeaders, sampleRows);
+  if (leadingBlankCols >= LEADING_BLANK_REJECT_THRESHOLD) {
+    return {
+      reject: true,
+      rejectReason:
+        `The first ${leadingBlankCols} columns (${rawHeaders.slice(0, leadingBlankCols).join(', ')}) have header names but every sampled row's value for them is blank — ` +
+        `this usually means the data got shifted out of alignment with its own header row during export. Please re-export the file so each column's header sits directly above its own data, then upload again.`,
+      usedAi: false,
+    };
+  }
+
   const normHeaders = rawHeaders.map(normalizeHeader);
   const fieldToIndex = deterministicMap(synonyms, normHeaders);
 
   const userContent = buildAiUserContent(canonicalFields, rawHeaders, sampleRows);
-  const ai = await callGroqMapping(systemPrompt, userContent) ?? await callHaikuMapping(systemPrompt, userContent);
+  const ai = await callGroqMapping(systemPrompt, userContent) ?? await callCerebrasMapping(systemPrompt, userContent);
   const usedAi = ai !== null;
 
   let fullNameIndex: number | null = null;
@@ -433,13 +473,30 @@ const CONTACTS_NO_IDENTITY_MESSAGE =
   'The file has no name, email, or phone column we could recognise, so its records can\'t be identified. ' +
   'Please make sure it includes at least a name, an email, or a phone number and upload again.';
 
-export async function buildContactsMapping(rawHeaders: string[], sampleRows: string[][]): Promise<FerventMappingResult> {
-  return buildSmartMapping(CONTACTS_CANONICAL_FIELDS, CONTACTS_SYNONYMS, CONTACTS_IDENTITY_FIELDS, rawHeaders, sampleRows, CONTACTS_MAPPING_SYSTEM_PROMPT, CONTACTS_NO_IDENTITY_MESSAGE);
+// Orgs with staging cleanup on also map the lead's source and product (game).
+const CONTACTS_CLEANUP_EXTRA_FIELDS: { key: string; desc: string }[] = [
+  { key: 'source', desc: 'Where the lead came from: lead source / channel / campaign / referral source' },
+  { key: 'product', desc: 'The product / game / offering the lead is interested in or plays' },
+  { key: 'assigned_to', desc: 'The CRM user (caller / agent / owner) the lead should be assigned to, given as a person name or login email' },
+];
+const CONTACTS_CLEANUP_EXTRA_SYNONYMS: Record<string, string[]> = {
+  source: ['source', 'lead_source', 'channel', 'lead_channel', 'utm_source', 'campaign_source'],
+  product: ['product', 'game', 'favourite_game', 'favorite_game', 'game_interest', 'interested_in'],
+  assigned_to: ['assigned_to', 'assigned', 'assign_to', 'assignee', 'owner', 'lead_owner', 'agent', 'caller', 'telecaller'],
+};
+
+export async function buildContactsMapping(rawHeaders: string[], sampleRows: string[][], withCleanupFields = false): Promise<FerventMappingResult> {
+  const fields = withCleanupFields ? [...CONTACTS_CANONICAL_FIELDS, ...CONTACTS_CLEANUP_EXTRA_FIELDS] : CONTACTS_CANONICAL_FIELDS;
+  const synonyms = withCleanupFields ? { ...CONTACTS_SYNONYMS, ...CONTACTS_CLEANUP_EXTRA_SYNONYMS } : CONTACTS_SYNONYMS;
+  return buildSmartMapping(fields, synonyms, CONTACTS_IDENTITY_FIELDS, rawHeaders, sampleRows, CONTACTS_MAPPING_SYSTEM_PROMPT, CONTACTS_NO_IDENTITY_MESSAGE);
 }
 
 // Contacts equivalent of applyFerventMapping: same full-name-split and
 // name-from-email derivation, targeted at the contacts row shape.
-export function applyContactsMapping(values: string[], mapping: FerventMapping): Record<string, string> {
+// keepFullNameWhole: put the whole full-name value into first_name instead of
+// splitting it (orgs with import_cleanup on, whose "Full Name" is often a
+// username or a name the client wants kept exactly as given).
+export function applyContactsMapping(values: string[], mapping: FerventMapping, keepFullNameWhole = false): Record<string, string> {
   const row: Record<string, string> = {};
   for (const [field, idx] of Object.entries(mapping.fieldToIndex)) {
     row[field] = (values[idx] ?? '').trim();
@@ -448,7 +505,7 @@ export function applyContactsMapping(values: string[], mapping: FerventMapping):
   if (mapping.fullNameIndex !== null && !row.first_name && !row.last_name) {
     const full = (values[mapping.fullNameIndex] ?? '').trim();
     if (full) {
-      const { first, last } = splitFullName(full);
+      const { first, last } = keepFullNameWhole ? { first: full.replace(/\s+/g, ' '), last: '' } : splitFullName(full);
       row.first_name = first;
       row.last_name = last;
     }

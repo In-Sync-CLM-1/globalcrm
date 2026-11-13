@@ -17,13 +17,15 @@ import upiQr from "@/assets/upi-qr.png";
  * lifts any account lock.
  */
 const BANK = {
-  accountName: "ECR TECHNICAL INNOVATIONS PVT LTD",
-  accountNumber: "50200092143760",
-  accountNumberDisplay: "5020 0092 1437 60",
-  ifsc: "HDFC0000182",
-  bank: "HDFC Bank",
-  branch: "Kandivali East — Thakur Complex",
+  accountName: "PROSYNC AI SOLUTIONS (OPC) PRIVATE LIMITED",
+  accountNumber: "10288101744",
+  accountNumberDisplay: "1028 8101 744",
+  ifsc: "IDFB0022461",
+  bank: "IDFC FIRST Bank",
+  branch: "Gurgaon — Sector 4",
 };
+
+const UPI_ID = "prosyncaisolutions@idfcbank";
 
 const OPS_WHATSAPP = "917738919680";
 const OPS_WHATSAPP_DISPLAY = "+91 77389 19680";
@@ -106,7 +108,10 @@ export function ManualPaymentDetails({ amount, purpose = "payment", className }:
         <div className="flex flex-col items-center justify-center rounded-md border bg-background p-3 text-center">
           <p className="mb-2 text-sm font-medium">Scan to pay by UPI</p>
           <img src={upiQr} alt="UPI QR code" className="h-40 w-40 rounded-md object-contain" />
-          <p className="mt-2 text-xs text-muted-foreground">Google Pay · PhonePe · Paytm · any UPI app</p>
+          <div className="mt-2 w-full text-left">
+            <CopyField label="UPI ID" value={UPI_ID} />
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">Google Pay · PhonePe · Paytm · any UPI app</p>
         </div>
       </div>
 

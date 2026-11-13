@@ -6,6 +6,7 @@ import { Phone, Clock, TrendingUp, Users, PhoneCall, CheckCircle, XCircle, Activ
 import { useNotification } from "@/hooks/useNotification";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useUrlState } from "@/hooks/useUrlState";
 
 interface AgentStats {
   agent_id: string;
@@ -50,7 +51,7 @@ export default function CallingDashboardTab() {
   });
   const [loading, setLoading] = useState(true);
   const [timeRange, setTimeRange] = useState("7");
-  const [selectedUser, setSelectedUser] = useState<string>("all");
+  const [selectedUser, setSelectedUser] = useUrlState<string>("cduser", "all");
   const [users, setUsers] = useState<User[]>([]);
   const [teamMemberIds, setTeamMemberIds] = useState<string[]>([]);
   const [activeCallsCount, setActiveCallsCount] = useState(0);

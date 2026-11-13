@@ -18,26 +18,30 @@ import { SalesActivityTrend } from "@/components/Dashboard/SalesActivityTrend";
 import { SalesLeaderboard } from "@/components/Dashboard/SalesLeaderboard";
 import { DueTodayCard } from "@/components/Dashboard/DueTodayCard";
 import { CompactDashboard } from "@/components/Dashboard/CompactDashboard";
+import { ContactsByCategoryChart } from "@/components/Dashboard/ContactsByCategoryChart";
 import { SDRDashboard } from "@/components/Dashboard/SDRDashboard";
+import { GamingManagerDashboard } from "@/components/Gaming/GamingManagerDashboard";
+import { GamingCallerDashboard } from "@/components/Gaming/GamingCallerDashboard";
+import { GAMING_ORG_ID } from "@/components/Gaming/gamingStats";
 import { useUserRole } from "@/hooks/useUserRole";
 import IedupDashboard from "@/pages/IedupDashboard";
 import { IEDUP_ORG_ID } from "@/hooks/useIsIedup";
 import FerventDashboard from "@/pages/FerventDashboard";
 import { FERVENT_ORG_ID } from "@/hooks/useIsFervent";
+import { useUrlDateRange } from "@/hooks/useUrlDateRange";
 
 const INSYNC_DEMO_ORG_ID = "61f7f96d-e80c-4d9b-a765-8eb32bd3c70d";
 
 export default function Dashboard() {
   const { effectiveOrgId, isLoading: orgLoading } = useOrgContext();
-  const { isAdmin, isSuperAdmin, loading: roleLoading } = useUserRole();
+  const { isAdmin, isSuperAdmin, isSalesManager, loading: roleLoading } = useUserRole();
 
   const queryClient = useQueryClient();
   const { triggerEdgeFunctionCheck, checkReminders } = useCallbackReminders();
   const hasCheckedReminders = useRef(false);
 
   // Date range filter state - default to This Month
-  const [datePreset, setDatePreset] = useState<DateRangePreset>("this_month");
-  const [dateRange, setDateRange] = useState(() => getDateRangeFromPreset("this_month"));
+  const [datePreset, setDatePreset, dateRange, setDateRange] = useUrlDateRange("this_month");
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Only the standard sales dashboard runs the heavy queries below.
@@ -46,6 +50,7 @@ export default function Dashboard() {
     !!effectiveOrgId &&
     effectiveOrgId !== IEDUP_ORG_ID &&
     effectiveOrgId !== FERVENT_ORG_ID &&
+    effectiveOrgId !== GAMING_ORG_ID &&
     effectiveOrgId !== INSYNC_DEMO_ORG_ID;
 
   // Trigger reminder check on dashboard load
@@ -133,6 +138,21 @@ export default function Dashboard() {
     enabled: isStandardDashboardOrg,
   });
 
+  // Fetch contacts grouped by category (populated for orgs that tag contacts
+  // by data-type/list origin, e.g. RMPL's OPM database imports)
+  const { data: contactsByCategory = [], isLoading: categoryLoading } = useQuery<{ category: string; contact_count: number }[]>({
+    queryKey: ["contacts-by-category", effectiveOrgId],
+    queryFn: async () => {
+      if (!effectiveOrgId) throw new Error("No organization context");
+      const { data, error } = await supabase.rpc("get_contacts_by_category", {
+        p_org_id: effectiveOrgId,
+      });
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: isStandardDashboardOrg,
+  });
+
   // Fetch contacts in won/lost stages for win rate
   const { data: wonLostData } = useQuery({
     queryKey: ["won-lost-counts", effectiveOrgId],
@@ -199,6 +219,7 @@ export default function Dashboard() {
     await queryClient.invalidateQueries({ queryKey: ["sales-activity-trends"] });
     await queryClient.invalidateQueries({ queryKey: ["new-leads-period"] });
     await queryClient.invalidateQueries({ queryKey: ["won-lost-counts"] });
+    await queryClient.invalidateQueries({ queryKey: ["contacts-by-category"] });
     setIsRefreshing(false);
   };
 
@@ -212,6 +233,26 @@ export default function Dashboard() {
   // Fervent org: render the database-insights dashboard
   if (effectiveOrgId === FERVENT_ORG_ID) {
     return <FerventDashboard />;
+  }
+
+  // Gaming org: admins and calling managers see every caller's day; callers see their own targets
+  if (effectiveOrgId === GAMING_ORG_ID) {
+    if (roleLoading) {
+      return (
+        <DashboardLayout>
+          <LoadingState message="Loading dashboard..." />
+        </DashboardLayout>
+      );
+    }
+    return (
+      <DashboardLayout>
+        {isAdmin || isSuperAdmin || isSalesManager ? (
+          <GamingManagerDashboard orgId={effectiveOrgId} />
+        ) : (
+          <GamingCallerDashboard orgId={effectiveOrgId} />
+        )}
+      </DashboardLayout>
+    );
   }
 
   // In-Sync Demo: admins see team-level compact dashboard; SDRs see their own dashboard
@@ -304,6 +345,11 @@ export default function Dashboard() {
             <SalesActivityTrend data={activityTrendData} isLoading={activityTrendsLoading} />
           </div>
         </div>
+
+        {/* Contacts by Category (only present for orgs that tag contacts by data type) */}
+        {(categoryLoading || contactsByCategory.length > 0) && (
+          <ContactsByCategoryChart data={contactsByCategory} isLoading={categoryLoading} />
+        )}
 
         {/* Sales Rep Leaderboard */}
         <SalesLeaderboard reps={salesReps} isLoading={salesRepsLoading} />

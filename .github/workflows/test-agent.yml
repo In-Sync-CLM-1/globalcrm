@@ -1,0 +1,19 @@
+name: Test agent
+
+# Sends every pull request to the central test agent (In-Sync-CLM-1/test-agent).
+# The result appears on the PR; nothing goes live unless the test ledger records a pass (or a skip-tests waiver).
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled, ready_for_review]
+
+jobs:
+  send:
+    if: github.event.action != 'labeled' && github.event.action != 'unlabeled' || github.event.label.name == 'skip-tests'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ask the test agent to test this PR
+        env:
+          GH_TOKEN: ${{ secrets.TEST_AGENT_TOKEN }}
+        run: |
+          gh api repos/In-Sync-CLM-1/test-agent/dispatches -f event_type=pr-test \
+            -F "client_payload[repo]=${{ github.repository }}" -F "client_payload[pr]=${{ github.event.pull_request.number }}"

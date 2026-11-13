@@ -1,0 +1,114 @@
+[
+ {
+  "id": "registered-F",
+  "scriptId": "registered",
+  "agentGender": "F",
+  "seconds": 71,
+  "transcript": "agent: Hello, I am calling from the gaming platform. You showed interest in our games last week. Do you have two minutes?\nuser: Yes, tell me. I did look at it on Instagram.\nagent: Great. Registration is completely free and takes about two minutes. New players also get a welcome reward in their account after signing up.\nuser: Okay. Is it safe? I do not want to give my bank details or anything.\nagent: That is a very fair question. Your account is verified with just your mobile number. We never ask for bank details, passwords or an OTP on a call.\nuser: Alright. And is there any cost?\nagent: No cost to register, and you can try the games before deciding anything else. Shall we do it together right now?\nuser: Okay, let us do it.\nagent: Perfect. Please open the link I sent and enter your mobile number. You will get a six digit code on your own phone. Keep that with you, do not tell it to me.\nuser: I got the code. I have entered it. It says registration complete.\nagent: Wonderful, you are registered. Your welcome reward is now waiting in your account. Which game would you like to try first?\nuser: Ludo, I used to play that a lot.\nagent: Excellent choice. Go ahead and try it today. I will call you in two days to check how it went. Thank you for your time."
+ },
+ {
+  "id": "registered-M",
+  "scriptId": "registered",
+  "agentGender": "M",
+  "seconds": 70,
+  "transcript": "agent: Hello, I am calling from the gaming platform. You showed interest in our games last week. Do you have two minutes?\nuser: Yes, tell me. I did look at it on Instagram.\nagent: Great. Registration is completely free and takes about two minutes. New players also get a welcome reward in their account after signing up.\nuser: Okay. Is it safe? I do not want to give my bank details or anything.\nagent: That is a very fair question. Your account is verified with just your mobile number. We never ask for bank details, passwords or an OTP on a call.\nuser: Alright. And is there any cost?\nagent: No cost to register, and you can try the games before deciding anything else. Shall we do it together right now?\nuser: Okay, let us do it.\nagent: Perfect. Please open the link I sent and enter your mobile number. You will get a six digit code on your own phone. Keep that with you, do not tell it to me.\nuser: I got the code. I have entered it. It says registration complete.\nagent: Wonderful, you are registered. Your welcome reward is now waiting in your account. Which game would you like to try first?\nuser: Ludo, I used to play that a lot.\nagent: Excellent choice. Go ahead and try it today. I will call you in two days to check how it went. Thank you for your time."
+ },
+ {
+  "id": "activated-F",
+  "scriptId": "activated",
+  "agentGender": "F",
+  "seconds": 83,
+  "transcript": "agent: Hello, I am calling from the gaming platform. Thanks again for registering with us last week. Is this a good time?\nuser: Yes, hello. I have not really played yet. I got busy with work.\nagent: No problem at all. Your welcome reward is still waiting in your account, and your first game takes only a couple of minutes.\nuser: I will try later in the evening.\nagent: Of course. If you like, I can stay on the line and guide you. It is just two taps to start, and it may be easier with me here.\nuser: Okay, fine. I have the app open right now.\nagent: Great. On the home screen you will see the games you showed interest in. Which one would you like to try first?\nuser: The quiz one, I think. I like quizzes.\nagent: Good choice. Tap on it, and then on Play. Tell me when it starts, and take your time.\nuser: It started. There is a timer, and the questions are quite easy.\nagent: That is the practice round, so there is no pressure at all. Answer a few, and the game will show your score at the end.\nuser: I got seven out of ten. That was fun, honestly.\nagent: Well done. Now open the rewards section, and you should see your welcome reward added to your account.\nuser: Yes, I can see it. It says reward added.\nagent: Wonderful. You are all set. You can invite a friend whenever you like, but that is entirely your choice. Is there anything else I can help you with?\nuser: No, that is all. Thank you for walking me through it.\nagent: My pleasure. Enjoy the games, and have a lovely evening."
+ },
+ {
+  "id": "activated-M",
+  "scriptId": "activated",
+  "agentGender": "M",
+  "seconds": 77,
+  "transcript": "agent: Hello, I am calling from the gaming platform. Thanks again for registering with us last week. Is this a good time?\nuser: Yes, hello. I have not really played yet. I got busy with work.\nagent: No problem at all. Your welcome reward is still waiting in your account, and your first game takes only a couple of minutes.\nuser: I will try later in the evening.\nagent: Of course. If you like, I can stay on the line and guide you. It is just two taps to start, and it may be easier with me here.\nuser: Okay, fine. I have the app open right now.\nagent: Great. On the home screen you will see the games you showed interest in. Which one would you like to try first?\nuser: The quiz one, I think. I like quizzes.\nagent: Good choice. Tap on it, and then on Play. Tell me when it starts, and take your time.\nuser: It started. There is a timer, and the questions are quite easy.\nagent: That is the practice round, so there is no pressure at all. Answer a few, and the game will show your score at the end.\nuser: I got seven out of ten. That was fun, honestly.\nagent: Well done. Now open the rewards section, and you should see your welcome reward added to your account.\nuser: Yes, I can see it. It says reward added.\nagent: Wonderful. You are all set. You can invite a friend whenever you like, but that is entirely your choice. Is there anything else I can help you with?\nuser: No, that is all. Thank you for walking me through it.\nagent: My pleasure. Enjoy the games, and have a lovely evening."
+ },
+ {
+  "id": "interested-F",
+  "scriptId": "interested",
+  "agentGender": "F",
+  "seconds": 75,
+  "transcript": "agent: Hello, I am calling from the gaming platform. You showed interest in Carrom on our site. Do you have a minute?\nuser: Yes, but I am in the middle of something. Please keep it short.\nagent: Of course. Registration is free and takes about two minutes, and new players get a welcome reward after signing up.\nuser: That sounds good. What games do you have?\nagent: Carrom, Ludo, Chess, quiz and puzzle games, among others. You can try any of them as soon as you register.\nuser: Okay. Is there any age limit, or any documents needed?\nagent: Players must be eighteen or older, and you only need your mobile number to start. We never ask for bank details or passwords on a call.\nuser: That is good to know. I cannot do it right now though. Can you send me the details?\nagent: Certainly. I will send you the registration link now, so you can register whenever you are free.\nuser: Yes, please send it. And how long does the welcome reward stay in the account?\nagent: The reward details are shown right inside the app once you register, so you can read them at your own pace.\nuser: Fine. I will look at it this evening.\nagent: Perfect. If you have any questions, just ask me when I call back. Thank you for your time, and have a good day.\nuser: Thank you, bye."
+ },
+ {
+  "id": "interested-M",
+  "scriptId": "interested",
+  "agentGender": "M",
+  "seconds": 71,
+  "transcript": "agent: Hello, I am calling from the gaming platform. You showed interest in Carrom on our site. Do you have a minute?\nuser: Yes, but I am in the middle of something. Please keep it short.\nagent: Of course. Registration is free and takes about two minutes, and new players get a welcome reward after signing up.\nuser: That sounds good. What games do you have?\nagent: Carrom, Ludo, Chess, quiz and puzzle games, among others. You can try any of them as soon as you register.\nuser: Okay. Is there any age limit, or any documents needed?\nagent: Players must be eighteen or older, and you only need your mobile number to start. We never ask for bank details or passwords on a call.\nuser: That is good to know. I cannot do it right now though. Can you send me the details?\nagent: Certainly. I will send you the registration link now, so you can register whenever you are free.\nuser: Yes, please send it. And how long does the welcome reward stay in the account?\nagent: The reward details are shown right inside the app once you register, so you can read them at your own pace.\nuser: Fine. I will look at it this evening.\nagent: Perfect. If you have any questions, just ask me when I call back. Thank you for your time, and have a good day.\nuser: Thank you, bye."
+ },
+ {
+  "id": "callback-F",
+  "scriptId": "callback",
+  "agentGender": "F",
+  "seconds": 59,
+  "transcript": "agent: Hello, I am calling from the gaming platform. Is this a good time to talk for two minutes?\nuser: Oh, hello. I am travelling right now, and the network is not great.\nagent: I understand. I will not take much time. You had shown interest in registering with us a few days ago.\nuser: Yes, I remember. I was looking at the quiz games. But I cannot talk properly now.\nagent: No worries at all. Would you like me to call you at a better time, or send you the details first?\nuser: Please call me tomorrow morning. I would like to understand it properly, and I do not want to rush.\nagent: Certainly. What time suits you best?\nuser: Around ten in the morning is fine. I will be at my desk by then, and the network will be better.\nagent: Perfect. Just so you know, registration is free and takes about two minutes, so we can do it together tomorrow if you like.\nuser: Okay, that works. Please do not call before ten though.\nagent: Understood. I will call you tomorrow at ten, not a minute earlier. Thank you, and have a safe journey.\nuser: Thank you. Talk tomorrow."
+ },
+ {
+  "id": "callback-M",
+  "scriptId": "callback",
+  "agentGender": "M",
+  "seconds": 56,
+  "transcript": "agent: Hello, I am calling from the gaming platform. Is this a good time to talk for two minutes?\nuser: Oh, hello. I am travelling right now, and the network is not great.\nagent: I understand. I will not take much time. You had shown interest in registering with us a few days ago.\nuser: Yes, I remember. I was looking at the quiz games. But I cannot talk properly now.\nagent: No worries at all. Would you like me to call you at a better time, or send you the details first?\nuser: Please call me tomorrow morning. I would like to understand it properly, and I do not want to rush.\nagent: Certainly. What time suits you best?\nuser: Around ten in the morning is fine. I will be at my desk by then, and the network will be better.\nagent: Perfect. Just so you know, registration is free and takes about two minutes, so we can do it together tomorrow if you like.\nuser: Okay, that works. Please do not call before ten though.\nagent: Understood. I will call you tomorrow at ten, not a minute earlier. Thank you, and have a safe journey.\nuser: Thank you. Talk tomorrow."
+ },
+ {
+  "id": "not-interested-elsewhere-F",
+  "scriptId": "not-interested-elsewhere",
+  "agentGender": "F",
+  "seconds": 35,
+  "transcript": "agent: Hello, I am calling from the gaming platform. You enquired about our games recently. Do you have a minute?\nuser: Yes, but I already play on another app. I do not need another one.\nagent: That is quite common, many of our players use more than one. Ours is free to join, and there is a welcome reward for new players.\nuser: I do not want to install another app. My phone is already full.\nagent: Understood. You can also try the games in your browser without installing anything.\nuser: Still not interested, honestly. I am happy where I am.\nagent: That is perfectly fine. Thank you for your time, and I wish you good games."
+ },
+ {
+  "id": "not-interested-elsewhere-M",
+  "scriptId": "not-interested-elsewhere",
+  "agentGender": "M",
+  "seconds": 34,
+  "transcript": "agent: Hello, I am calling from the gaming platform. You enquired about our games recently. Do you have a minute?\nuser: Yes, but I already play on another app. I do not need another one.\nagent: That is quite common, many of our players use more than one. Ours is free to join, and there is a welcome reward for new players.\nuser: I do not want to install another app. My phone is already full.\nagent: Understood. You can also try the games in your browser without installing anything.\nuser: Still not interested, honestly. I am happy where I am.\nagent: That is perfectly fine. Thank you for your time, and I wish you good games."
+ },
+ {
+  "id": "not-interested-no-time-F",
+  "scriptId": "not-interested-no-time",
+  "agentGender": "F",
+  "seconds": 9,
+  "transcript": "agent: Hello, I am calling from the gaming platform. Can I take a minute of your time?\nuser: Sorry, I have no time for this. Not interested.\nagent: No problem at all. Thank you, have a good day."
+ },
+ {
+  "id": "not-interested-no-time-M",
+  "scriptId": "not-interested-no-time",
+  "agentGender": "M",
+  "seconds": 10,
+  "transcript": "agent: Hello, I am calling from the gaming platform. Can I take a minute of your time?\nuser: Sorry, I have no time for this. Not interested.\nagent: No problem at all. Thank you, have a good day."
+ },
+ {
+  "id": "wrong-number-F",
+  "scriptId": "wrong-number",
+  "agentGender": "F",
+  "seconds": 9,
+  "transcript": "agent: Hello, is this the number that enquired about our gaming platform?\nuser: No, you have the wrong number. I did not enquire about anything.\nagent: I am sorry for the trouble. Have a good day."
+ },
+ {
+  "id": "wrong-number-M",
+  "scriptId": "wrong-number",
+  "agentGender": "M",
+  "seconds": 10,
+  "transcript": "agent: Hello, is this the number that enquired about our gaming platform?\nuser: No, you have the wrong number. I did not enquire about anything.\nagent: I am sorry for the trouble. Have a good day."
+ },
+ {
+  "id": "already-registered-F",
+  "scriptId": "already-registered",
+  "agentGender": "F",
+  "seconds": 13,
+  "transcript": "agent: Hello, I am calling from the gaming platform. You enquired about registering with us.\nuser: I already have an account with you. I play every day.\nagent: Wonderful, thank you. Enjoy the games, and let us know if you ever need help."
+ },
+ {
+  "id": "already-registered-M",
+  "scriptId": "already-registered",
+  "agentGender": "M",
+  "seconds": 12,
+  "transcript": "agent: Hello, I am calling from the gaming platform. You enquired about registering with us.\nuser: I already have an account with you. I play every day.\nagent: Wonderful, thank you. Enjoy the games, and let us know if you ever need help."
+ }
+]

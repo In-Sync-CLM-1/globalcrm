@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { useNotification } from "@/hooks/useNotification";
 import { Mail, Plus, X, Star } from "lucide-react";
+import { useGamingAccess } from "@/hooks/useGamingAccess";
 
 interface ContactEmail {
   id: string;
@@ -23,6 +24,7 @@ interface ContactEmailsProps {
 
 export function ContactEmails({ contactId, orgId, readOnly = false }: ContactEmailsProps) {
   const notify = useNotification();
+  const gaming = useGamingAccess();
   const [emails, setEmails] = useState<ContactEmail[]>([]);
   const [newEmail, setNewEmail] = useState({ email: "", email_type: "work" });
   const [loading, setLoading] = useState(false);
@@ -117,9 +119,13 @@ export function ContactEmails({ contactId, orgId, readOnly = false }: ContactEma
         {emails.map((item) => (
           <div key={item.id} className="flex items-center gap-2">
             <Mail className="h-4 w-4 text-muted-foreground" />
-            <a href={`mailto:${item.email}`} className="text-sm hover:underline">
-              {item.email}
-            </a>
+            {gaming.masked ? (
+              <span className="text-sm">{gaming.email(item.email)}</span>
+            ) : (
+              <a href={`mailto:${item.email}`} className="text-sm hover:underline">
+                {item.email}
+              </a>
+            )}
             <Badge variant="secondary" className={`text-xs ${getTypeColor(item.email_type)}`}>
               {item.email_type}
             </Badge>

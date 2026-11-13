@@ -10,6 +10,7 @@ import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import InsightCard from "@/components/Campaigns/Insights/InsightCard";
 import AIChatInterface from "@/components/Campaigns/Insights/AIChatInterface";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { UrlTabs } from "@/components/UrlTabs";
 
 export default function AIInsightsDashboard() {
   const notify = useNotification();
@@ -90,7 +91,7 @@ export default function AIInsightsDashboard() {
           </Card>
         </div>
 
-        <Tabs defaultValue="insights" className="space-y-4">
+        <UrlTabs param="tab" defaultValue="insights" className="space-y-4">
           <TabsList>
             <TabsTrigger value="insights">AI Insights</TabsTrigger>
             <TabsTrigger value="chat">Ask AI</TabsTrigger>
@@ -150,7 +151,7 @@ export default function AIInsightsDashboard() {
           <TabsContent value="chat">
             <AIChatInterface />
           </TabsContent>
-        </Tabs>
+        </UrlTabs>
       </div>
     </DashboardLayout>
   );

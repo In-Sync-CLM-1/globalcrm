@@ -7,6 +7,8 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Search, Calendar, Users, FileText } from "lucide-react";
 import { format } from "date-fns";
+import { UrlTabs } from "@/components/UrlTabs";
+import { useUrlState } from "@/hooks/useUrlState";
 
 interface Invoice {
   id: string;
@@ -71,7 +73,7 @@ export function RevenueBreakdownTabs({
   clientBreakdown,
   currency = "INR",
 }: RevenueBreakdownTabsProps) {
-  const [searchTerm, setSearchTerm] = useState("");
+  const [searchTerm, setSearchTerm] = useUrlState("revq", "");
 
   const filteredInvoices = invoices.filter((inv) => {
     const search = searchTerm.toLowerCase();
@@ -107,7 +109,7 @@ export function RevenueBreakdownTabs({
         </div>
       </CardHeader>
       <CardContent>
-        <Tabs defaultValue="by-date">
+        <UrlTabs param="revenuebreakdowntabs_tab" defaultValue="by-date">
           <TabsList className="mb-4">
             <TabsTrigger value="by-date" className="gap-2">
               <Calendar className="h-4 w-4" />
@@ -254,7 +256,7 @@ export function RevenueBreakdownTabs({
               </Table>
             </ScrollArea>
           </TabsContent>
-        </Tabs>
+        </UrlTabs>
       </CardContent>
     </Card>
   );

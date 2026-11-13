@@ -12,6 +12,8 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { format } from "date-fns";
 import { CallRecordingPlayer } from "@/components/Contact/CallRecordingPlayer";
+import { UrlTabs } from "@/components/UrlTabs";
+import { useUrlState } from "@/hooks/useUrlState";
 
 interface AgentStats {
   agent_id: string;
@@ -80,14 +82,14 @@ export default function CallingDashboard() {
     positive_rate: 0,
   });
   const [loading, setLoading] = useState(true);
-  const [timeRange, setTimeRange] = useState("7");
-  const [selectedUser, setSelectedUser] = useState<string>("all");
+  const [timeRange, setTimeRange] = useUrlState("range", "7");
+  const [selectedUser, setSelectedUser] = useUrlState<string>("user", "all");
   const [users, setUsers] = useState<User[]>([]);
   const [teamMemberIds, setTeamMemberIds] = useState<string[]>([]);
   const [activeCallsCount, setActiveCallsCount] = useState(0);
   const [callLogs, setCallLogs] = useState<CallLog[]>([]);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [callTypeFilter, setCallTypeFilter] = useState("all");
+  const [searchQuery, setSearchQuery] = useUrlState("q", "");
+  const [callTypeFilter, setCallTypeFilter] = useUrlState("type", "all");
   const [syncing, setSyncing] = useState(false);
   const notify = useNotification();
 
@@ -503,7 +505,7 @@ export default function CallingDashboard() {
           </div>
         </div>
 
-        <Tabs defaultValue="overview" className="space-y-6">
+        <UrlTabs param="tab" defaultValue="overview" className="space-y-6">
           <TabsList>
             <TabsTrigger value="overview">
               <Activity className="h-4 w-4 mr-2" />
@@ -810,7 +812,7 @@ export default function CallingDashboard() {
               </CardContent>
             </Card>
           </TabsContent>
-        </Tabs>
+        </UrlTabs>
       </div>
     </DashboardLayout>
   );

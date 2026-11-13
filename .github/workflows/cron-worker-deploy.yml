@@ -14,7 +14,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  gate:
+    runs-on: ubuntu-24.04
+    name: Test agent gate (may this commit go live?)
+    steps:
+      - name: Ask the test ledger
+        env:
+          GATE_TOKEN: ${{ secrets.TEST_GATE_TOKEN }}
+        run: |
+          r=$(curl -sS -X POST https://test-ledger.echocommunicator.workers.dev/gate \
+            -H "Authorization: Bearer $GATE_TOKEN" -H "content-type: application/json" \
+            -d "{\"repo\":\"${{ github.repository }}\",\"sha\":\"${{ github.sha }}\",\"workflow\":\"${{ github.workflow }}\"}")
+          echo "$r"
+          echo "$r" | grep -q '"allow": true' || { echo "::error::Not allowed to go live: $(echo "$r" | sed -n 's/.*"reason": "\(.*\)".*/\1/p')"; exit 1; }
+
   deploy:
+    needs: gate
     runs-on: ubuntu-latest
     name: Deploy each cron worker
     env:
@@ -27,6 +42,7 @@ jobs:
       BOLNA_API_KEY: ${{ secrets.BOLNA_API_KEY }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
       R2_RECORDINGS_WORKER_URL: ${{ secrets.R2_RECORDINGS_WORKER_URL }}
       R2_RECORDINGS_SECRET: ${{ secrets.R2_RECORDINGS_SECRET }}
       EXOTEL_API_KEY: ${{ secrets.EXOTEL_API_KEY }}
@@ -51,7 +67,10 @@ jobs:
           : "${SUPABASE_SERVICE_ROLE_KEY:?missing}"
           ok=0; fail=0
           while IFS='|' read -r suffix fn body sched; do
-            [ -z "$suffix" ] && continue
+            # Skip blanks and comments — a "#" line is documentation, not a job.
+            # Without this, commenting a job out makes wrangler try to deploy a
+            # worker literally named after the comment text.
+            case "${suffix## }" in ''|'#'*) continue ;; esac
             name="globalcrm-cron-$suffix"
             if [ -n "$body" ]; then
               esc=${body//\"/\\\"}
@@ -89,7 +108,7 @@ jobs:
           if [ ! -f native-jobs.txt ]; then echo "no native-jobs.txt"; exit 0; fi
           ok=0; fail=0
           while IFS='|' read -r name sched secrets; do
-            [ -z "$name" ] && continue
+            case "${name## }" in ''|'#'*) continue ;; esac
             workername="globalcrm-cron-$name"
             cat > .tmp-native.toml <<EOF
           name = "$workername"
