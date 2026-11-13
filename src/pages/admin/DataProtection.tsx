@@ -15,6 +15,7 @@ import {
   ShieldCheck, FileText, CheckCircle2, AlertTriangle, KeyRound, Eye,
   Database, ClipboardList, Download, Lock, Trash2, Clock,
 } from "lucide-react";
+import { UrlTabs } from "@/components/UrlTabs";
 
 type DataRequest = {
   id: string; request_type: string; status: string; requester_identifier: string;
@@ -42,6 +43,7 @@ const fmt = (d?: string | null) =>
 
 export default function DataProtection() {
   const { effectiveOrgId } = useOrgContext();
+  const [piiProtected, setPiiProtected] = useState(false);
   const { isAdmin, loading: roleLoading } = useUserRole();
   const notify = useNotification();
   // The DPDP tables/columns are newer than the committed Supabase types; use a
@@ -60,13 +62,35 @@ export default function DataProtection() {
     title: "", description: "", impact: "", remedial_steps: "", contact_info: "",
   });
   const [savingSettings, setSavingSettings] = useState(false);
+  const [newKey, setNewKey] = useState("");
+  const [savingKey, setSavingKey] = useState(false);
+  const [proof, setProof] = useState<{ kind: string; shown_in_app: string; stored_ciphertext_hex: string; ciphertext_bytes: number; decrypts_correctly: boolean }[] | null>(null);
+  const [loadingProof, setLoadingProof] = useState(false);
   const [submittingBreach, setSubmittingBreach] = useState(false);
 
   useEffect(() => {
     if (!effectiveOrgId) return;
+    supabase.rpc("pii_protected" as never, { _org: effectiveOrgId } as never).then(({ data }) => setPiiProtected(!!data));
     void loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveOrgId]);
+
+  async function saveKey() {
+    setSavingKey(true);
+    const { data, error } = await supabase.functions.invoke("set-encryption-key", { body: { action: "save", encryption_key: newKey } });
+    setSavingKey(false);
+    if (error || data?.error) { notify.error("Could not save the encryption key", data?.error ?? error?.message); return; }
+    notify.success("Encryption key saved", "Existing protected data was re-encrypted under the new key.");
+    setNewKey(""); setProof(null);
+  }
+
+  async function showProof() {
+    setLoadingProof(true);
+    const { data, error } = await sb.rpc("get_pii_encryption_proof");
+    setLoadingProof(false);
+    if (error) { notify.error("Could not load the live proof", error.message); return; }
+    setProof(data ?? []);
+  }
 
   async function loadAll() {
     if (!effectiveOrgId) return;
@@ -194,7 +218,7 @@ export default function DataProtection() {
           <Stat icon={<AlertTriangle className="h-4 w-4" />} label="Breaches" value={stats.breaches} danger={stats.breaches > 0} />
         </div>
 
-        <Tabs defaultValue="requests">
+        <UrlTabs param="tab" defaultValue="requests">
           <TabsList className="flex-wrap h-auto">
             <TabsTrigger value="requests"><ClipboardList className="h-4 w-4 mr-1" />Data Requests</TabsTrigger>
             <TabsTrigger value="consent"><FileText className="h-4 w-4 mr-1" />Consent</TabsTrigger>
@@ -354,6 +378,12 @@ export default function DataProtection() {
                 <div className="flex items-center gap-2 text-emerald-700">
                   <CheckCircle2 className="h-5 w-5" /><span className="font-medium">Encryption key configured (held in Supabase Vault)</span>
                 </div>
+                {piiProtected && (
+                  <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+                    <p className="font-medium">Full PII protection is on for this organisation</p>
+                    <p className="mt-1">Phone numbers and emails are stored only in encrypted form. The readable columns, call logs and exports hold masked values, so callers never receive a real number. The server decrypts a number only to place a call or send an email, and admins can reveal a contact's details, which is logged below.</p>
+                  </div>
+                )}
                 <ul className="text-sm text-muted-foreground space-y-2 list-disc pl-5">
                   <li>Contact email and phone are encrypted at rest with AES-256; the key lives in the vault, never in code or logs.</li>
                   <li>Decryption runs only through an authorized server function, and <span className="font-medium text-foreground">every access is written to the audit log</span>.</li>
@@ -361,6 +391,37 @@ export default function DataProtection() {
                 </ul>
               </CardContent>
             </Card>
+            {piiProtected && (
+              <>
+                <Card>
+                  <CardHeader><CardTitle className="flex items-center gap-2"><KeyRound className="h-5 w-5" />PII Encryption Key</CardTitle>
+                    <CardDescription>AES-256 key that protects personal data, as required by the DPDP Act 2023. Bring your own key (BYOK) — your organisation controls it, not In-Sync.</CardDescription></CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="flex items-center gap-2"><Badge className="bg-emerald-600 hover:bg-emerald-600">Configured</Badge><span className="text-sm text-muted-foreground">An encryption key is set.</span></div>
+                    <div className="space-y-1 max-w-xl"><Label htmlFor="pii-key">Rotate Encryption Key</Label>
+                      <Input id="pii-key" type="password" autoComplete="new-password" placeholder="Enter AES-256 encryption key (min 16 chars)" value={newKey} onChange={(e) => setNewKey(e.target.value)} /></div>
+                    <Button disabled={newKey.length < 16 || savingKey} onClick={saveKey}>{savingKey ? "Re-encrypting…" : "Save Key"}</Button>
+                    <p className="text-xs text-muted-foreground">Saving re-encrypts every protected phone number and email under the new key in a single step, so nothing becomes unreadable. If anything fails, the old key stays in place.</p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader><CardTitle className="flex items-center gap-2"><ShieldCheck className="h-5 w-5" />Live Proof of Encryption</CardTitle></CardHeader>
+                  <CardContent className="space-y-4">
+                    <p className="text-sm text-muted-foreground">Pull up real evidence, straight from the database, that a contact's phone number and email are encrypted at rest — useful to show an auditor directly in the app. The real value is never displayed.</p>
+                    <Button variant="outline" onClick={showProof} disabled={loadingProof}>{loadingProof ? "Loading…" : "Show Live Proof"}</Button>
+                    {proof && proof.map((p) => (
+                      <div key={p.kind} className="rounded-lg border divide-y text-sm">
+                        <div className="p-3 grid grid-cols-1 sm:grid-cols-[240px_1fr] gap-1"><span className="text-muted-foreground">{p.kind}: what you see in the app</span><span className="font-medium">{p.shown_in_app}</span></div>
+                        <div className="p-3 grid grid-cols-1 sm:grid-cols-[240px_1fr] gap-1"><span className="text-muted-foreground">What is actually stored in the database</span><span className="font-mono text-xs break-all">{p.stored_ciphertext_hex}</span></div>
+                        <div className="p-3 grid grid-cols-1 sm:grid-cols-[240px_1fr] gap-1"><span className="text-muted-foreground">Ciphertext size</span><span>{p.ciphertext_bytes} bytes</span></div>
+                        <div className="p-3 grid grid-cols-1 sm:grid-cols-[240px_1fr] gap-1 items-center"><span className="text-muted-foreground">Decrypts back correctly with the current key</span>
+                          {p.decrypts_correctly ? <Badge className="bg-emerald-600 hover:bg-emerald-600 w-fit">✓ Confirmed</Badge> : <Badge variant="destructive" className="w-fit">Failed</Badge>}</div>
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
+              </>
+            )}
           </TabsContent>
 
           {/* ---- SETTINGS ---- */}
@@ -389,7 +450,7 @@ export default function DataProtection() {
               </CardContent>
             </Card>
           </TabsContent>
-        </Tabs>
+        </UrlTabs>
       </div>
     </DashboardLayout>
   );

@@ -17,6 +17,7 @@ import { LoadingState } from "@/components/common/LoadingState";
 import { EmptyState } from "@/components/common/EmptyState";
 import { EntitySelector, SelectedEntity } from "./EntitySelector";
 import { format } from "date-fns";
+import { useUrlState } from "@/hooks/useUrlState";
 
 const documentTypes = [
   { value: "contract", label: "Contract" },
@@ -32,9 +33,9 @@ export function DocumentsTab() {
   const { effectiveOrgId } = useOrgContext();
   const queryClient = useQueryClient();
   const notify = useNotification();
-  const [searchTerm, setSearchTerm] = useState("");
-  const [typeFilter, setTypeFilter] = useState<string>("all");
-  const [entityTypeFilter, setEntityTypeFilter] = useState<string>("all");
+  const [searchTerm, setSearchTerm] = useUrlState("dq", "");
+  const [typeFilter, setTypeFilter] = useUrlState<string>("dtype", "all");
+  const [entityTypeFilter, setEntityTypeFilter] = useUrlState<string>("dentity", "all");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [viewingFile, setViewingFile] = useState<string | null>(null);
 

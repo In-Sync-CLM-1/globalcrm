@@ -12,6 +12,7 @@ import {
   Star, Search, Sparkles 
 } from "lucide-react";
 import { useOrgContext } from "@/hooks/useOrgContext";
+import { useUrlState } from "@/hooks/useUrlState";
 
 const CATEGORY_ICONS = {
   onboarding: Mail,
@@ -31,8 +32,8 @@ interface RuleTemplatesGalleryProps {
 export function RuleTemplatesGallery({ onSelectTemplate }: RuleTemplatesGalleryProps) {
   const { effectiveOrgId } = useOrgContext();
   const queryClient = useQueryClient();
-  const [searchQuery, setSearchQuery] = useState("");
-  const [selectedCategory, setSelectedCategory] = useState("all");
+  const [searchQuery, setSearchQuery] = useUrlState("tq", "");
+  const [selectedCategory, setSelectedCategory] = useUrlState("tcat", "all");
 
   const { data: templates, isLoading } = useQuery({
     queryKey: ['email-automation-rule-templates'],

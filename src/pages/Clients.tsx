@@ -20,6 +20,7 @@ import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { ClientStatusBadge } from "@/components/ClientHub/ClientStatusBadge";
 import { DuplicateClientsManager } from "@/components/ClientHub/DuplicateClientsManager";
 import { format } from "date-fns";
+import { useUrlState } from "@/hooks/useUrlState";
 
 type StatusFilter = 'all' | 'active' | 'inactive' | 'churned';
 
@@ -28,11 +29,11 @@ export default function Clients() {
   const { effectiveOrgId } = useOrgContext();
   const notify = useNotification();
   const queryClient = useQueryClient();
-  const [searchTerm, setSearchTerm] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [companyFilter, setCompanyFilter] = useState("all");
-  const [cityFilter, setCityFilter] = useState("all");
-  const [stateFilter, setStateFilter] = useState("all");
+  const [searchTerm, setSearchTerm] = useUrlState("q", "");
+  const [statusFilter, setStatusFilter] = useUrlState<StatusFilter>("status", "all");
+  const [companyFilter, setCompanyFilter] = useUrlState("company", "all");
+  const [cityFilter, setCityFilter] = useUrlState("city", "all");
+  const [stateFilter, setStateFilter] = useUrlState("state", "all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showDuplicatesManager, setShowDuplicatesManager] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);

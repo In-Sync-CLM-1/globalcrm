@@ -50,7 +50,7 @@ serve(async (req) => {
     // Get call log and verify access
     const { data: callLog } = await supabaseClient
       .from('call_logs')
-      .select('org_id, recording_url, r2_key')
+      .select('org_id, recording_url, r2_key, agent_id')
       .eq('id', callLogId)
       .single();
 
@@ -66,6 +66,18 @@ serve(async (req) => {
         status: 403,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
+    }
+
+    // Orgs with PII protection: only admins can hear someone else's call
+    const { data: orgProtected } = await supabaseClient.rpc('pii_protected', { _org: callLog.org_id });
+    if (orgProtected && callLog.agent_id !== user.id) {
+      const { data: isAdmin } = await supabaseClient.rpc('pii_caller_is_admin', { _org: callLog.org_id });
+      if (!isAdmin) {
+        return new Response(JSON.stringify({ error: 'Access denied' }), {
+          status: 403,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
     }
 
     // If we have an R2 copy, serve from there (free egress, no Exotel re-auth)

@@ -1,4 +1,5 @@
 // Shared helpers for AI calling: working-window gate, Bolna agent provisioning, call dispatch.
+import { AI_CALLING_ENABLED, AI_CALLING_DISABLED_REASON, logBlockedCall } from "./aiCallingSwitch.ts";
 
 export const INSYNC_DEMO_ORG_ID = "61f7f96d-e80c-4d9b-a765-8eb32bd3c70d";
 export const IEDUP_ORG_ID = "6dcf4229-6902-4cd4-9c7f-2d6ed4a6045d";
@@ -316,6 +317,12 @@ export async function triggerBolnaCall(
   bolnaKey: string,
   input: TriggerCallInput,
 ): Promise<{ execution_id?: string; error?: string }> {
+  // Master switch — see _shared/aiCallingSwitch.ts. Refuses before anything
+  // reaches Bolna, so a caller that forgot to check still cannot dial.
+  if (!AI_CALLING_ENABLED) {
+    logBlockedCall("triggerBolnaCall", input.toNumber);
+    return { error: AI_CALLING_DISABLED_REASON };
+  }
   // When name_hi is set, the Bolna agent's prompt is in Devanagari and the
   // synthesizer needs the same script — pass name_hi as first_name so the
   // LLM produces Hindi-pronunciation tokens for ElevenLabs.

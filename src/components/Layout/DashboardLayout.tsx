@@ -49,6 +49,8 @@ import SubscriptionStatusBanner from "@/components/Subscription/SubscriptionStat
 import { useModuleTracking } from "@/hooks/useModuleTracking";
 import { useTopModules } from "@/hooks/useTopModules";
 import { NotificationBell } from "./NotificationBell";
+import { OrgSwitcher } from "@/components/OrgSwitcher";
+import { WorksyncLaunchButton } from "./WorksyncLaunchButton";
 import { QuickDial } from "@/components/Contact/QuickDial";
 import { CallbackReminderAlert } from "@/components/Contact/CallbackReminderAlert";
 import { useAuth } from "@/contexts/AuthProvider";
@@ -57,6 +59,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useTotalUnreadCount } from "@/hooks/useConversations";
 import { IEDUP_ORG_ID } from "@/hooks/useIsIedup";
 import { FERVENT_ORG_ID } from "@/hooks/useIsFervent";
+import { GAMING_ORG_ID } from "@/components/Gaming/gamingStats";
 
 interface DashboardLayoutProps {
   children: ReactNode;
@@ -120,12 +123,18 @@ function DashboardLayout({ children }: DashboardLayoutProps) {
   const userName = userData?.profile
     ? `${userData.profile.first_name} ${userData.profile.last_name}`
     : "";
-  const isPlatformAdmin = userData?.profile?.is_platform_admin || false;
+  // "Platform admin" here means the console-only experience: no organisation
+  // navigation, no notifications, no dialer. Someone who holds the platform
+  // role AND works inside an organisation should get the normal app, with the
+  // console reachable from the organisation switcher.
+  const hasPlatformRole = userData?.profile?.is_platform_admin || false;
+  const isPlatformAdmin = hasPlatformRole && !userData?.profile?.org_id;
   const orgLogo = userData?.org?.logo_url || "";
   const orgName = userData?.org?.name || "";
   const onboardingCompleted = userData?.profile?.onboarding_completed || false;
   const isIedup = userData?.profile?.org_id === IEDUP_ORG_ID;
   const isFervent = userData?.profile?.org_id === FERVENT_ORG_ID;
+  const isGaming = userData?.profile?.org_id === GAMING_ORG_ID;
 
   // Check if user needs onboarding
   useEffect(() => {
@@ -150,7 +159,7 @@ function DashboardLayout({ children }: DashboardLayoutProps) {
   const showOperationsSection = canAccessFeature("campaigns_email") || canAccessFeature("contacts") || 
     canAccessFeature("pipeline_stages") || canAccessFeature("calling");
   
-  const showAdminCommunicationSection = isAdmin && (
+  const showAdminCommunicationSection = isAdmin && canAccessFeature("communications") && (
     canAccessFeature("campaigns_whatsapp") || 
     canAccessFeature("email_settings") ||
     canAccessFeature("calling") || 
@@ -262,6 +271,14 @@ function DashboardLayout({ children }: DashboardLayoutProps) {
                     <span>Pipeline</span>
                   </Link>
                   <Link
+                    to="/templates"
+                    className="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-primary transition-colors"
+                    onClick={() => setSidebarOpen(false)}
+                  >
+                    <FileText size={16} className="shrink-0 text-sidebar-muted" />
+                    <span>Templates</span>
+                  </Link>
+                  <Link
                     to="/users"
                     className="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-primary transition-colors"
                     onClick={() => setSidebarOpen(false)}
@@ -370,6 +387,17 @@ function DashboardLayout({ children }: DashboardLayoutProps) {
                 </Link>
               )}
 
+              {isGaming && (
+                <Link
+                  to="/call-logs"
+                  className="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-primary transition-colors"
+                  onClick={() => setSidebarOpen(false)}
+                >
+                  <PhoneCall size={16} className="shrink-0 text-sidebar-muted" />
+                  <span>Call Logs</span>
+                </Link>
+              )}
+
               {canAccessFeature("contacts") && (
                 <Link
                   to="/contacts"
@@ -378,6 +406,17 @@ function DashboardLayout({ children }: DashboardLayoutProps) {
                 >
                   <Contact size={16} className="shrink-0 text-sidebar-muted" />
                   <span>Contacts</span>
+                </Link>
+              )}
+
+              {isAdmin && canAccessFeature("ai_calling") && (
+                <Link
+                  to="/ai-calling"
+                  className="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-primary transition-colors"
+                  onClick={() => setSidebarOpen(false)}
+                >
+                  <Sparkles size={16} className="shrink-0 text-sidebar-muted" />
+                  <span>AI Calling</span>
                 </Link>
               )}
 
@@ -417,6 +456,7 @@ function DashboardLayout({ children }: DashboardLayoutProps) {
                 </>
               )}
 
+               {canAccessFeature("communications") && (
                <Link
                  to="/chat"
                  className={`flex items-center gap-2 px-2 py-1.5 rounded-md text-sm transition-colors ${
@@ -437,6 +477,7 @@ function DashboardLayout({ children }: DashboardLayoutProps) {
                    </span>
                  )}
                </Link>
+               )}
 
               {canAccessFeature("templates") && (
                 <Link
@@ -662,7 +703,7 @@ function DashboardLayout({ children }: DashboardLayoutProps) {
                     </div>
                   )}
 
-                  {(canAccessFeature("campaigns_whatsapp") || canAccessFeature("email_settings") || canAccessFeature("calling")) && (
+                  {canAccessFeature("communications") && (canAccessFeature("campaigns_whatsapp") || canAccessFeature("email_settings") || canAccessFeature("calling")) && (
                     <Link
                       to="/admin/communication-settings"
                       className="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-primary transition-colors"
@@ -673,7 +714,7 @@ function DashboardLayout({ children }: DashboardLayoutProps) {
                     </Link>
                   )}
 
-                  {userRole === "admin" && (
+                  {userRole === "admin" && canAccessFeature("communications") && (
                     <Link
                       to="/apollo-settings"
                       className="flex items-center gap-2 px-2 py-1.5 pl-6 rounded-md text-sm text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-primary transition-colors"
@@ -725,6 +766,7 @@ function DashboardLayout({ children }: DashboardLayoutProps) {
                 </>
               )}
 
+              <WorksyncLaunchButton onNavigate={() => setSidebarOpen(false)} />
             </nav>
 
             {/* Sign out - Compact */}
@@ -752,9 +794,10 @@ function DashboardLayout({ children }: DashboardLayoutProps) {
 
         {/* Main content - Compact */}
         <main className="flex-1 min-w-0 flex flex-col overflow-hidden">
-          {/* Desktop header with notifications */}
+          {/* Desktop header: organisation switcher on the left, alerts right */}
           {!isPlatformAdmin && (
-            <div className="hidden lg:flex items-center justify-end gap-2 px-4 py-2 border-b border-border bg-card shrink-0">
+            <div className="hidden lg:flex items-center justify-between gap-2 px-4 py-2 border-b border-border bg-card shrink-0">
+              <OrgSwitcher />
               <NotificationBell />
             </div>
           )}
@@ -778,7 +821,7 @@ function DashboardLayout({ children }: DashboardLayoutProps) {
       {!isPlatformAdmin && <CallbackReminderAlert />}
 
        {/* Floating Chat Widget */}
-       {!isPlatformAdmin && <FloatingChatWidget />}
+       {!isPlatformAdmin && canAccessFeature("communications") && <FloatingChatWidget />}
     </div>
   );
 }

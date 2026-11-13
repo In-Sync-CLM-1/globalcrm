@@ -14,9 +14,10 @@ import {
 import { format, eachDayOfInterval, startOfDay, differenceInCalendarDays, startOfWeek } from "date-fns";
 import {
   Users as UsersIcon, PhoneCall, MessageSquare, IndianRupee,
-  AlertTriangle, CheckCircle2, XCircle, Eye, Send,
+  AlertTriangle, CheckCircle2, XCircle, Eye, Send, Mail,
 } from "lucide-react";
 import { useIsIedup, IEDUP_ORG_ID } from "@/hooks/useIsIedup";
+import { useUrlDateRange } from "@/hooks/useUrlDateRange";
 
 const REFRESH_MS = 30_000;
 
@@ -35,12 +36,11 @@ const TEMPLATE_LABELS: Record<string, string> = {
 const templateLabel = (n: string | null) =>
   n ? (TEMPLATE_LABELS[n] || n.replace(/^iedup_cmyuva_/, "").replace(/_v\d+$/, "").replace(/_/g, " ")) : "—";
 
-const C = { sent: "#3b82f6", delivered: "#10b981", opened: "#8b5cf6", placed: "#6366f1", connected: "#10b981" };
+const C = { sent: "#3b82f6", delivered: "#10b981", opened: "#8b5cf6", placed: "#6366f1", connected: "#10b981", emailSent: "#f59e0b", emailFailed: "#ef4444" };
 
 export default function IedupDashboard() {
   const { isLoading: orgLoading } = useIsIedup();
-  const [datePreset, setDatePreset] = useState<DateRangePreset>("this_month");
-  const [dateRange, setDateRange] = useState(() => getDateRangeFromPreset("this_month"));
+  const [datePreset, setDatePreset, dateRange, setDateRange] = useUrlDateRange("this_month");
 
   const fromIso = dateRange.from.toISOString();
   const toIso = dateRange.to.toISOString();
@@ -56,30 +56,16 @@ export default function IedupDashboard() {
     refetchInterval: REFRESH_MS,
   });
 
-  // Calls within the selected period
-  const { data: callRows } = useQuery({
-    queryKey: ["iedup-calls", rangeKey],
+  // Every figure for the selected period is aggregated inside the database (one small response,
+  // no row cap), so busy periods are never under-counted.
+  const { data: stats } = useQuery({
+    queryKey: ["iedup-dashboard-stats", rangeKey],
     queryFn: async () => {
-      const { data } = await supabase
-        .from("call_logs")
-        .select("status, conversation_duration, started_at, created_at")
-        .eq("org_id", IEDUP_ORG_ID).eq("caller_type", "ai")
-        .gte("created_at", fromIso).lte("created_at", toIso);
-      return data || [];
-    },
-    refetchInterval: REFRESH_MS,
-  });
-
-  // WhatsApp within the selected period
-  const { data: waRows } = useQuery({
-    queryKey: ["iedup-wa", rangeKey],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("whatsapp_logs")
-        .select("status, template_name, sent_at, delivered_at, read_at, created_at, cost_charged")
-        .eq("org_id", IEDUP_ORG_ID)
-        .gte("created_at", fromIso).lte("created_at", toIso);
-      return data || [];
+      const { data, error } = await supabase.rpc("get_iedup_dashboard_stats" as any, {
+        p_org: IEDUP_ORG_ID, p_from: fromIso, p_to: toIso,
+      });
+      if (error) throw error;
+      return data as any;
     },
     refetchInterval: REFRESH_MS,
   });
@@ -92,33 +78,33 @@ export default function IedupDashboard() {
 
   // ---- Derived metrics ------------------------------------------------------
   const calls = useMemo(() => {
-    const all = callRows || [];
-    const placed = all.length;
-    const connected = all.filter((r: any) => Number(r.conversation_duration || 0) >= 5).length;
-    const noAnswer = all.filter((r: any) => ["no-answer", "busy", "canceled"].includes(String(r.status))).length;
-    const failed = all.filter((r: any) => ["failed", "error"].includes(String(r.status))).length;
-    const totalSec = all.reduce((a: number, r: any) => a + Number(r.conversation_duration || 0), 0);
-    return { placed, connected, noAnswer, failed, avgSec: placed ? Math.round(totalSec / placed) : 0, costRupees: Math.ceil(totalSec / 60) * 3 };
-  }, [callRows]);
+    const c = stats?.calls || {};
+    const placed = Number(c.placed || 0);
+    const totalSec = Number(c.total_sec || 0);
+    return { placed, connected: Number(c.connected || 0), avgSec: placed ? Math.round(totalSec / placed) : 0, costRupees: Math.ceil(totalSec / 60) * 3 };
+  }, [stats]);
 
   const wa = useMemo(() => {
-    const all = waRows || [];
-    const sent = all.filter((r: any) => ["sent", "delivered", "read"].includes(String(r.status))).length;
-    const delivered = all.filter((r: any) => ["delivered", "read"].includes(String(r.status)) || r.delivered_at).length;
-    const opened = all.filter((r: any) => String(r.status) === "read" || r.read_at).length;
-    const failed = all.filter((r: any) => String(r.status) === "failed").length;
-    const cost = all.reduce((a: number, r: any) => a + Number(r.cost_charged || 0), 0);
-    const openRate = sent ? Math.round((opened / sent) * 100) : 0;
-    const deliveryRate = sent ? Math.round((delivered / sent) * 100) : 0;
-    return { sent, delivered, opened, failed, cost, openRate, deliveryRate };
-  }, [waRows]);
+    const w = stats?.wa || {};
+    const sent = Number(w.sent || 0), delivered = Number(w.delivered || 0), opened = Number(w.opened || 0);
+    return {
+      sent, delivered, opened, failed: Number(w.failed || 0), cost: Number(w.cost || 0),
+      openRate: sent ? Math.round((opened / sent) * 100) : 0,
+      deliveryRate: sent ? Math.round((delivered / sent) * 100) : 0,
+    };
+  }, [stats]);
+
+  const email = useMemo(() => {
+    const e = stats?.email || {};
+    const sent = Number(e.sent || 0), failed = Number(e.failed || 0);
+    return { sent, failed, cost: Number(e.cost || 0), total: sent + failed };
+  }, [stats]);
 
   // Per-bucket time series (daily, or weekly for long ranges)
   const trend = useMemo(() => {
     const spanDays = Math.max(1, differenceInCalendarDays(dateRange.to, dateRange.from) + 1);
     const weekly = spanDays > 45;
     const keyOf = (d: Date) => (weekly ? startOfWeek(d, { weekStartsOn: 1 }) : startOfDay(d));
-    const labelFmt = weekly ? "MMM d" : "MMM d";
 
     const buckets = new Map<string, any>();
     const days = eachDayOfInterval({ start: dateRange.from, end: dateRange.to });
@@ -127,49 +113,39 @@ export default function IedupDashboard() {
       : days;
     for (const d of seeds) {
       const k = keyOf(d).toISOString();
-      buckets.set(k, { key: k, label: format(new Date(k), labelFmt), sent: 0, delivered: 0, opened: 0, placed: 0, connected: 0 });
+      buckets.set(k, { key: k, label: format(new Date(k), "MMM d"), sent: 0, delivered: 0, opened: 0, placed: 0, connected: 0, emailSent: 0, emailFailed: 0 });
     }
-    const bump = (iso: string | null, fn: (b: any) => void) => {
-      if (!iso) return;
-      const k = keyOf(new Date(iso)).toISOString();
-      const b = buckets.get(k);
-      if (b) fn(b);
-    };
-    (waRows || []).forEach((r: any) => {
-      const status = String(r.status);
-      if (["sent", "delivered", "read"].includes(status)) bump(r.sent_at || r.created_at, (b) => b.sent++);
-      if (["delivered", "read"].includes(status) || r.delivered_at) bump(r.delivered_at || r.sent_at || r.created_at, (b) => b.delivered++);
-      if (status === "read" || r.read_at) bump(r.read_at || r.sent_at || r.created_at, (b) => b.opened++);
-    });
-    (callRows || []).forEach((r: any) => {
-      bump(r.started_at || r.created_at, (b) => b.placed++);
-      if (Number(r.conversation_duration || 0) >= 5) bump(r.started_at || r.created_at, (b) => b.connected++);
+    (stats?.daily || []).forEach((r: any) => {
+      const b = buckets.get(keyOf(new Date(`${r.day}T00:00:00`)).toISOString());
+      if (!b) return;
+      b.sent += r.wa_sent || 0; b.delivered += r.wa_delivered || 0; b.opened += r.wa_opened || 0;
+      b.placed += r.placed || 0; b.connected += r.connected || 0;
+      b.emailSent += r.email_sent || 0; b.emailFailed += r.email_failed || 0;
     });
     return Array.from(buckets.values());
-  }, [waRows, callRows, dateRange]);
+  }, [stats, dateRange]);
 
   const byTemplate = useMemo(() => {
     const m = new Map<string, { name: string; sent: number; opened: number }>();
-    (waRows || []).forEach((r: any) => {
-      const label = templateLabel(r.template_name);
+    (stats?.by_template || []).forEach((r: any) => {
+      const label = templateLabel(r.template);
       if (!m.has(label)) m.set(label, { name: label, sent: 0, opened: 0 });
       const e = m.get(label)!;
-      if (["sent", "delivered", "read"].includes(String(r.status))) e.sent++;
-      if (String(r.status) === "read" || r.read_at) e.opened++;
+      e.sent += r.sent || 0; e.opened += r.opened || 0;
     });
     return Array.from(m.values()).sort((a, b) => b.sent - a.sent);
-  }, [waRows]);
+  }, [stats]);
 
   useEffect(() => {}, []); // refetch handled by react-query intervals
 
   if (orgLoading) return <DashboardLayout><div className="p-6">Loading…</div></DashboardLayout>;
 
-  const hasWaData = (waRows || []).length > 0;
-  const hasCallData = (callRows || []).length > 0;
+  const hasWaData = wa.sent + wa.failed > 0;
+  const hasCallData = calls.placed > 0;
 
   return (
     <DashboardLayout>
-      <div className="flex flex-col gap-3 lg:h-full lg:overflow-hidden">
+      <div className="flex flex-col gap-3">
         {/* Header */}
         <div className="flex shrink-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -185,92 +161,94 @@ export default function IedupDashboard() {
         </div>
 
         {/* Headline KPIs */}
-        <div className="grid shrink-0 grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        <div className="grid shrink-0 grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
           <KpiCard icon={<UsersIcon size={16} />} label="Beneficiaries" value={dataCounts?.total ?? "—"} tone="slate" />
           <KpiCard icon={<Send size={16} />} label="Messages sent" value={wa.sent} tone="blue" />
           <KpiCard icon={<CheckCircle2 size={16} />} label="Delivery rate" value={`${wa.deliveryRate}%`} tone="emerald" />
           <KpiCard icon={<Eye size={16} />} label="Open rate" value={`${wa.openRate}%`} tone="violet" />
           <KpiCard icon={<PhoneCall size={16} />} label="Calls placed" value={calls.placed} tone="indigo" />
+          <KpiCard icon={<Mail size={16} />} label="Emails sent" value={email.sent} tone="amber" />
         </div>
 
-        {/* Primary trend + funnel */}
-        <div className="grid grid-cols-1 gap-3 lg:min-h-0 lg:flex-1 lg:grid-cols-3">
-          <ChartCard className="lg:col-span-2" title="WhatsApp outreach over time" subtitle="Sent → Delivered → Opened">
-            {hasWaData ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={trend} margin={{ top: 6, right: 8, left: -18, bottom: 0 }}>
-                  <defs>
-                    {(["sent", "delivered", "opened"] as const).map((k) => (
-                      <linearGradient key={k} id={`g-${k}`} x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor={C[k]} stopOpacity={0.35} />
-                        <stop offset="95%" stopColor={C[k]} stopOpacity={0} />
-                      </linearGradient>
-                    ))}
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.5} />
-                  <XAxis dataKey="label" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={16} />
-                  <YAxis tick={{ fontSize: 10 }} tickLine={false} axisLine={false} allowDecimals={false} />
-                  <Tooltip content={<ChartTooltip />} />
-                  <Legend wrapperStyle={{ fontSize: 11, paddingTop: 6 }} formatter={(v) => <span className="capitalize text-muted-foreground">{v}</span>} />
-                  <Area type="monotone" dataKey="sent" stroke={C.sent} strokeWidth={2} fill="url(#g-sent)" />
-                  <Area type="monotone" dataKey="delivered" stroke={C.delivered} strokeWidth={2} fill="url(#g-delivered)" />
-                  <Area type="monotone" dataKey="opened" stroke={C.opened} strokeWidth={2} fill="url(#g-opened)" />
-                </AreaChart>
-              </ResponsiveContainer>
-            ) : <Empty>No WhatsApp activity in this period</Empty>}
-          </ChartCard>
+        {/* One integrated trend: every channel, same timeline */}
+        <ChartCard title="Outreach over time" subtitle="WhatsApp · Calls · Email — all channels on one timeline" height="tall">
+          {hasWaData || hasCallData || email.total > 0 ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={trend} margin={{ top: 6, right: 8, left: -18, bottom: 0 }}>
+                <defs>
+                  {(["sent", "delivered", "opened", "placed", "connected", "emailSent", "emailFailed"] as const).map((k) => (
+                    <linearGradient key={k} id={`g-${k}`} x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={C[k]} stopOpacity={0.3} />
+                      <stop offset="95%" stopColor={C[k]} stopOpacity={0} />
+                    </linearGradient>
+                  ))}
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.5} />
+                <XAxis dataKey="label" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={16} />
+                <YAxis tick={{ fontSize: 10 }} tickLine={false} axisLine={false} allowDecimals={false} />
+                <Tooltip content={<ChartTooltip />} />
+                <Legend wrapperStyle={{ fontSize: 11, paddingTop: 6 }} formatter={(v) => <span className="capitalize text-muted-foreground">{v}</span>} />
+                <Area type="monotone" dataKey="sent" name="WA sent" stroke={C.sent} strokeWidth={2} fill="url(#g-sent)" />
+                <Area type="monotone" dataKey="delivered" name="WA delivered" stroke={C.delivered} strokeWidth={1.5} fill="url(#g-delivered)" />
+                <Area type="monotone" dataKey="opened" name="WA opened" stroke={C.opened} strokeWidth={1.5} fill="url(#g-opened)" />
+                <Area type="monotone" dataKey="placed" name="Calls placed" stroke={C.placed} strokeWidth={2} fill="url(#g-placed)" />
+                <Area type="monotone" dataKey="connected" name="Calls connected" stroke={C.connected} strokeWidth={1.5} fill="url(#g-connected)" />
+                <Area type="monotone" dataKey="emailSent" name="Email sent" stroke={C.emailSent} strokeWidth={2} fill="url(#g-emailSent)" />
+                <Area type="monotone" dataKey="emailFailed" name="Email failed" stroke={C.emailFailed} strokeWidth={1.5} fill="url(#g-emailFailed)" />
+              </AreaChart>
+            </ResponsiveContainer>
+          ) : <Empty>No outreach activity in this period</Empty>}
+        </ChartCard>
 
-          <ChartCard title="Delivery funnel" subtitle="This period">
+        {/* Per-channel detail */}
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+          <ChartCard title="WhatsApp delivery funnel" subtitle="This period">
             <div className="flex h-full flex-col justify-center gap-3 px-1">
               <FunnelBar label="Sent" value={wa.sent} total={wa.sent} color={C.sent} />
               <FunnelBar label="Delivered" value={wa.delivered} total={wa.sent} color={C.delivered} />
               <FunnelBar label="Opened" value={wa.opened} total={wa.sent} color={C.opened} />
             </div>
           </ChartCard>
-        </div>
 
-        {/* Calls trend + by-template */}
-        <div className="grid grid-cols-1 gap-3 lg:min-h-0 lg:flex-1 lg:grid-cols-2">
-          <ChartCard title="Calls over time" subtitle="Placed vs Connected">
-            {hasCallData ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={trend} margin={{ top: 6, right: 8, left: -18, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="g-placed" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor={C.placed} stopOpacity={0.35} /><stop offset="95%" stopColor={C.placed} stopOpacity={0} />
-                    </linearGradient>
-                    <linearGradient id="g-connected" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor={C.connected} stopOpacity={0.35} /><stop offset="95%" stopColor={C.connected} stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.5} />
-                  <XAxis dataKey="label" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={16} />
-                  <YAxis tick={{ fontSize: 10 }} tickLine={false} axisLine={false} allowDecimals={false} />
-                  <Tooltip content={<ChartTooltip />} />
-                  <Legend wrapperStyle={{ fontSize: 11, paddingTop: 6 }} formatter={(v) => <span className="capitalize text-muted-foreground">{v}</span>} />
-                  <Area type="monotone" dataKey="placed" stroke={C.placed} strokeWidth={2} fill="url(#g-placed)" />
-                  <Area type="monotone" dataKey="connected" stroke={C.connected} strokeWidth={2} fill="url(#g-connected)" />
-                </AreaChart>
-              </ResponsiveContainer>
-            ) : <Empty>No calls in this period</Empty>}
+          <ChartCard title="Calls" subtitle="This period">
+            <div className="flex h-full flex-col justify-center gap-3 px-1">
+              <FunnelBar label="Placed" value={calls.placed} total={calls.placed} color={C.placed} />
+              <FunnelBar label="Connected" value={calls.connected} total={calls.placed} color={C.connected} />
+              <div className="mt-1 flex items-baseline justify-between text-xs">
+                <span className="font-medium text-muted-foreground">Cost</span>
+                <span className="font-medium">₹{calls.costRupees.toFixed(2)}</span>
+              </div>
+            </div>
           </ChartCard>
 
-          <ChartCard title="By message type" subtitle="Sent vs Opened">
-            {byTemplate.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={byTemplate} layout="vertical" margin={{ top: 4, right: 12, left: 8, bottom: 0 }}>
-                  <CartesianGrid horizontal={false} strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.5} />
-                  <XAxis type="number" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} allowDecimals={false} />
-                  <YAxis type="category" dataKey="name" width={96} tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
-                  <Tooltip content={<ChartTooltip />} />
-                  <Legend wrapperStyle={{ fontSize: 11, paddingTop: 6 }} formatter={(v) => <span className="capitalize text-muted-foreground">{v}</span>} />
-                  <Bar dataKey="sent" fill={C.sent} radius={[0, 4, 4, 0]} barSize={9} />
-                  <Bar dataKey="opened" fill={C.opened} radius={[0, 4, 4, 0]} barSize={9} />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : <Empty>No WhatsApp activity in this period</Empty>}
+          <ChartCard title="Email status" subtitle="This period">
+            <div className="flex h-full flex-col justify-center gap-3 px-1">
+              <FunnelBar label="Sent" value={email.sent} total={email.total} color={C.emailSent} />
+              <FunnelBar label="Failed" value={email.failed} total={email.total} color={C.emailFailed} />
+              <div className="mt-1 flex items-baseline justify-between text-xs">
+                <span className="font-medium text-muted-foreground">Cost</span>
+                <span className="font-medium">₹{email.cost.toFixed(2)}</span>
+              </div>
+            </div>
           </ChartCard>
         </div>
+
+        {/* By message type */}
+        <ChartCard title="WhatsApp by message type" subtitle="Sent vs Opened">
+          {byTemplate.length > 0 ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={byTemplate} layout="vertical" margin={{ top: 4, right: 12, left: 8, bottom: 0 }}>
+                <CartesianGrid horizontal={false} strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.5} />
+                <XAxis type="number" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} allowDecimals={false} />
+                <YAxis type="category" dataKey="name" width={96} tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
+                <Tooltip content={<ChartTooltip />} />
+                <Legend wrapperStyle={{ fontSize: 11, paddingTop: 6 }} formatter={(v) => <span className="capitalize text-muted-foreground">{v}</span>} />
+                <Bar dataKey="sent" fill={C.sent} radius={[0, 4, 4, 0]} barSize={9} />
+                <Bar dataKey="opened" fill={C.opened} radius={[0, 4, 4, 0]} barSize={9} />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : <Empty>No WhatsApp activity in this period</Empty>}
+        </ChartCard>
 
       </div>
     </DashboardLayout>
@@ -301,14 +279,14 @@ function KpiCard({ icon, label, value, tone }: { icon: React.ReactNode; label: s
   );
 }
 
-function ChartCard({ title, subtitle, children, className = "" }: { title: string; subtitle?: string; children: React.ReactNode; className?: string }) {
+function ChartCard({ title, subtitle, children, className = "", height }: { title: string; subtitle?: string; children: React.ReactNode; className?: string; height?: "tall" }) {
   return (
-    <Card className={`flex flex-col p-4 ${className}`}>
+    <Card className={`flex shrink-0 flex-col p-4 ${className}`}>
       <div className="mb-2 shrink-0">
         <h3 className="text-sm font-semibold">{title}</h3>
         {subtitle && <p className="text-[11px] text-muted-foreground">{subtitle}</p>}
       </div>
-      <div className="h-[180px] lg:h-auto lg:min-h-0 lg:flex-1">{children}</div>
+      <div className={height === "tall" ? "h-[320px] lg:h-[400px]" : "h-[220px]"}>{children}</div>
     </Card>
   );
 }
@@ -356,7 +334,7 @@ const ChartTooltip = ({ active, payload, label }: any) => {
       {payload.map((p: any) => (
         <div key={p.dataKey} className="flex items-center gap-2">
           <span className="h-2 w-2 rounded-full" style={{ backgroundColor: p.color || p.fill }} />
-          <span className="capitalize text-muted-foreground">{p.dataKey}:</span>
+          <span className="capitalize text-muted-foreground">{p.name || p.dataKey}:</span>
           <span className="font-medium">{p.value}</span>
         </div>
       ))}

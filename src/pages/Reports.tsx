@@ -15,6 +15,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import CampaignAnalyticsTab from "@/components/Reports/Analytics/CampaignAnalyticsTab";
 import AIInsightsTab from "@/components/Reports/Insights/AIInsightsTab";
 import CallingDashboardTab from "@/components/Reports/CallingDashboard/CallingDashboardTab";
+import { UrlTabs } from "@/components/UrlTabs";
+import { useUrlState } from "@/hooks/useUrlState";
+import { useGamingAccess } from "@/hooks/useGamingAccess";
 
 interface SalesReport {
   user_name: string;
@@ -34,9 +37,10 @@ interface PipelineReport {
 
 export default function Reports() {
   const navigate = useNavigate();
-  const [dateRange, setDateRange] = useState<"week" | "month" | "quarter">("month");
-  const [activeTab, setActiveTab] = useState<string>("campaigns");
+  const [dateRange, setDateRange] = useUrlState<"week" | "month" | "quarter">("range", "month");
+  const [activeTab, setActiveTab] = useUrlState<string>("tab", "campaigns");
   const notify = useNotification();
+  const gaming = useGamingAccess();
   const { effectiveOrgId } = useOrgContext();
 
   // Load and persist tab from localStorage and URL hash
@@ -189,7 +193,7 @@ export default function Reports() {
                 <p className="text-muted-foreground">Individual sales metrics and pipeline analysis</p>
               </div>
               
-              <Tabs defaultValue="performance" className="space-y-4">
+              <UrlTabs param="ptab" defaultValue="performance" className="space-y-4">
                 <TabsList>
                   <TabsTrigger value="performance">Team Performance</TabsTrigger>
                   <TabsTrigger value="pipeline">Pipeline Analysis</TabsTrigger>
@@ -203,15 +207,17 @@ export default function Reports() {
                   <CardTitle>Sales Performance by User</CardTitle>
                   <CardDescription>Individual performance metrics</CardDescription>
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => exportToCSV(salesReports, "sales_performance")}
-                  disabled={salesLoading}
-                >
-                  <Download className="mr-2 h-4 w-4" />
-                  Export CSV
-                </Button>
+                {gaming.canExport && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => exportToCSV(salesReports, "sales_performance")}
+                    disabled={salesLoading}
+                  >
+                    <Download className="mr-2 h-4 w-4" />
+                    Export CSV
+                  </Button>
+                )}
               </CardHeader>
               <CardContent>
                 {salesLoading ? (
@@ -263,15 +269,17 @@ export default function Reports() {
                   <CardTitle>Pipeline Stage Analysis</CardTitle>
                   <CardDescription>Performance metrics by stage</CardDescription>
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => exportToCSV(pipelineReports, "pipeline_analysis")}
-                  disabled={pipelineLoading}
-                >
-                  <Download className="mr-2 h-4 w-4" />
-                  Export CSV
-                </Button>
+                {gaming.canExport && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => exportToCSV(pipelineReports, "pipeline_analysis")}
+                    disabled={pipelineLoading}
+                  >
+                    <Download className="mr-2 h-4 w-4" />
+                    Export CSV
+                  </Button>
+                )}
               </CardHeader>
               <CardContent>
                 {pipelineLoading ? (
@@ -386,7 +394,7 @@ export default function Reports() {
               </Card>
             </div>
           </TabsContent>
-        </Tabs>
+        </UrlTabs>
       </div>
     </TabsContent>
   </Tabs>

@@ -16,6 +16,7 @@ import { useNotification } from "@/hooks/useNotification";
 import { LoadingState } from "@/components/common/LoadingState";
 import { EmptyState } from "@/components/common/EmptyState";
 import { format } from "date-fns";
+import { useUrlState } from "@/hooks/useUrlState";
 
 const entityTypes = [
   { value: "prospect", label: "Prospect" },
@@ -50,8 +51,8 @@ export function ExternalEntitiesTab() {
   const { effectiveOrgId } = useOrgContext();
   const queryClient = useQueryClient();
   const notify = useNotification();
-  const [searchTerm, setSearchTerm] = useState("");
-  const [typeFilter, setTypeFilter] = useState<string>("all");
+  const [searchTerm, setSearchTerm] = useUrlState("eq", "");
+  const [typeFilter, setTypeFilter] = useUrlState<string>("etype", "all");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [formData, setFormData] = useState<ExternalEntityFormData>(initialFormData);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -148,6 +149,8 @@ export function ExternalEntitiesTab() {
 
   const convertToContactMutation = useMutation({
     mutationFn: async (entity: any) => {
+      const { data: { user } } = await supabase.auth.getUser();
+
       // Create a contact (lead) from external entity
       const { data: contact, error: contactError } = await supabase
         .from("contacts")
@@ -160,6 +163,7 @@ export function ExternalEntitiesTab() {
           address: entity.address,
           source: "External Entity",
           notes: entity.notes,
+          created_by: user?.id ?? null,
         })
         .select()
         .single();

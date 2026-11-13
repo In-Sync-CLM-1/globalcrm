@@ -77,7 +77,8 @@ export function PostCallDispositionDialog({
       const { data, error } = await supabase
         .from("call_dispositions")
         .select("id, name, category")
-        .eq("is_active", true);
+        .eq("is_active", true)
+        .order("created_at");
       if (error) throw error;
       return data || [];
     },
@@ -90,7 +91,8 @@ export function PostCallDispositionDialog({
       const { data, error } = await supabase
         .from("call_sub_dispositions")
         .select("*")
-        .eq("is_active", true);
+        .eq("is_active", true)
+        .order("created_at");
       if (error) throw error;
       return data || [];
     },

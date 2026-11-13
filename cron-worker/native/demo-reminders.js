@@ -137,7 +137,7 @@ async function fireReminderCall(env, m, c) {
         user_data: {
           contact_id: m.contact_id, call_log_id: callLogId, purpose: "reminder",
           first_name: c.first_name || "there", last_summary: lastSummary, demo_time: istTime(m.scheduled_at),
-          product: String(c.product || "").toLowerCase() === "vendorverification" ? "Vendor Verification" : "WorkSync",
+          product: String(c.product || "").toLowerCase() === "vendorsync" ? "Vendorsync" : "WorkSync",
         },
       }),
     });

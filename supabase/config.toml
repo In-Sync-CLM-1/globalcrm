@@ -33,6 +33,15 @@ verify_jwt = true
 [functions.sync-exotel-whatsapp-templates]
 verify_jwt = true
 
+[functions.delete-exotel-whatsapp-template]
+verify_jwt = true
+
+[functions.iedup-ramp-notify]
+verify_jwt = false
+
+[functions.iedup-fire-action]
+verify_jwt = true
+
 [functions.send-whatsapp-message]
 verify_jwt = true
 
@@ -166,17 +175,37 @@ verify_jwt = false
 [functions.send-post-call-message]
 verify_jwt = false
 
-# External payment webhook — Razorpay POSTs with no Supabase JWT, so the
-# gateway was 401ing every event before it reached the function's own
-# x-razorpay-signature check. Public like every other external webhook
-# (whatsapp-webhook, exotel-webhook, resend); the signature check is what
-# actually authenticates the caller.
-[functions.razorpay-webhook]
-verify_jwt = false
-
 
 # Suggests likely spellings for beneficiary names damaged by a bad CSV encoding.
 # Called from the authenticated IEDUP upload preview, so the gateway JWT check
 # stays on — suggestions are only ever shown to a signed-in human for approval.
 [functions.suggest-name-fix]
 verify_jwt = true
+
+# AI calling on the in-house LiveKit stack. The bridge, the LiveKit agent and the cron Worker present
+# AI_CALL_INTERNAL_TOKEN (checked inside the function), so the gateway must not require a user JWT.
+[functions.ai-call-context]
+verify_jwt = false
+
+[functions.ai-call-webhook]
+verify_jwt = false
+
+[functions.ai-call-advance]
+verify_jwt = false
+
+[functions.ai-call-enqueue]
+verify_jwt = false
+
+[functions.set-encryption-key]
+verify_jwt = false
+
+[functions.iedup-ramp-interest-send]
+verify_jwt = false
+
+[functions.iedup-ramp-interest-wa]
+verify_jwt = false
+
+# External payment webhook: Razorpay POSTs with no Supabase JWT, so the gateway check must be off.
+# The x-razorpay-signature check in the function (RAZORPAY_WEBHOOK_SECRET) is what authenticates the caller.
+[functions.razorpay-webhook]
+verify_jwt = false

@@ -12,16 +12,15 @@ import {
   WindowSlot,
 } from "../_shared/aiCalling.ts";
 import { orgServiceGate } from "../_shared/billingGate.ts";
+import {
+  WA_SENDER_BY_ORG,
+  sendWhatsAppTemplate as sharedSendWhatsAppTemplate,
+  triggerCall,
+} from "../_shared/pipelineActions.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
-
-// Per-org Exotel WhatsApp sender (WABA from-number). Mirrors the IEDUP override
-// used by the post-call WA auto-send in ai-bolna-webhook.
-const WA_SENDER_BY_ORG: Record<string, string> = {
-  "6dcf4229-6902-4cd4-9c7f-2d6ed4a6045d": "+918178798930", // IEDUP
 };
 
 // How many of each action to fire per org per tick.
@@ -30,20 +29,7 @@ const WA_SENDER_BY_ORG: Record<string, string> = {
 // Spend is still hard-capped by the per-message floor-guarded reserve, never by this.
 const MAX_WA_PER_TICK = 150;
 const WA_SEND_CONCURRENCY = 12;
-// Exotel WhatsApp price per message (₹). Utility = ₹0.20, Marketing = ₹1.00.
 const WHATSAPP_UTILITY_COST_PER_MSG = 0.20;
-const WHATSAPP_MARKETING_COST_PER_MSG = 1.00;
-// Templates Meta classifies as MARKETING (charged at the marketing rate).
-// Everything else is UTILITY-only by policy. iedup_ramp_round1_selection_v1 is
-// the one deliberate exception — a rich RAMP Round 1 selection broadcast Meta
-// approved as MARKETING (2026-07-26); its plain UTILITY twin is
-// iedup_round1_selected_v1, wired separately and billed at the utility rate.
-const MARKETING_TEMPLATES = new Set<string>(["iedup_ramp_round1_selection_v1"]);
-function waCostFor(templateName: string | null): number {
-  return templateName && MARKETING_TEMPLATES.has(templateName)
-    ? WHATSAPP_MARKETING_COST_PER_MSG
-    : WHATSAPP_UTILITY_COST_PER_MSG;
-}
 
 // Run an async fn over items with bounded concurrency, preserving result order.
 async function mapPool<T, R>(items: T[], concurrency: number, fn: (item: T) => Promise<R>): Promise<R[]> {
@@ -231,7 +217,12 @@ async function processOrg(supabase: any, orgId: string): Promise<unknown> {
         await markQueue(supabase, r.id, "skipped", "missing phone/template");
         return "skipped";
       }
-      const res = await sendWhatsAppTemplate(supabase, { orgId, sender, contact, phone, row: r, floor });
+      const res = await sharedSendWhatsAppTemplate(supabase, {
+        orgId, sender, contact, phone,
+        templateName: r.template_name || "",
+        languageCode: r.language_code,
+        floor,
+      });
       if (res.ok) { await markQueue(supabase, r.id, "sent", null); return "sent"; }
       if (res.insufficientFunds) {
         // Wallet at floor — release the claim so it retries after the client tops up.
@@ -362,313 +353,6 @@ async function processOrg(supabase: any, orgId: string): Promise<unknown> {
     org_id: orgId, acted: true, window: win.reason,
     wa_sent: waSent, wa_failed: waFailed, calls_triggered: callsTriggered, skipped,
   };
-}
-
-// ---- WhatsApp send ----------------------------------------------------------
-// Logs to whatsapp_logs (the billing/usage table the IEDUP dashboard reads and
-// the DLR webhook advances) and charges the wallet — same path as the post-call
-// sender. Recipient is digits-with-country-code, no '+', as that path proved out.
-async function sendWhatsAppTemplate(
-  supabase: any,
-  args: { orgId: string; sender: string; contact: any; phone: string; row: QueueRow; floor: number | null },
-): Promise<{ ok: boolean; error?: string; insufficientFunds?: boolean }> {
-  const { orgId, sender, contact, phone, row, floor } = args;
-  const apiKey = Deno.env.get("EXOTEL_API_KEY");
-  const apiToken = Deno.env.get("EXOTEL_API_TOKEN");
-  const sid = Deno.env.get("EXOTEL_SID");
-  const subdomain = Deno.env.get("EXOTEL_SUBDOMAIN") || "api.exotel.com";
-  if (!apiKey || !apiToken || !sid || !sender) {
-    return { ok: false, error: "Exotel WA creds/sender not configured" };
-  }
-
-  const cleanTo = phone.replace(/^\+/, "").replace(/^0+/, "");
-
-  // Only some templates carry a {{1}} name variable; the rest are generic.
-  // Match by prefix so the name is filled across versions (v1, v2, …).
-  const name = contact.name_hi || contact.first_name || "प्रतिभागी";
-  const NAME_PARAM_PREFIXES = ["iedup_cmyuva_training_helpdesk", "iedup_cmyuva_assessment_link"];
-  const params: string[] = NAME_PARAM_PREFIXES.some((p) => (row.template_name || "").startsWith(p)) ? [name] : [];
-  const components = params.length > 0
-    ? [{ type: "body", parameters: params.map((p) => ({ type: "text", text: p })) }]
-    : [];
-
-  // Pre-insert a queued row so the dashboard sees the attempt immediately.
-  const { data: waLogRow } = await supabase
-    .from("whatsapp_logs")
-    .insert({
-      org_id: orgId,
-      contact_id: row.contact_id,
-      to_number: cleanTo,
-      template_name: row.template_name,
-      language_code: row.language_code || "hi",
-      body_params: params,
-      status: "queued",
-    })
-    .select("id")
-    .single();
-  const waLogId = waLogRow?.id as string | undefined;
-
-  // Charge BEFORE sending: atomically reserve the message cost from the wallet,
-  // refusing if it would breach the org's floor. Refunded below if the send fails.
-  const cost = waCostFor(row.template_name);
-  const category = MARKETING_TEMPLATES.has(row.template_name || "") ? "marketing" : "utility";
-  if (waLogId) {
-    const reserved = await reserveFunds(supabase, {
-      orgId, serviceType: "whatsapp", referenceId: waLogId, quantity: 1, cost, floor,
-      description: `WhatsApp ${category} template ${row.template_name} → ${cleanTo}`,
-    });
-    if (!reserved.ok) {
-      await supabase.from("whatsapp_logs")
-        .update({ status: "failed", failed_at: new Date().toISOString(), error_text: "insufficient wallet balance (floor)" })
-        .eq("id", waLogId);
-      return { ok: false, error: "insufficient wallet balance", insufficientFunds: true };
-    }
-  }
-
-  const callbackUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/whatsapp-webhook`;
-  const payload = {
-    custom_data: row.contact_id,
-    status_callback: callbackUrl,
-    whatsapp: {
-      messages: [{
-        from: sender,
-        to: cleanTo,
-        content: {
-          type: "template",
-          template: {
-            name: row.template_name,
-            language: { code: row.language_code || "hi" },
-            ...(components.length > 0 ? { components } : {}),
-          },
-        },
-      }],
-    },
-  };
-
-  const auth = btoa(`${apiKey}:${apiToken}`);
-  let respText = "";
-  let httpOk = false;
-  try {
-    const resp = await fetch(`https://${subdomain}/v2/accounts/${sid}/messages`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Basic ${auth}` },
-      body: JSON.stringify(payload),
-    });
-    respText = await resp.text();
-    httpOk = resp.ok;
-  } catch (e: any) {
-    if (waLogId) {
-      await refundFunds(supabase, { orgId, serviceType: "whatsapp", referenceId: waLogId, cost, description: `Refund — WhatsApp send failed (${row.template_name})` });
-      await supabase.from("whatsapp_logs")
-        .update({ status: "failed", failed_at: new Date().toISOString(), error_text: `fetch failed: ${String(e?.message || e)}` })
-        .eq("id", waLogId);
-    }
-    return { ok: false, error: `fetch failed: ${e?.message || e}` };
-  }
-
-  let exoSid: string | null = null;
-  try {
-    const j = JSON.parse(respText);
-    const msgResp = j?.response?.whatsapp?.messages?.[0];
-    exoSid = msgResp?.data?.sid || null;
-    httpOk = httpOk && (msgResp?.code === 200 || msgResp?.code === 202);
-  } catch { /* keep raw */ }
-
-  if (httpOk && waLogId) {
-    // Already charged at reserve time — just mark the log sent.
-    await supabase.from("whatsapp_logs")
-      .update({
-        status: "sent",
-        sent_at: new Date().toISOString(),
-        exotel_msg_sid: exoSid,
-        cost_charged: cost,
-      })
-      .eq("id", waLogId);
-    return { ok: true };
-  }
-
-  if (waLogId) {
-    await refundFunds(supabase, { orgId, serviceType: "whatsapp", referenceId: waLogId, cost, description: `Refund — WhatsApp send failed (${row.template_name})` });
-    await supabase.from("whatsapp_logs")
-      .update({ status: "failed", failed_at: new Date().toISOString(), error_text: respText.slice(0, 500) })
-      .eq("id", waLogId);
-  }
-  return { ok: false, error: respText.slice(0, 300) };
-}
-
-// Reserve (charge) funds BEFORE sending. Atomically debits the wallet via the
-// reserve_wallet_funds RPC, which only succeeds if balance − cost stays at/above
-// the org's floor (passing null floor = unlimited, for internal/demo orgs). On
-// success, writes the deduction ledger + usage row so the dashboard reflects the
-// charge. Idempotent on (service_type, reference_id): a retry for the same message
-// is a no-op success. Returns { ok:false } when the wallet can't fund it.
-async function reserveFunds(
-  supabase: any,
-  args: { orgId: string; serviceType: "call" | "whatsapp" | "email"; referenceId: string; quantity: number; cost: number; floor: number | null; description: string },
-): Promise<{ ok: boolean; balanceAfter?: number }> {
-  try {
-    const { data: existing } = await supabase
-      .from("service_usage_logs")
-      .select("id")
-      .eq("org_id", args.orgId)
-      .eq("service_type", args.serviceType)
-      .eq("reference_id", args.referenceId)
-      .maybeSingle();
-    if (existing) return { ok: true }; // already charged
-
-    // Atomic, floor-guarded debit. NULL floor → effectively unlimited (internal orgs).
-    const effectiveFloor = args.floor ?? -1e15;
-    const { data: newBal, error } = await supabase.rpc("reserve_wallet_funds", {
-      p_org: args.orgId, p_amount: args.cost, p_floor: effectiveFloor,
-    });
-    if (error) { console.error("reserve_wallet_funds error:", error.message); return { ok: false }; }
-    if (newBal === null || newBal === undefined) return { ok: false }; // insufficient — would breach floor
-
-    const balanceAfter = Number(newBal);
-    const balanceBefore = balanceAfter + args.cost;
-    const { data: walletTxn } = await supabase
-      .from("wallet_transactions")
-      .insert({
-        org_id: args.orgId,
-        transaction_type: `deduction_${args.serviceType}`,
-        amount: -args.cost,
-        balance_before: balanceBefore,
-        balance_after: balanceAfter,
-        reference_id: args.referenceId,
-        reference_type: args.serviceType,
-        quantity: args.quantity,
-        unit_cost: args.cost / Math.max(1, args.quantity),
-        description: args.description,
-      })
-      .select("id")
-      .single();
-    await supabase.from("service_usage_logs")
-      .insert({ org_id: args.orgId, service_type: args.serviceType, reference_id: args.referenceId, quantity: args.quantity, cost: args.cost, wallet_deducted: true, wallet_transaction_id: walletTxn?.id });
-    return { ok: true, balanceAfter };
-  } catch (e) {
-    console.error("reserveFunds exception:", String(e));
-    return { ok: false };
-  }
-}
-
-// Credit a previously-reserved charge back when the send fails. Atomic increment
-// via credit_wallet_funds, plus a refund ledger row, and removes the usage row so
-// the reserve becomes re-chargeable (and so reporting doesn't count a sent message
-// that never went out). Idempotent: if the usage row is already gone, does nothing.
-async function refundFunds(
-  supabase: any,
-  args: { orgId: string; serviceType: "call" | "whatsapp" | "email"; referenceId: string; cost: number; description: string },
-): Promise<void> {
-  try {
-    const { data: usage } = await supabase
-      .from("service_usage_logs")
-      .select("id")
-      .eq("org_id", args.orgId)
-      .eq("service_type", args.serviceType)
-      .eq("reference_id", args.referenceId)
-      .maybeSingle();
-    if (!usage) return; // nothing was charged (or already refunded)
-
-    const { data: newBal, error } = await supabase.rpc("credit_wallet_funds", {
-      p_org: args.orgId, p_amount: args.cost,
-    });
-    if (error) { console.error("credit_wallet_funds error:", error.message); return; }
-    const balanceAfter = Number(newBal ?? 0);
-    const balanceBefore = balanceAfter - args.cost;
-    await supabase.from("wallet_transactions").insert({
-      org_id: args.orgId,
-      transaction_type: `refund_${args.serviceType}`,
-      amount: args.cost,
-      balance_before: balanceBefore,
-      balance_after: balanceAfter,
-      reference_id: args.referenceId,
-      reference_type: args.serviceType,
-      quantity: 1,
-      unit_cost: args.cost,
-      description: args.description,
-    });
-    await supabase.from("service_usage_logs").delete().eq("id", usage.id);
-  } catch (e) {
-    console.error("refundFunds exception:", String(e));
-  }
-}
-
-// ---- AI call trigger --------------------------------------------------------
-async function triggerCall(
-  supabase: any,
-  args: {
-    orgId: string; bolnaKey: string; agentId: string; scriptId: string | null;
-    fromNumber?: string | null; dispositionId: string | null; contact: any; phone: string;
-  },
-): Promise<{ ok: boolean; error?: string }> {
-  const { orgId, bolnaKey, agentId, scriptId, dispositionId, contact, phone } = args;
-  const fromNumber = args.fromNumber || "+911169323462";
-
-  const { data: inserted, error: insErr } = await supabase
-    .from("call_logs")
-    .insert({
-      org_id: orgId,
-      caller_type: "ai",
-      ai_script_id: scriptId,
-      contact_id: contact.id,
-      status: "queued",
-      call_type: "outbound",
-      direction: "outbound",
-      from_number: fromNumber,
-      to_number: phone,
-      created_at: new Date().toISOString(),
-    })
-    .select("id")
-    .single();
-  if (insErr || !inserted) return { ok: false, error: `call_logs insert: ${insErr?.message || "unknown"}` };
-
-  // Call Bolna directly (not the shared helper) so we can also pass the demo
-  // preferences captured on the form — the agent confirms them instead of asking.
-  const firstNameForBolna = contact.name_hi || contact.first_name || "";
-  const userData: Record<string, unknown> = {
-    contact_id: contact.id,
-    call_log_id: inserted.id,
-    first_name: firstNameForBolna,
-    last_name: contact.last_name ?? "",
-    company: contact.company ?? "your company",
-    job_title: contact.job_title ?? "",
-    team_size: contact.team_size ?? "",
-    preferred_date: contact.preferred_demo_date ?? "",
-    preferred_time: contact.preferred_demo_time ?? "",
-  };
-  let result: { execution_id?: string; error?: string };
-  try {
-    const br = await fetch("https://api.bolna.ai/call", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${bolnaKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ agent_id: agentId, recipient_phone_number: phone, from_phone_number: fromNumber, user_data: userData }),
-    });
-    const bt = await br.text();
-    let bj: Record<string, unknown> = {};
-    try { bj = JSON.parse(bt); } catch { /* keep raw */ }
-    const execId = (bj.execution_id as string) || (bj.run_id as string);
-    result = br.ok && execId ? { execution_id: execId } : { error: `${br.status}: ${bt.slice(0, 200)}` };
-  } catch (e) {
-    result = { error: String(e) };
-  }
-
-  if (result.error) {
-    await supabase.from("call_logs").update({ status: "error", notes: result.error }).eq("id", inserted.id);
-    return { ok: false, error: result.error };
-  }
-
-  // "Call made" the moment the call is placed.
-  await supabase
-    .from("call_logs")
-    .update({
-      status: "in_progress",
-      bolna_execution_id: result.execution_id,
-      started_at: new Date().toISOString(),
-      ...(dispositionId ? { disposition_id: dispositionId } : {}),
-    })
-    .eq("id", inserted.id);
-
-  return { ok: true };
 }
 
 async function markQueue(supabase: any, id: string, status: string, error: string | null) {

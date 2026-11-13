@@ -549,12 +549,11 @@ async function autoDisposition(
     if (!connected) {
       outcomeKey = (args.status === "no-answer" || args.status === "busy") ? "no_answer" : "not_connected";
     } else {
-      const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY");
       const { data: c } = await supabase.from("contacts").select("product").eq("id", args.contactId).maybeSingle();
-      const productLabel = String(c?.product || "").toLowerCase() === "vendorverification" ? "Vendor Verification" : "WorkSync";
+      const productLabel = String(c?.product || "").toLowerCase() === "vendorsync" ? "Vendorsync" : "WorkSync";
       const { data: keyRows } = await supabase.from("ai_outcome_disposition_map").select("outcome_key").eq("org_id", args.orgId);
       const keys = (keyRows || []).map((r: any) => r.outcome_key);
-      const cls = anthropicKey ? await classifyCall(anthropicKey, { transcript, productLabel, outcomeKeys: keys }) : null;
+      const cls = await classifyCall({ transcript, productLabel, outcomeKeys: keys });
       if (cls) {
         outcomeKey = cls.outcome_key;
         demoDate = cls.demo_date;
@@ -608,9 +607,7 @@ async function handleReminderResult(
     const connected = (args.durationSec ?? 0) > 0 && /(?:^|\n)\s*user\s*:/i.test(transcript);
     if (!connected) return; // no answer — nothing to report
 
-    const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY");
-    const cls = anthropicKey ? await classifyJoinIntent(anthropicKey, transcript)
-      : { intent: "unclear" as const, reschedule_text: null, reschedule_date: null, reschedule_time: null };
+    const cls = await classifyJoinIntent(transcript);
     const intent = cls.intent;
 
     const { data: contact } = await supabase.from("contacts").select("first_name, product").eq("id", args.contactId).maybeSingle();
@@ -621,7 +618,7 @@ async function handleReminderResult(
       .order("scheduled_at", { ascending: false }).limit(1).maybeSingle();
 
     const prospect = contact?.first_name || "The prospect";
-    const productLabel = String(contact?.product || "").toLowerCase() === "vendorverification" ? "Vendor Verification" : "WorkSync";
+    const productLabel = String(contact?.product || "").toLowerCase() === "vendorsync" ? "Vendorsync" : "WorkSync";
     const fmt = (iso: string) => new Date(iso).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Kolkata" });
 
     // RSVP + auto-reschedule

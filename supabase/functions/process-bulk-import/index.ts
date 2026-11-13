@@ -2,12 +2,244 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { getSupabaseClient } from '../_shared/supabaseClient.ts';
 import { logEdgeError, logStep, logBatchProgress, logValidationError } from '../_shared/errorLogger.ts';
 import { normalizeEmployeeSize, parseTurnoverUsdMillion, formatTurnoverUsdMillion } from '../_shared/ferventFieldNormalization.ts';
+import { cleanContactChunk, type CleanupVocab } from '../_shared/contactImportCleanup.ts';
 import { buildFerventMapping, applyFerventMapping, isSalvageable, buildContactsMapping, applyContactsMapping, isContactsSalvageable, type FerventMapping } from '../_shared/ferventSmartMapping.ts';
 
 const OPERATION_TIMEOUT = 20 * 60 * 1000; // 20 minutes
 const MAX_RETRIES = 3;
 const BATCH_SIZE = 500; // Reduced for better memory management
 const PROGRESS_UPDATE_INTERVAL = 5000; // 5 seconds - more frequent updates
+
+// A single invocation can't safely run to the end of a large file — the
+// platform kills long-running functions and a job used to be silently left
+// stuck at "processing" forever (no failure path for that case). Applies to
+// every import_type, not just Fervent: rows get staged once (cheap, no
+// dedup/AI work) into import_staging, then a claim loop below processes
+// bounded slices and self-continues once a time budget is crossed, resuming
+// off the job's own processed_rows/counts — no separate resume-cursor param
+// needed, and cost per chain link no longer depends on total file size.
+const IMPORT_TIME_BUDGET_MS = 60 * 1000;
+const STAGE_INSERT_CHUNK = 1000; // plain bulk insert into import_staging, no DB round-trips per row
+
+async function continueImport(importJobId: string): Promise<void> {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL');
+  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  if (!supabaseUrl || !serviceKey) {
+    console.error('[CONTINUE] missing SUPABASE_URL/SERVICE_ROLE_KEY, cannot self re-invoke; stale-job sweep will pick this up');
+    return;
+  }
+  const kick = fetch(`${supabaseUrl}/functions/v1/process-bulk-import`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${serviceKey}` },
+    body: JSON.stringify({ importJobId }),
+  }).catch((e) => console.error('[CONTINUE] self re-invoke kick failed:', String(e)));
+  // Keep the fetch alive past this invocation's HTTP response (a bare
+  // fire-and-forget gets cut off once we return) — same pattern as
+  // web-lead-intake's dispatcher kick.
+  try { (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime?.waitUntil?.(kick); }
+  catch { /* EdgeRuntime unavailable — stale-job sweep picks it up within a few minutes */ }
+}
+
+// Bulk-insert already-built target records into the staging table. Cheap:
+// no dedup/AI/DB-lookup work happens here, just a plain insert, so this is
+// safe to run for the whole file in one invocation even for very large files.
+async function stageRecords(supabase: any, importJobId: string, records: Array<{ row_index: number; record: any }>): Promise<void> {
+  for (let i = 0; i < records.length; i += STAGE_INSERT_CHUNK) {
+    const chunk = records.slice(i, i + STAGE_INSERT_CHUNK).map((r) => ({
+      import_job_id: importJobId,
+      row_index: r.row_index,
+      record: r.record,
+    }));
+    const { error } = await supabase.from('import_staging').insert(chunk);
+    if (error) throw new Error(`Failed to stage rows: ${error.message}`);
+  }
+}
+
+async function stageSkippedRows(supabase: any, importJobId: string, skipped: Array<{ row_index: number; values: any; reason: string }>): Promise<void> {
+  for (let i = 0; i < skipped.length; i += STAGE_INSERT_CHUNK) {
+    const chunk = skipped.slice(i, i + STAGE_INSERT_CHUNK).map((r) => ({
+      import_job_id: importJobId,
+      row_index: r.row_index,
+      values: r.values,
+      reason: r.reason,
+    }));
+    const { error } = await supabase.from('import_skipped_rows').insert(chunk);
+    if (error) console.error('[STAGE] Failed to record skipped rows (non-fatal):', error.message);
+  }
+}
+
+// Resolves an uploaded "Assigned to" value to an active user of the org:
+// login email, full name, or first name when exactly one user has it.
+// Case and spacing are ignored.
+async function loadAssigneeLookup(supabase: any, orgId: string): Promise<(v: string) => string | null> {
+  const { data } = await supabase
+    .from('profiles')
+    .select('id, first_name, last_name, email, is_active')
+    .eq('org_id', orgId);
+  const key = (v: string) => String(v ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const exact = new Map<string, string>();
+  const byFirst = new Map<string, string[]>();
+  for (const u of data || []) {
+    if (u.is_active === false) continue;
+    if (u.email) exact.set(key(u.email), u.id);
+    const full = key(`${u.first_name ?? ''} ${u.last_name ?? ''}`);
+    if (full) exact.set(full, u.id);
+    const first = key(u.first_name ?? '');
+    if (first) byFirst.set(first, [...(byFirst.get(first) ?? []), u.id]);
+  }
+  return (v: string) => {
+    const k = key(v);
+    if (!k) return null;
+    if (exact.has(k)) return exact.get(k)!;
+    const f = byFirst.get(k);
+    return f && f.length === 1 ? f[0] : null;
+  };
+}
+
+type BatchProcessor = (supabase: any, importJob: ImportJob, batch: any[], batchNumber: number) => Promise<{
+  inserted: number; updated: number; skipped: number; dbErrors?: number;
+  duplicateSamples?: Array<{ matched_on: string; value: string }>;
+  dbErrorSamples?: Array<{ row?: number; field?: string; message: string; sample?: string }>;
+}>;
+
+// Shared claim-and-process chain used by every import_type once its rows are
+// staged. Claims a bounded slice of unprocessed staging rows, runs them
+// through the existing per-type batch processor (processBatch, which already
+// dispatches to processFerventBatch for fervent_repository), deletes claimed
+// rows once processed, and self-continues on a time budget instead of trying
+// to finish the whole staged set in one invocation.
+async function claimAndProcessStagedBatches(
+  supabase: any,
+  importJob: ImportJob,
+  startTime: number,
+  processBatchFn: BatchProcessor,
+): Promise<{ done: boolean }> {
+  let successCount = importJob.success_count || 0;
+  let updatedCount = importJob.updated_count || 0;
+  let duplicateCount = importJob.duplicate_count || 0;
+  let errorCount = importJob.error_count || 0;
+  let processedSoFar = importJob.processed_rows || 0;
+  const totalRows = importJob.total_rows || 0;
+  let batchNumber = 0;
+
+  while (true) {
+    const { data: claimed, error: claimErr } = await supabase
+      .from('import_staging')
+      .select('id, row_index, record')
+      .eq('import_job_id', importJob.id)
+      .eq('processed', false)
+      .order('row_index', { ascending: true })
+      .limit(BATCH_SIZE);
+
+    if (claimErr) throw new Error(`Failed to claim staged rows: ${claimErr.message}`);
+    if (!claimed || claimed.length === 0) break;
+
+    batchNumber++;
+    const batchRecords = claimed.map((c: any) => c.record);
+    const result = await processBatchFn(supabase, importJob, batchRecords, batchNumber);
+    successCount += result.inserted;
+    updatedCount += result.updated;
+    duplicateCount += result.skipped;
+    if (result.dbErrors) errorCount += result.dbErrors;
+
+    const { error: delErr } = await supabase.from('import_staging').delete().in('id', claimed.map((c: any) => c.id));
+    if (delErr) console.error('[CLAIM] Failed to mark staged rows processed (non-fatal, may reprocess on resume):', delErr.message);
+
+    processedSoFar += claimed.length;
+    await updateJobProgress(supabase, importJob.id, {
+      total_rows: totalRows,
+      processed_rows: processedSoFar,
+      success_count: successCount,
+      updated_count: updatedCount,
+      duplicate_count: duplicateCount,
+      error_count: errorCount,
+      current_stage: 'inserting',
+      stage_details: { message: `Imported ${(successCount + updatedCount).toLocaleString()} of ${totalRows.toLocaleString()}…` },
+    });
+
+    if (Date.now() - startTime > IMPORT_TIME_BUDGET_MS) {
+      console.log(`[CONTINUE] time budget hit at ${processedSoFar}/${totalRows} rows, handing off to a fresh invocation`);
+      await continueImport(importJob.id);
+      return { done: false };
+    }
+  }
+
+  return { done: true };
+}
+
+// Shared finalize step for every import_type. Always reads counts off the
+// (freshly refetched) job row rather than accumulating them in memory, since
+// a large job may have finished on a different invocation than the one that
+// started it.
+async function finalizeImportJob(supabase: any, importJob: ImportJob, startTime: number): Promise<Response> {
+  await updateJobStage(supabase, importJob.id, 'finalizing', { message: 'Finalizing…' });
+
+  // Re-read the job: callers may pass a row fetched before the claim loop
+  // wrote the counts (the first invocation does), which reported every
+  // upload as 0 imported.
+  const { data: freshJob } = await supabase.from('import_jobs').select('*').eq('id', importJob.id).single();
+  if (freshJob) importJob = freshJob as ImportJob;
+
+  const totalRows = importJob.total_rows || 0;
+  const successCount = importJob.success_count || 0;
+  const updatedCount = importJob.updated_count || 0;
+  const duplicateCount = importJob.duplicate_count || 0;
+  const errorCount = importJob.error_count || 0;
+
+  let skippedEmailSent = false;
+  if (importJob.import_type === 'fervent_repository') {
+    const { data: skippedRowsData } = await supabase
+      .from('import_skipped_rows')
+      .select('values, reason')
+      .eq('import_job_id', importJob.id)
+      .order('row_index', { ascending: true });
+    const skippedRows = (skippedRowsData || []).map((r: any) => ({ values: r.values as string[], reason: r.reason as string }));
+    const rawHeaders = importJob.stage_details?.raw_headers as string[] | undefined;
+    if (skippedRows.length > 0 && rawHeaders) {
+      const emailResult = await emailSkippedRows(supabase, importJob, rawHeaders, skippedRows, {
+        imported: successCount + updatedCount,
+        total: totalRows + skippedRows.length,
+      });
+      skippedEmailSent = emailResult.sent;
+    }
+  }
+
+  await supabase.from('import_skipped_rows').delete().eq('import_job_id', importJob.id);
+
+  const { error: deleteError } = await supabase.storage.from('import-files').remove([importJob.file_path]);
+  if (deleteError) console.error('[CLEANUP] Failed to delete import file:', deleteError);
+
+  const duration = Math.round((Date.now() - startTime) / 1000);
+  await supabase.from('import_jobs').update({
+    status: 'completed',
+    current_stage: 'completed',
+    total_rows: totalRows,
+    processed_rows: totalRows,
+    success_count: successCount,
+    updated_count: updatedCount,
+    duplicate_count: duplicateCount,
+    error_count: errorCount,
+    completed_at: new Date().toISOString(),
+    file_cleaned_up: !deleteError,
+    file_cleanup_at: new Date().toISOString(),
+    stage_details: {
+      message: `Import completed in ${duration}s`,
+      total_success: successCount,
+      total_updated: updatedCount,
+      total_errors: errorCount,
+      total_duplicates: duplicateCount,
+      skipped_email_sent: skippedEmailSent,
+    },
+  }).eq('id', importJob.id);
+
+  if (importJob.import_type === 'fervent_repository') {
+    const { error: cacheErr } = await supabase.rpc('refresh_fervent_dashboard_cache', { p_org_id: importJob.org_id });
+    if (cacheErr) console.error('[CACHE] dashboard cache refresh failed (non-fatal):', cacheErr.message);
+  }
+
+  console.log('[SUCCESS] Import completed in', duration, 'seconds');
+  return jsonResponse({ success: true, processed: successCount, updated: updatedCount, duplicates: duplicateCount, errors: errorCount, total: totalRows }, 200);
+}
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -22,6 +254,15 @@ interface ImportJob {
   file_path: string;
   import_type: string;
   target_id: string | null;
+  source_type?: string | null;
+  current_stage?: string | null;
+  processed_rows?: number | null;
+  total_rows?: number | null;
+  success_count?: number | null;
+  updated_count?: number | null;
+  duplicate_count?: number | null;
+  error_count?: number | null;
+  stage_details?: any;
 }
 
 interface ContactRecord {
@@ -128,6 +369,16 @@ serve(async (req) => {
 
     console.log('[JOB] Found:', importJob.file_name, 'Type:', importJob.import_type);
 
+    // Resuming a chained continuation: every row was already staged on the
+    // first leg (see stageRecords/claimAndProcessStagedBatches), so skip
+    // straight to the claim loop instead of re-downloading and re-parsing
+    // the file — cost of a resumed leg no longer depends on file size at all.
+    if (importJob.current_stage === 'inserting') {
+      const { done } = await claimAndProcessStagedBatches(supabase, importJob, startTime, processBatch);
+      if (!done) return jsonResponse({ success: true, continued: true }, 200);
+      return await finalizeImportJob(supabase, importJob, startTime);
+    }
+
     // Download file from storage
     await updateJobStage(supabase, importJobId, 'downloading', {
       message: 'Downloading file...'
@@ -152,9 +403,10 @@ serve(async (req) => {
       throw new Error('CSV file is empty');
     }
 
-    // Fervent's row cap is enforced inside runFerventSmartImport against
-    // FERVENT_MAX_RECORDS (10,000, matching what the upload dialog states).
-    // A stale 5,000 check used to run here and rejected valid files.
+    // No practical row-count ceiling: the stage-then-claim pipeline chains
+    // across invocations regardless of file size (see ABSOLUTE_MAX_RECORDS
+    // and claimAndProcessStagedBatches). A stale 5,000 check used to run
+    // here and rejected valid files.
 
     // Parse headers
     await updateJobStage(supabase, importJobId, 'validating', {
@@ -191,12 +443,30 @@ serve(async (req) => {
     // file arrived in gets mapped onto the contacts schema the same way Fervent's
     // repository uploads are mapped.
     let contactsMapping: FerventMapping | undefined;
+    let cleanupVocab: CleanupVocab | undefined;
+    let assigneeLookup: ((v: string) => string | null) | undefined;
+    let defaultStageId: string | null = null;
     if (importJob.import_type === 'contacts') {
       const { data: org } = await supabase
         .from('organizations')
-        .select('smart_import_enabled')
+        .select('smart_import_enabled, settings')
         .eq('id', importJob.org_id)
         .single();
+
+      // Opt-in per org (organizations.settings.import_cleanup): clean names/phones/
+      // emails, and map the file's stage/source/game/city text onto the org's own
+      // lists with Groq (Cerebras backup), at staging time.
+      const cleanupCfg = org?.settings?.import_cleanup;
+      if (cleanupCfg?.enabled) {
+        assigneeLookup = await loadAssigneeLookup(supabase, importJob.org_id);
+        const { data: stg } = await supabase.from('pipeline_stages').select('id, name, stage_order').eq('org_id', importJob.org_id).eq('is_active', true).order('stage_order');
+        defaultStageId = stg?.[0]?.id ?? null; // leads without a stage column start in the first stage
+        cleanupVocab = {
+          stages: stg || [],
+          sources: Array.isArray(cleanupCfg.sources) ? cleanupCfg.sources : [],
+          products: Array.isArray(cleanupCfg.products) ? cleanupCfg.products : [],
+        };
+      }
 
       if (org?.smart_import_enabled) {
         const sampleRows: string[][] = [];
@@ -205,7 +475,7 @@ serve(async (req) => {
           if (l) sampleRows.push(parseCSVLine(l));
         }
         await updateJobStage(supabase, importJobId, 'validating', { message: 'Understanding your file…', file_size_kb: fileSizeKB });
-        const mapResult = await buildContactsMapping(rawHeadersOriginal, sampleRows);
+        const mapResult = await buildContactsMapping(rawHeadersOriginal, sampleRows, !!cleanupVocab);
         if (mapResult.reject || !mapResult.mapping) {
           throw new Error(mapResult.rejectReason || 'The file could not be understood as a contact list.');
         }
@@ -252,23 +522,30 @@ serve(async (req) => {
       }
     }
 
-    // Parse and process data
+    // Stage every row (cheap: parsing + shaping only, no DB writes to the
+    // target table yet) so the claim-and-process phase below can chain
+    // across invocations regardless of file size.
     await updateJobStage(supabase, importJobId, 'parsing', {
       message: 'Parsing CSV data...',
       headers_found: headers.length,
-      total_batches: Math.ceil((lines.length - 1) / BATCH_SIZE)
     });
 
     const totalRows = lines.length - 1;
-    let processedRows = 0;
-    let successCount = 0;
+    if (totalRows > ABSOLUTE_MAX_RECORDS) {
+      throw new Error(`File contains ${totalRows.toLocaleString()} rows, which is above the ${ABSOLUTE_MAX_RECORDS.toLocaleString()} sanity ceiling. Please split it into smaller files.`);
+    }
     let errorCount = 0;
-    let duplicateCount = 0;
-    let updatedCount = 0;
-    const duplicateSamples: Array<{ matched_on: string; value: string }> = [];
     const errors: Array<{row?: number; field?: string; message: string; sample?: string}> = [];
-    let batch: any[] = [];
-    let batchNumber = 0;
+    const staged: Array<{ row_index: number; record: any }> = [];
+    // Cleans a chunk (when the org opted in) and writes it to import_staging.
+    const stageChunk = async (chunk: Array<{ row_index: number; record: any }>) => {
+      if (cleanupVocab && importJob.import_type === 'contacts') {
+        const st = await cleanContactChunk(chunk, cleanupVocab, { groq: Deno.env.get('GROQ_API_KEY') || undefined, cerebras: Deno.env.get('CEREBRAS_API_KEY') || undefined });
+        console.log('[IMPORT-CLEANUP]', JSON.stringify(st));
+      }
+      await stageRecords(supabase, importJobId!, chunk);
+    };
+    const skippedForEmail: Array<{ row_index: number; values: any; reason: string }> = [];
     let lastProgressUpdate = Date.now();
 
     let currentRowNumber = 1;
@@ -277,30 +554,18 @@ serve(async (req) => {
       const line = lines[i].trim();
       if (!line) continue;
 
-      // Progress update every 100 rows during parsing
-      if (i % 100 === 0) {
+      if (i % 500 === 0) {
         const now = Date.now();
         if (now - lastProgressUpdate > PROGRESS_UPDATE_INTERVAL) {
-          await updateJobProgress(supabase, importJobId, {
-            total_rows: totalRows,
-            processed_rows: processedRows,
-            success_count: successCount,
-            error_count: errorCount,
-            current_stage: 'parsing',
-            stage_details: {
-              message: `Parsing row ${i} of ${totalRows}...`,
-              rows_parsed: i
-            }
-          });
+          await updateJobStage(supabase, importJobId, 'parsing', { message: `Parsing row ${i} of ${totalRows}...`, rows_parsed: i });
           lastProgressUpdate = now;
-          console.log(`[PROGRESS] Parsed ${i}/${totalRows} rows`);
         }
       }
 
       try {
         const values = parseCSVLine(line);
         const row: any = contactsMapping
-          ? applyContactsMapping(values, contactsMapping)
+          ? applyContactsMapping(values, contactsMapping, !!cleanupVocab)
           : {};
         if (!contactsMapping) {
           headers.forEach((header, idx) => {
@@ -309,6 +574,7 @@ serve(async (req) => {
         } else if (!isContactsSalvageable(row).ok) {
           errorCount++;
           errors.push({ row: currentRowNumber, message: 'No name, email, or phone number to identify this record' });
+          skippedForEmail.push({ row_index: currentRowNumber, values, reason: 'No name, email, or phone number to identify this record' });
           continue;
         }
 
@@ -330,7 +596,12 @@ serve(async (req) => {
             nature_of_business: row.nature_of_business || null,
             status: row.status || 'new',
             source: row.source || 'bulk_import',
-            pipeline_stage_id: stageNameToId[String(row.action || row.pipeline_stage || row.stage || '').trim().toLowerCase()] || null,
+            pipeline_stage_id: stageNameToId[String(row.action || row.pipeline_stage || row.stage || '').trim().toLowerCase()] || defaultStageId,
+            ...(cleanupVocab ? {
+              first_name: row.first_name || (row.last_name ? row.first_name : 'Unknown'),
+              product: row.product || null,
+              _raw: { stage: row.action || row.pipeline_stage || row.stage || '', source: row.source || '', product: row.product || '' },
+            } : {}),
             address: row.address || null,
             city: row.city || row.location_city || null,
             state: row.state || row.location_state || null,
@@ -348,6 +619,14 @@ serve(async (req) => {
             notes: row.notes || null,
             created_by: importJob.user_id
           };
+          // Assigned to (orgs with import_cleanup on): a CRM user's name or login
+          // email. Unrecognised values leave the lead unassigned and are noted.
+          const assignee = cleanupVocab ? String(row.assigned_to ?? '').trim() : '';
+          if (assignee) {
+            const userId = assigneeLookup?.(assignee) ?? null;
+            if (userId) record.assigned_to = userId;
+            else record.notes = [record.notes, `Assigned to in file not recognised: ${assignee}`].filter(Boolean).join(' | ');
+          }
         } else if (importJob.import_type === 'email_recipients') {
           record = {
             campaign_id: importJob.target_id,
@@ -366,161 +645,35 @@ serve(async (req) => {
           };
         }
 
-        batch.push(record);
-        processedRows++;
-
-        // Check if too many errors - stop processing
-        if (errors.length >= 500) {
-          console.error('[ERROR] Too many errors (>500), stopping import');
-          await supabase.from('import_jobs').update({
-            status: 'failed',
-            error_count: errors.length,
-            error_details: errors,
-            completed_at: new Date().toISOString(),
-            stage_details: {
-              error: 'Import stopped: Too many errors',
-              max_errors_reached: true
-            }
-          }).eq('id', importJobId);
-          
-          return new Response(JSON.stringify({
-            success: false,
-            error: 'Too many errors (>500)',
-            errorCount: errors.length
-          }), {
-            status: 200,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-          });
-        }
-
-        // Process batch when full
-        if (batch.length >= BATCH_SIZE) {
-          batchNumber++;
-          console.log(`[BATCH] Processing batch ${batchNumber} with ${batch.length} records`);
-          
-          const result = await processBatch(supabase, importJob, batch, batchNumber);
-          successCount += result.inserted;
-          updatedCount += result.updated;
-
-          if (result.skipped > 0) {
-            console.log(`[BATCH] Skipped ${result.skipped} duplicate records in batch ${batchNumber}`);
-            duplicateCount += result.skipped;
-            if (result.duplicateSamples) {
-              duplicateSamples.push(...result.duplicateSamples.slice(0, Math.max(0, 200 - duplicateSamples.length)));
-            }
-          }
-          if (result.dbErrors) {
-            errorCount += result.dbErrors;
-            if (result.dbErrorSamples) errors.push(...result.dbErrorSamples);
-          }
-
-          batch = [];
-
-          // Update progress after each batch WITH error details for real-time visibility
-          await updateJobProgress(supabase, importJobId, {
-            total_rows: totalRows,
-            processed_rows: processedRows,
-            success_count: successCount,
-            error_count: errorCount,
-            duplicate_count: duplicateCount,
-            updated_count: updatedCount,
-            error_details: errors.slice(-100), // Save last 100 errors in real-time
-            current_stage: 'inserting',
-            stage_details: {
-              message: `Inserted batch ${batchNumber} (${successCount} records inserted, ${updatedCount} updated, ${errorCount} errors, ${duplicateCount} duplicates skipped)`,
-              batches_completed: batchNumber,
-              total_batches: Math.ceil(totalRows / BATCH_SIZE)
-            }
-          });
-          lastProgressUpdate = Date.now();
+        staged.push({ row_index: currentRowNumber, record });
+        if (staged.length >= STAGE_INSERT_CHUNK) {
+          await stageChunk(staged.splice(0, staged.length));
         }
 
       } catch (error) {
         errorCount++;
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        errors.push({
-          row: currentRowNumber,
-          field: 'parsing',
-          message: errorMessage,
-          sample: line.substring(0, 100)
-        });
+        errors.push({ row: currentRowNumber, field: 'parsing', message: errorMessage, sample: line.substring(0, 100) });
         console.log(`[ERROR] Row ${currentRowNumber}: ${errorMessage}`);
       }
     }
+    if (staged.length > 0) await stageChunk(staged);
+    if (skippedForEmail.length > 0) await stageSkippedRows(supabase, importJobId, skippedForEmail);
 
-    // Process remaining batch
-    if (batch.length > 0) {
-      batchNumber++;
-      const result = await processBatch(supabase, importJob, batch, batchNumber);
-      successCount += result.inserted;
-      updatedCount += result.updated;
-      if (result.skipped > 0) {
-        duplicateCount += result.skipped;
-        if (result.duplicateSamples) {
-          duplicateSamples.push(...result.duplicateSamples.slice(0, Math.max(0, 200 - duplicateSamples.length)));
-        }
-      }
-      if (result.dbErrors) {
-        errorCount += result.dbErrors;
-        if (result.dbErrorSamples) errors.push(...result.dbErrorSamples);
-      }
-    }
-
-    console.log('[COMPLETE] Processed:', successCount, 'success,', errorCount, 'errors');
-
-    // Finalize import
-    await updateJobStage(supabase, importJobId, 'finalizing', {
-      message: 'Finalizing import...',
-      total_success: successCount,
-      total_errors: errorCount
-    });
-
-    // Cleanup file
-    const { error: deleteError } = await supabase.storage
-      .from('bulk-imports')
-      .remove([importJob.file_path]);
-
-    if (deleteError) {
-      console.error('[CLEANUP] Failed to delete file:', deleteError);
-    } else {
-      console.log('[CLEANUP] File deleted successfully');
-    }
-
-    // Update final status
-    const duration = Math.round((Date.now() - startTime) / 1000);
-    await supabase.from('import_jobs').update({
-      status: 'completed',
-      current_stage: 'completed',
-      total_rows: totalRows,
-      processed_rows: processedRows,
-      success_count: successCount,
+    const stagedCount = totalRows - errorCount;
+    await updateJobProgress(supabase, importJobId, {
+      total_rows: stagedCount,
+      processed_rows: 0,
       error_count: errorCount,
-      duplicate_count: duplicateCount,
-      updated_count: updatedCount,
-      error_details: errors.slice(-500), // Store up to 500 errors for better debugging
-      completed_at: new Date().toISOString(),
-      file_cleaned_up: !deleteError,
-      file_cleanup_at: new Date().toISOString(),
-      stage_details: {
-        message: `Import completed in ${duration}s`,
-        total_success: successCount,
-        total_updated: updatedCount,
-        total_errors: errorCount,
-        total_duplicates: duplicateCount,
-        duplicate_samples: duplicateSamples
-      }
-    }).eq('id', importJobId);
-
-    console.log('[SUCCESS] Import completed in', duration, 'seconds');
-
-    return new Response(JSON.stringify({
-      success: true,
-      processed: successCount,
-      errors: errorCount
-    }), {
-      status: 200,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      error_details: errors.slice(-500),
+      current_stage: 'inserting',
+      stage_details: { message: `Staged ${stagedCount.toLocaleString()} rows, starting import…` },
     });
+
+    const { data: refetchedJob } = await supabase.from('import_jobs').select('*').eq('id', importJobId).single();
+    const { done } = await claimAndProcessStagedBatches(supabase, refetchedJob as ImportJob, startTime, processBatch);
+    if (!done) return jsonResponse({ success: true, continued: true }, 200);
+    return await finalizeImportJob(supabase, refetchedJob as ImportJob, startTime);
 
   } catch (error) {
     console.error('[ERROR] Processing failed:', error);
@@ -582,6 +735,7 @@ async function processBatch(
     let tableName: string;
     let upsertOptions: any = {};
     let skippedCount = 0;
+    let updatedCount = 0;
     const duplicateSamples: Array<{ matched_on: string; value: string }> = [];
 
     if (importJob.import_type === 'contacts') {
@@ -596,15 +750,22 @@ async function processBatch(
       
       // Check which emails already exist in database
       if (emailsToCheck.length > 0) {
-        const { data: existingByEmail } = await supabase
-          .from('contacts')
-          .select('email')
-          .eq('org_id', importJob.org_id)
-          .in('email', emailsToCheck);
-        
-        existingEmails = new Set(
-          (existingByEmail || []).map((r: any) => r.email?.trim()?.toLowerCase())
-        );
+        const { data: orgIsProtected } = await supabase.rpc('pii_protected', { _org: importJob.org_id });
+        if (orgIsProtected) {
+          // contacts.email holds only a masked value for this org; match on the keyed hash instead.
+          const { data: existingHashed } = await supabase.rpc('pii_existing_emails', { _org: importJob.org_id, _emails: emailsToCheck });
+          existingEmails = new Set((existingHashed || []).map((e: string) => e?.trim()?.toLowerCase()));
+        } else {
+          const { data: existingByEmail } = await supabase
+            .from('contacts')
+            .select('email')
+            .eq('org_id', importJob.org_id)
+            .in('email', emailsToCheck);
+
+          existingEmails = new Set(
+            (existingByEmail || []).map((r: any) => r.email?.trim()?.toLowerCase())
+          );
+        }
       }
       
       // Deduplicate: skip emails that exist in DB or in batch
@@ -638,6 +799,57 @@ async function processBatch(
       if (skippedCount > 0) {
         console.log(`[DB] Batch ${batchNumber}: Filtered ${skippedCount} duplicate emails, inserting ${batch.length} records`);
       }
+
+      // Orgs with import_cleanup on upload phone-only lead lists, so also skip
+      // phone numbers already in the CRM or repeated in the file. A repeat of an
+      // unassigned lead that the file assigns to someone gets that assignee.
+      const { data: orgRow } = await supabase.from('organizations').select('settings').eq('id', importJob.org_id).single();
+      if (orgRow?.settings?.import_cleanup?.enabled) {
+        const phoneKey = (p: any) => String(p ?? '').replace(/\D/g, '').slice(-10);
+        const masked = (p: any) => `••••••• ${phoneKey(p).slice(-3)}`;
+        const firstByPhone = new Map<string, any>();
+        const kept: any[] = [];
+        for (const r of batch) {
+          const k = phoneKey(r.phone);
+          if (k.length < 10) { kept.push(r); continue; }
+          const prev = firstByPhone.get(k);
+          if (prev) {
+            if (!prev.assigned_to && r.assigned_to) prev.assigned_to = r.assigned_to;
+            skippedCount++;
+            if (duplicateSamples.length < 20) duplicateSamples.push({ matched_on: 'phone (repeated in file)', value: masked(r.phone) });
+            continue;
+          }
+          firstByPhone.set(k, r);
+          kept.push(r);
+        }
+        const phones = kept.map((r) => r.phone).filter((p) => phoneKey(p).length === 10);
+        const existing = new Map<string, { contact_id: string; assigned_to: string | null }>();
+        if (phones.length > 0) {
+          const { data: hits, error: hitErr } = await supabase.rpc('pii_existing_phones', { _org: importJob.org_id, _phones: phones });
+          if (hitErr) throw hitErr;
+          for (const h of hits || []) existing.set(phoneKey(h.phone), h);
+        }
+        const assignExisting = new Map<string, string[]>();
+        batch = kept.filter((r) => {
+          const e = existing.get(phoneKey(r.phone));
+          if (!e) return true;
+          if (r.assigned_to && !e.assigned_to) {
+            assignExisting.set(r.assigned_to, [...(assignExisting.get(r.assigned_to) ?? []), e.contact_id]);
+          } else {
+            skippedCount++;
+            if (duplicateSamples.length < 20) duplicateSamples.push({ matched_on: 'phone (already in CRM)', value: masked(r.phone) });
+          }
+          return false;
+        });
+        for (const [userId, ids] of assignExisting) {
+          const { data: upd, error: updErr } = await supabase
+            .from('contacts').update({ assigned_to: userId })
+            .in('id', ids).is('assigned_to', null).select('id');
+          if (updErr) throw updErr;
+          updatedCount += (upd || []).length;
+        }
+        console.log(`[DB] Batch ${batchNumber}: phone dedupe kept ${batch.length}, assigned ${updatedCount} existing, skipped total ${skippedCount}`);
+      }
       // No upsertOptions - use simple insert for contacts
     } else if (importJob.import_type === 'email_recipients') {
       tableName = 'email_campaign_recipients';
@@ -659,7 +871,7 @@ async function processBatch(
 
     // Use insert for contacts, upsert for campaign recipients
     const { error } = (importJob.import_type === 'contacts')
-      ? await supabase.from(tableName).insert(batch)
+      ? (batch.length > 0 ? await supabase.from(tableName).insert(batch) : { error: null })
       : await supabase.from(tableName).upsert(batch, upsertOptions);
 
     if (error) {
@@ -668,7 +880,7 @@ async function processBatch(
     }
 
     console.log('[DB] Batch', batchNumber, 'inserted successfully');
-    return { inserted: batch.length, updated: 0, skipped: skippedCount, duplicateSamples };
+    return { inserted: batch.length, updated: updatedCount, skipped: skippedCount, duplicateSamples };
   } catch (error) {
     console.error('[DB] Batch processing error:', error);
     throw error;
@@ -706,8 +918,11 @@ async function processBatch(
 // empty cells never blank out data already on the record.
 // =============================================================================
 
-const GROQ_MODEL = 'llama-3.3-70b-versatile';
-const HAIKU_MODEL = 'claude-haiku-4-5';
+// llama-3.3-70b-versatile was retired by Groq (404 model_not_found) -- same
+// deprecation hit Vendorsync's PI/document parsing 2026-09-03, fixed there
+// with this model. Cerebras stays as the second-line fallback.
+const GROQ_MODEL = 'openai/gpt-oss-120b';
+const CEREBRAS_MODEL = 'gemma-4-31b';
 
 // Sub-8-digit values (checked live 2026-07-27: 15 of 21,795 rows, mostly bare
 // extensions) are dropped rather than matched on: they aren't unique on their
@@ -759,11 +974,42 @@ function displayName(r: any): string {
   return [r.first_name, r.last_name].filter((v) => v && String(v).trim()).join(' ').trim() || r.company_name || '';
 }
 
+// The 4 phone slots, in the order a fresh number should fill them.
+const PHONE_FIELDS = ['mobile_number_1', 'mobile_number_2', 'direct_number', 'phone_number'] as const;
+
+// A person can carry more than one real number, and the same person often
+// shows up across more than one row of an upload (or a row folding into an
+// existing record) with a different number each time. Plain overwrite would
+// let whichever row merges in last stomp a perfectly good number already
+// sitting in that same slot. Instead, gather every distinct number across
+// both records' 4 slots and refill the same 4 slots with them in order, so
+// a second (or third, or fourth) genuine number is kept rather than lost.
+// Only 4 slots exist, so a 5th distinct number has nowhere to go and is dropped.
+function mergePhoneFields(base: any, incoming: any): Record<string, string | null> {
+  const seen = new Set<string>();
+  const collected: string[] = [];
+  for (const field of PHONE_FIELDS) {
+    for (const src of [base, incoming]) {
+      const v = src?.[field];
+      if (v === null || v === undefined || String(v).trim() === '') continue;
+      const key = normPhone(v) ?? String(v).trim();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      collected.push(String(v).trim());
+    }
+  }
+  const out: Record<string, string | null> = {};
+  PHONE_FIELDS.forEach((field, i) => { out[field] = collected[i] ?? null; });
+  return out;
+}
+
 // Incoming non-empty values overwrite base; empty/missing values keep base's.
+// Phone fields are consolidated instead of overwritten (see mergePhoneFields).
 function mergeNonEmpty(base: any, incoming: any): any {
-  const out = { ...base };
+  const out = { ...base, ...mergePhoneFields(base, incoming) };
   for (const [k, v] of Object.entries(incoming)) {
     if (k === 'unique_id' || k === 'org_id' || k === 'created_by') continue;
+    if ((PHONE_FIELDS as readonly string[]).includes(k)) continue;
     if (v !== null && v !== undefined && String(v).trim() !== '') out[k] = v;
   }
   return out;
@@ -813,38 +1059,37 @@ async function callGroqVerify(items: any[]): Promise<Set<number> | null> {
 }
 
 // Backup for when Groq is down/unconfigured/rate-limited.
-async function callHaikuVerify(items: any[]): Promise<Set<number> | null> {
-  const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
-  if (!anthropicKey) return null;
+async function callCerebrasVerify(items: any[]): Promise<Set<number> | null> {
+  const cerebrasKey = Deno.env.get('CEREBRAS_API_KEY');
+  if (!cerebrasKey) return null;
   try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    const resp = await fetch('https://api.cerebras.ai/v1/chat/completions', {
       method: 'POST',
-      headers: {
-        'x-api-key': anthropicKey,
-        'anthropic-version': '2023-06-01',
-        'Content-Type': 'application/json',
-      },
+      headers: { Authorization: `Bearer ${cerebrasKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: HAIKU_MODEL,
-        max_tokens: 1024,
-        system: NAME_VERIFY_SYSTEM_PROMPT,
-        messages: [{ role: 'user', content: JSON.stringify(items) }],
+        model: CEREBRAS_MODEL,
+        temperature: 0,
+        response_format: { type: 'json_object' },
+        messages: [
+          { role: 'system', content: NAME_VERIFY_SYSTEM_PROMPT },
+          { role: 'user', content: JSON.stringify(items) },
+        ],
       }),
     });
     if (!resp.ok) {
-      console.error('[AI-DEDUPE] Haiku verification failed:', resp.status, await resp.text());
+      console.error('[AI-DEDUPE] Cerebras verification failed:', resp.status, await resp.text());
       return null;
     }
     const data = await resp.json();
-    return parseVerifyResults(data.content[0].text);
+    return parseVerifyResults(data.choices[0].message.content);
   } catch (e) {
-    console.error('[AI-DEDUPE] Haiku verification error:', e);
+    console.error('[AI-DEDUPE] Cerebras verification error:', e);
     return null;
   }
 }
 
 // One call verifies every name-only candidate pair in the batch at once.
-// Groq first, Claude Haiku as backup if Groq is unavailable or errors.
+// Groq first, Cerebras as backup if Groq is unavailable or errors.
 // Fails closed: if both are unavailable, nothing is confirmed and those
 // rows fall through to "new" rather than risk merging two different people.
 async function verifySamePersonBatch(
@@ -873,11 +1118,11 @@ async function verifySamePersonBatch(
   const groqResult = await callGroqVerify(items);
   if (groqResult) return groqResult;
 
-  console.warn('[AI-DEDUPE] Groq unavailable, falling back to Haiku');
-  const haikuResult = await callHaikuVerify(items);
-  if (haikuResult) return haikuResult;
+  console.warn('[AI-DEDUPE] Groq unavailable, falling back to Cerebras');
+  const cerebrasResult = await callCerebrasVerify(items);
+  if (cerebrasResult) return cerebrasResult;
 
-  console.error('[AI-DEDUPE] Both Groq and Haiku verification failed; treating all as not-same-person');
+  console.error('[AI-DEDUPE] Both Groq and Cerebras verification failed; treating all as not-same-person');
   return new Set();
 }
 
@@ -974,9 +1219,13 @@ async function processFerventBatch(
       const strong = cands.find((c: any) => c.match_type === 'phone' || c.match_type === 'email');
       if (strong) {
         const existingEntry = mergesByTarget.get(strong.existing_record.id);
+        // Seed the accumulator from the real DB record (not {}) the first time
+        // this target is touched, so phone consolidation below has visibility
+        // into numbers already sitting in the DB's 4 slots, not just whatever
+        // this batch's incoming rows happen to carry.
         mergesByTarget.set(strong.existing_record.id, {
           target_id: strong.existing_record.id,
-          record: mergeNonEmpty(existingEntry?.record || {}, record),
+          record: mergeNonEmpty(existingEntry?.record || strong.existing_record, record),
         });
         return;
       }
@@ -1004,7 +1253,7 @@ async function processFerventBatch(
           const existingEntry = mergesByTarget.get(targetId);
           mergesByTarget.set(targetId, {
             target_id: targetId,
-            record: mergeNonEmpty(existingEntry?.record || {}, check.incoming),
+            record: mergeNonEmpty(existingEntry?.record || check.candidate, check.incoming),
           });
         } else {
           newRows.push(check.incoming);
@@ -1138,13 +1387,13 @@ async function processFerventBatch(
 // =============================================================================
 // FERVENT SMART-FORMATTING IMPORT
 // Entry point for fervent_repository uploads. Understands whatever layout the
-// file arrived in (AI-assisted, Groq -> Haiku), derives inferable fields,
+// file arrived in (AI-assisted, Groq -> Cerebras), derives inferable fields,
 // rejects the whole file if its shape is unusable or too many rows can't be
 // identified, imports the good rows through the existing dedup/upsert pipeline,
 // and emails any unusable rows back to the uploader to fix and re-upload.
 // =============================================================================
 
-const FERVENT_MAX_RECORDS = 10000;
+const ABSOLUTE_MAX_RECORDS = 2000000; // sanity/abuse guard, not a practical limit — see runFerventSmartImport
 const SKIP_REJECT_THRESHOLD = 0.10; // reject the whole file if >10% of rows are unusable
 
 function jsonResponse(body: any, status: number): Response {
@@ -1174,6 +1423,7 @@ async function failFerventJob(supabase: any, jobId: string, reason: string, extr
 function buildFerventRecord(row: Record<string, string>, importJob: ImportJob): any {
   return {
     org_id: importJob.org_id,
+    source_type: importJob.source_type || 'domestic',
     sr_no: intOrNull(row.sr_no),
     unique_id: row.unique_id || null,
     db_sourced_year: intOrNull(row.db_sourced_year),
@@ -1304,8 +1554,12 @@ async function runFerventSmartImport(
 ): Promise<Response> {
   const totalRows = lines.length - 1;
 
-  if (totalRows > FERVENT_MAX_RECORDS) {
-    await failFerventJob(supabase, importJob.id, `File contains ${totalRows.toLocaleString()} rows. Maximum allowed is ${FERVENT_MAX_RECORDS.toLocaleString()} records.`);
+  // No practical record-count ceiling: the claim-and-chain pipeline below
+  // processes staged rows in bounded slices regardless of total file size,
+  // so cost per invocation no longer depends on how many rows the file has.
+  // ABSOLUTE_MAX_RECORDS is a sanity/abuse guard only, far beyond real use.
+  if (totalRows > ABSOLUTE_MAX_RECORDS) {
+    await failFerventJob(supabase, importJob.id, `File contains ${totalRows.toLocaleString()} rows, which is above the ${ABSOLUTE_MAX_RECORDS.toLocaleString()} sanity ceiling. Please split it into smaller files.`);
     return jsonResponse({ success: false, rejected: true, reason: 'too_many_rows' }, 200);
   }
 
@@ -1367,80 +1621,31 @@ async function runFerventSmartImport(
     return jsonResponse({ success: false, rejected: true, reason: 'too_many_unusable_rows' }, 200);
   }
 
-  // --- Pass 2: import the good rows through the existing dedup pipeline -----
-  let successCount = 0, updatedCount = 0, duplicateCount = 0, errorCount = 0;
-  const duplicateSamples: Array<{ matched_on: string; value: string }> = [];
-  const errors: Array<{ row?: number; field?: string; message: string; sample?: string }> = [];
-  let batch: any[] = [];
-  let batchNumber = 0;
-
-  const flush = async () => {
-    batchNumber++;
-    const result = await processFerventBatch(supabase, importJob, batch, batchNumber);
-    successCount += result.inserted;
-    updatedCount += result.updated;
-    duplicateCount += result.skipped;
-    if (result.dbErrors) { errorCount += result.dbErrors; if (result.dbErrorSamples) errors.push(...result.dbErrorSamples); }
-    if (result.duplicateSamples) duplicateSamples.push(...result.duplicateSamples.slice(0, Math.max(0, 200 - duplicateSamples.length)));
-    batch = [];
-    await updateJobProgress(supabase, importJob.id, {
-      total_rows: totalRows,
-      processed_rows: Math.min(batchNumber * BATCH_SIZE, canonicalRows.length),
-      success_count: successCount,
-      updated_count: updatedCount,
-      duplicate_count: duplicateCount,
-      error_count: errorCount,
-      current_stage: 'inserting',
-      stage_details: { message: `Imported ${(successCount + updatedCount).toLocaleString()} of ${canonicalRows.length.toLocaleString()}…` },
-    });
-  };
-
-  for (const row of canonicalRows) {
-    batch.push(buildFerventRecord(row, importJob));
-    if (batch.length >= BATCH_SIZE) await flush();
-  }
-  if (batch.length > 0) await flush();
-
-  // --- Email the unusable rows back to the uploader ------------------------
-  await updateJobStage(supabase, importJob.id, 'finalizing', { message: 'Finalizing…' });
-  let skippedEmail: { sent: boolean; to: string | null } = { sent: false, to: null };
+  // --- Pass 2: stage the good rows, then hand off to the shared claim loop --
+  // This function only ever runs on the FIRST leg of a job (the top-level
+  // handler intercepts current_stage === 'inserting' and skips straight to
+  // claimAndProcessStagedBatches for any resume), so there's no resume-index
+  // bookkeeping needed here — just stage everything and go.
+  const stagePayload = canonicalRows.map((row, idx) => ({ row_index: idx + 1, record: buildFerventRecord(row, importJob) }));
+  await stageRecords(supabase, importJob.id, stagePayload);
   if (skippedRows.length > 0) {
-    skippedEmail = await emailSkippedRows(supabase, importJob, rawHeaders, skippedRows, { imported: successCount + updatedCount, total: totalRows });
+    await stageSkippedRows(supabase, importJob.id, skippedRows.map((r, idx) => ({ row_index: idx + 1, values: r.values, reason: r.reason })));
   }
 
-  // Cleanup uploaded file (best-effort).
-  const { error: deleteError } = await supabase.storage.from('import-files').remove([importJob.file_path]);
-  if (deleteError) console.error('[CLEANUP] Failed to delete import file:', deleteError);
-
-  const duration = Math.round((Date.now() - startTime) / 1000);
-  await supabase.from('import_jobs').update({
-    status: 'completed',
-    current_stage: 'completed',
-    total_rows: totalRows,
-    processed_rows: totalRows,
-    success_count: successCount,
-    updated_count: updatedCount,
-    duplicate_count: duplicateCount,
-    error_count: errorCount,
-    error_details: errors.slice(-500),
-    completed_at: new Date().toISOString(),
-    file_cleaned_up: !deleteError,
-    file_cleanup_at: new Date().toISOString(),
+  await updateJobProgress(supabase, importJob.id, {
+    total_rows: canonicalRows.length,
+    processed_rows: 0,
+    current_stage: 'inserting',
     stage_details: {
-      message: `Import completed in ${duration}s`,
-      total_success: successCount,
-      total_updated: updatedCount,
-      total_errors: errorCount,
-      total_duplicates: duplicateCount,
-      duplicate_samples: duplicateSamples,
-      skipped_count: skippedRows.length,
-      skipped_email_sent: skippedEmail.sent,
-      skipped_email_to: skippedEmail.to,
+      message: `Staged ${canonicalRows.length.toLocaleString()} rows, starting import…`,
+      raw_headers: rawHeaders,
       used_ai: mapResult.usedAi,
       resolved_columns: mapResult.resolved,
     },
-  }).eq('id', importJob.id);
+  });
 
-  console.log(`[SUCCESS] Fervent smart import in ${duration}s: ${successCount} inserted, ${updatedCount} updated, ${skippedRows.length} skipped/emailed(${skippedEmail.sent})`);
-  return jsonResponse({ success: true, processed: successCount, updated: updatedCount, skipped: skippedRows.length }, 200);
+  const { data: refetchedJob } = await supabase.from('import_jobs').select('*').eq('id', importJob.id).single();
+  const { done } = await claimAndProcessStagedBatches(supabase, refetchedJob as ImportJob, startTime, processFerventBatch);
+  if (!done) return jsonResponse({ success: true, continued: true }, 200);
+  return await finalizeImportJob(supabase, refetchedJob as ImportJob, startTime);
 }

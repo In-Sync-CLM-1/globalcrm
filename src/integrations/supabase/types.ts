@@ -207,6 +207,80 @@ export type Database = {
           },
         ]
       }
+      ai_call_queue: {
+        Row: {
+          attempts: number
+          call_log_id: string | null
+          contact_id: string
+          created_at: string
+          created_by: string | null
+          id: string
+          last_error: string | null
+          next_attempt_at: string
+          org_id: string
+          script_id: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          attempts?: number
+          call_log_id?: string | null
+          contact_id: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          last_error?: string | null
+          next_attempt_at?: string
+          org_id: string
+          script_id: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          attempts?: number
+          call_log_id?: string | null
+          contact_id?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          last_error?: string | null
+          next_attempt_at?: string
+          org_id?: string
+          script_id?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_call_queue_call_log_id_fkey"
+            columns: ["call_log_id"]
+            isOneToOne: false
+            referencedRelation: "call_logs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_call_queue_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_call_queue_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_call_queue_script_id_fkey"
+            columns: ["script_id"]
+            isOneToOne: false
+            referencedRelation: "ai_call_scripts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       ai_call_scripts: {
         Row: {
           behavioral_guidelines: string | null
@@ -3161,10 +3235,14 @@ export type Database = {
       }
       contacts: {
         Row: {
+          action_channel: string | null
+          action_fired_at: string | null
+          action_template: string | null
           address: string | null
           apollo_person_id: string | null
           assigned_team_id: string | null
           assigned_to: string | null
+          category: string | null
           city: string | null
           company: string | null
           country: string | null
@@ -3230,10 +3308,14 @@ export type Database = {
           whatsapp_outreach_status: string | null
         }
         Insert: {
+          action_channel?: string | null
+          action_fired_at?: string | null
+          action_template?: string | null
           address?: string | null
           apollo_person_id?: string | null
           assigned_team_id?: string | null
           assigned_to?: string | null
+          category?: string | null
           city?: string | null
           company?: string | null
           country?: string | null
@@ -3299,10 +3381,14 @@ export type Database = {
           whatsapp_outreach_status?: string | null
         }
         Update: {
+          action_channel?: string | null
+          action_fired_at?: string | null
+          action_template?: string | null
           address?: string | null
           apollo_person_id?: string | null
           assigned_team_id?: string | null
           assigned_to?: string | null
+          category?: string | null
           city?: string | null
           company?: string | null
           country?: string | null
@@ -5039,6 +5125,84 @@ export type Database = {
           },
         ]
       }
+      fervent_dashboard_cache: {
+        Row: {
+          added_this_month_count: number
+          by_city: Json
+          by_company: Json
+          by_designation: Json
+          by_designation_level: Json
+          by_employee_size: Json
+          by_industry: Json
+          by_state: Json
+          by_status: Json
+          companies_count: number
+          daily_counts: Json
+          data_start_month: string | null
+          filter_options: Json
+          industries_count: number
+          missing_both_count: number
+          missing_email_only_count: number
+          missing_mobile_only_count: number
+          monthly_counts: Json
+          org_id: string
+          refreshed_at: string
+          total_count: number
+          with_email_count: number
+          with_mobile_count: number
+        }
+        Insert: {
+          added_this_month_count?: number
+          by_city?: Json
+          by_company?: Json
+          by_designation?: Json
+          by_designation_level?: Json
+          by_employee_size?: Json
+          by_industry?: Json
+          by_state?: Json
+          by_status?: Json
+          companies_count?: number
+          daily_counts?: Json
+          data_start_month?: string | null
+          filter_options?: Json
+          industries_count?: number
+          missing_both_count?: number
+          missing_email_only_count?: number
+          missing_mobile_only_count?: number
+          monthly_counts?: Json
+          org_id: string
+          refreshed_at?: string
+          total_count?: number
+          with_email_count?: number
+          with_mobile_count?: number
+        }
+        Update: {
+          added_this_month_count?: number
+          by_city?: Json
+          by_company?: Json
+          by_designation?: Json
+          by_designation_level?: Json
+          by_employee_size?: Json
+          by_industry?: Json
+          by_state?: Json
+          by_status?: Json
+          companies_count?: number
+          daily_counts?: Json
+          data_start_month?: string | null
+          filter_options?: Json
+          industries_count?: number
+          missing_both_count?: number
+          missing_email_only_count?: number
+          missing_mobile_only_count?: number
+          monthly_counts?: Json
+          org_id?: string
+          refreshed_at?: string
+          total_count?: number
+          with_email_count?: number
+          with_mobile_count?: number
+        }
+        Relationships: []
+      }
       fervent_data_repository: {
         Row: {
           city: string | null
@@ -5067,6 +5231,7 @@ export type Database = {
           personal_email_1: string | null
           personal_email_2: string | null
           phone_number: string | null
+          source_type: string
           sr_no: number | null
           state: string | null
           std_code: string | null
@@ -5106,6 +5271,7 @@ export type Database = {
           personal_email_1?: string | null
           personal_email_2?: string | null
           phone_number?: string | null
+          source_type: string
           sr_no?: number | null
           state?: string | null
           std_code?: string | null
@@ -5145,6 +5311,7 @@ export type Database = {
           personal_email_1?: string | null
           personal_email_2?: string | null
           phone_number?: string | null
+          source_type?: string
           sr_no?: number | null
           state?: string | null
           std_code?: string | null
@@ -5369,6 +5536,7 @@ export type Database = {
           import_type: string
           org_id: string
           processed_rows: number | null
+          source_type: string | null
           stage_details: Json | null
           started_at: string | null
           status: string
@@ -5394,6 +5562,7 @@ export type Database = {
           import_type: string
           org_id: string
           processed_rows?: number | null
+          source_type?: string | null
           stage_details?: Json | null
           started_at?: string | null
           status?: string
@@ -5419,6 +5588,7 @@ export type Database = {
           import_type?: string
           org_id?: string
           processed_rows?: number | null
+          source_type?: string | null
           stage_details?: Json | null
           started_at?: string | null
           status?: string
@@ -5435,6 +5605,76 @@ export type Database = {
             columns: ["org_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      import_skipped_rows: {
+        Row: {
+          created_at: string
+          id: number
+          import_job_id: string
+          reason: string
+          row_index: number
+          values: Json
+        }
+        Insert: {
+          created_at?: string
+          id?: number
+          import_job_id: string
+          reason: string
+          row_index: number
+          values: Json
+        }
+        Update: {
+          created_at?: string
+          id?: number
+          import_job_id?: string
+          reason?: string
+          row_index?: number
+          values?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "import_skipped_rows_import_job_id_fkey"
+            columns: ["import_job_id"]
+            isOneToOne: false
+            referencedRelation: "import_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      import_staging: {
+        Row: {
+          created_at: string
+          id: number
+          import_job_id: string
+          processed: boolean
+          record: Json
+          row_index: number
+        }
+        Insert: {
+          created_at?: string
+          id?: number
+          import_job_id: string
+          processed?: boolean
+          record: Json
+          row_index: number
+        }
+        Update: {
+          created_at?: string
+          id?: number
+          import_job_id?: string
+          processed?: boolean
+          record?: Json
+          row_index?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "import_staging_import_job_id_fkey"
+            columns: ["import_job_id"]
+            isOneToOne: false
+            referencedRelation: "import_jobs"
             referencedColumns: ["id"]
           },
         ]
@@ -6394,6 +6634,7 @@ export type Database = {
           services_enabled: boolean | null
           settings: Json | null
           slug: string
+          smart_import_enabled: boolean
           subscription_active: boolean | null
           updated_at: string | null
           usage_limits: Json | null
@@ -6417,6 +6658,7 @@ export type Database = {
           services_enabled?: boolean | null
           settings?: Json | null
           slug: string
+          smart_import_enabled?: boolean
           subscription_active?: boolean | null
           updated_at?: string | null
           usage_limits?: Json | null
@@ -6440,6 +6682,7 @@ export type Database = {
           services_enabled?: boolean | null
           settings?: Json | null
           slug?: string
+          smart_import_enabled?: boolean
           subscription_active?: boolean | null
           updated_at?: string | null
           usage_limits?: Json | null
@@ -6751,12 +6994,13 @@ export type Database = {
           attempts: number
           contact_id: string
           created_at: string
+          email_template_id: string | null
           id: string
           language_code: string
           last_error: string | null
           org_id: string
           processed_at: string | null
-          stage_id: string
+          stage_id: string | null
           status: string
           template_name: string | null
         }
@@ -6765,12 +7009,13 @@ export type Database = {
           attempts?: number
           contact_id: string
           created_at?: string
+          email_template_id?: string | null
           id?: string
           language_code?: string
           last_error?: string | null
           org_id: string
           processed_at?: string | null
-          stage_id: string
+          stage_id?: string | null
           status?: string
           template_name?: string | null
         }
@@ -6779,12 +7024,13 @@ export type Database = {
           attempts?: number
           contact_id?: string
           created_at?: string
+          email_template_id?: string | null
           id?: string
           language_code?: string
           last_error?: string | null
           org_id?: string
           processed_at?: string | null
-          stage_id?: string
+          stage_id?: string | null
           status?: string
           template_name?: string | null
         }
@@ -6801,6 +7047,13 @@ export type Database = {
             columns: ["contact_id"]
             isOneToOne: false
             referencedRelation: "contacts_with_stages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pipeline_action_queue_email_template_id_fkey"
+            columns: ["email_template_id"]
+            isOneToOne: false
+            referencedRelation: "email_templates"
             referencedColumns: ["id"]
           },
           {
@@ -6869,6 +7122,83 @@ export type Database = {
             columns: ["stage_id"]
             isOneToOne: false
             referencedRelation: "pipeline_stages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      pipeline_email_log: {
+        Row: {
+          contact_id: string | null
+          cost_charged: number | null
+          created_at: string
+          email_template_id: string | null
+          error_text: string | null
+          failed_at: string | null
+          id: string
+          org_id: string
+          resend_message_id: string | null
+          sent_at: string | null
+          status: string
+          subject: string | null
+          to_email: string
+        }
+        Insert: {
+          contact_id?: string | null
+          cost_charged?: number | null
+          created_at?: string
+          email_template_id?: string | null
+          error_text?: string | null
+          failed_at?: string | null
+          id?: string
+          org_id: string
+          resend_message_id?: string | null
+          sent_at?: string | null
+          status?: string
+          subject?: string | null
+          to_email: string
+        }
+        Update: {
+          contact_id?: string | null
+          cost_charged?: number | null
+          created_at?: string
+          email_template_id?: string | null
+          error_text?: string | null
+          failed_at?: string | null
+          id?: string
+          org_id?: string
+          resend_message_id?: string | null
+          sent_at?: string | null
+          status?: string
+          subject?: string | null
+          to_email?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pipeline_email_log_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pipeline_email_log_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_with_stages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pipeline_email_log_email_template_id_fkey"
+            columns: ["email_template_id"]
+            isOneToOne: false
+            referencedRelation: "email_templates"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pipeline_email_log_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
         ]
@@ -6950,6 +7280,7 @@ export type Database = {
           action_type: string
           agent_id: string | null
           created_at: string
+          email_template_id: string | null
           from_number: string | null
           id: string
           ignore_window: boolean
@@ -6958,11 +7289,13 @@ export type Database = {
           org_id: string
           stage_id: string
           template_name: string | null
+          whatsapp_template_id: string | null
         }
         Insert: {
           action_type: string
           agent_id?: string | null
           created_at?: string
+          email_template_id?: string | null
           from_number?: string | null
           id?: string
           ignore_window?: boolean
@@ -6971,11 +7304,13 @@ export type Database = {
           org_id: string
           stage_id: string
           template_name?: string | null
+          whatsapp_template_id?: string | null
         }
         Update: {
           action_type?: string
           agent_id?: string | null
           created_at?: string
+          email_template_id?: string | null
           from_number?: string | null
           id?: string
           ignore_window?: boolean
@@ -6984,8 +7319,16 @@ export type Database = {
           org_id?: string
           stage_id?: string
           template_name?: string | null
+          whatsapp_template_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "pipeline_stage_actions_email_template_id_fkey"
+            columns: ["email_template_id"]
+            isOneToOne: false
+            referencedRelation: "email_templates"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "pipeline_stage_actions_org_id_fkey"
             columns: ["org_id"]
@@ -6998,6 +7341,13 @@ export type Database = {
             columns: ["stage_id"]
             isOneToOne: true
             referencedRelation: "pipeline_stages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pipeline_stage_actions_whatsapp_template_id_fkey"
+            columns: ["whatsapp_template_id"]
+            isOneToOne: false
+            referencedRelation: "communication_templates"
             referencedColumns: ["id"]
           },
         ]
@@ -7145,6 +7495,7 @@ export type Database = {
           onboarding_completed: boolean | null
           org_id: string | null
           phone: string | null
+          reports_to_user_id: string | null
           sms_enabled: boolean | null
           updated_at: string | null
           whatsapp_enabled: boolean | null
@@ -7164,6 +7515,7 @@ export type Database = {
           onboarding_completed?: boolean | null
           org_id?: string | null
           phone?: string | null
+          reports_to_user_id?: string | null
           sms_enabled?: boolean | null
           updated_at?: string | null
           whatsapp_enabled?: boolean | null
@@ -7183,6 +7535,7 @@ export type Database = {
           onboarding_completed?: boolean | null
           org_id?: string | null
           phone?: string | null
+          reports_to_user_id?: string | null
           sms_enabled?: boolean | null
           updated_at?: string | null
           whatsapp_enabled?: boolean | null
@@ -7200,6 +7553,13 @@ export type Database = {
             columns: ["org_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "profiles_reports_to_user_id_fkey"
+            columns: ["reports_to_user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -9010,7 +9370,7 @@ export type Database = {
       }
       whatsapp_messages: {
         Row: {
-          contact_id: string
+          contact_id: string | null
           conversation_id: string | null
           created_at: string | null
           delivered_at: string | null
@@ -9036,7 +9396,7 @@ export type Database = {
           template_variables: Json | null
         }
         Insert: {
-          contact_id: string
+          contact_id?: string | null
           conversation_id?: string | null
           created_at?: string | null
           delivered_at?: string | null
@@ -9062,7 +9422,7 @@ export type Database = {
           template_variables?: Json | null
         }
         Update: {
-          contact_id?: string
+          contact_id?: string | null
           conversation_id?: string | null
           created_at?: string | null
           delivered_at?: string | null
@@ -9239,6 +9599,18 @@ export type Database = {
         Args: { p_ids: string[]; p_names: string[] }
         Returns: number
       }
+      bulk_delete_demandcom_batch: {
+        Args: {
+          p_batch_size?: number
+          p_offset?: number
+          p_record_ids: string[]
+        }
+        Returns: {
+          deleted_count: number
+          has_more: boolean
+          next_offset: number
+        }[]
+      }
       bulk_delete_verified: {
         Args: {
           _org_id: string
@@ -9274,6 +9646,19 @@ export type Database = {
         Returns: boolean
       }
       check_inactive_contacts: { Args: never; Returns: undefined }
+      claim_fervent_new_rows: {
+        Args: {
+          p_created_by: string
+          p_import_job_id: string
+          p_org_id: string
+          p_records: Json
+        }
+        Returns: {
+          incoming_idx: number
+          outcome: string
+          target_id: string
+        }[]
+      }
       cleanup_orphaned_profile: {
         Args: { user_id: string }
         Returns: undefined
@@ -9315,6 +9700,13 @@ export type Database = {
           _user_id: string
         }
         Returns: Json
+      }
+      delete_demandcom_by_activity_batch: {
+        Args: { p_activity_name: string; p_batch_size?: number }
+        Returns: {
+          deleted_count: number
+          has_more: boolean
+        }[]
       }
       delete_user_data: { Args: { user_email: string }; Returns: undefined }
       designation_has_feature_access: {
@@ -9420,6 +9812,10 @@ export type Database = {
           name_en: string
         }[]
       }
+      get_contacts_by_category: {
+        Args: { p_org_id: string }
+        Returns: { category: string; contact_count: number }[]
+      }
       get_dashboard_stats: { Args: { p_org_id: string }; Returns: Json }
       get_demo_stats_this_month: {
         Args: { p_org_id: string }
@@ -9462,6 +9858,14 @@ export type Database = {
         Returns: Json
       }
       get_org_statistics: { Args: { p_org_id: string }; Returns: Json }
+      get_org_wallet_channel_usage: {
+        Args: { p_org_id: string }
+        Returns: {
+          service_type: string
+          total_cost: number
+          usage_count: number
+        }[]
+      }
       get_orphaned_profiles: {
         Args: never
         Returns: {
@@ -9630,6 +10034,11 @@ export type Database = {
       }
       process_time_based_triggers: { Args: never; Returns: undefined }
       refresh_contacts_with_stages: { Args: never; Returns: undefined }
+      refresh_fervent_dashboard_cache: {
+        Args: { p_org_id: string }
+        Returns: undefined
+      }
+      refresh_fervent_dashboard_cache_cron: { Args: never; Returns: undefined }
       reserve_wallet_funds: {
         Args: { p_amount: number; p_floor: number; p_org: string }
         Returns: number

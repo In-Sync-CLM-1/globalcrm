@@ -56,7 +56,7 @@ serve(async (req) => {
     if (contactId) {
       const { data: contact } = await supabaseClient
         .from('contacts')
-        .select('phone, first_name, last_name')
+        .select('phone, first_name, last_name, org_id')
         .eq('id', contactId)
         .single();
 
@@ -64,6 +64,23 @@ serve(async (req) => {
         customerPhone = contact.phone;
         customerName = `${contact.first_name} ${contact.last_name || ''}`;
         console.log('Using contact phone for:', customerName);
+      }
+
+      // Orgs with PII protection store only a masked number in contacts.phone. The real number is decrypted
+      // here, on the server, and never sent back to the browser.
+      if (contact?.org_id) {
+        const service = createClient(Deno.env.get('SUPABASE_URL') ?? '', Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '');
+        const { data: protectedOrg } = await service.rpc('pii_protected', { _org: contact.org_id });
+        if (protectedOrg) {
+          const { data: realPhone } = await service.rpc('pii_contact_phone', { _contact_id: contactId });
+          if (!realPhone || String(realPhone).includes('•')) {
+            return new Response(JSON.stringify({ error: 'This contact has no callable number on file' }), {
+              status: 400,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+          customerPhone = realPhone;
+        }
       }
     }
 

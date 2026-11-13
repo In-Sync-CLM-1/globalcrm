@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Upload, FileText, AlertCircle, Download } from "lucide-react";
@@ -7,9 +7,16 @@ import { supabase } from "@/integrations/supabase/client";
 import { useNotification } from "@/hooks/useNotification";
 import { logError } from "@/lib/errorLogger";
 import { IEDUP_ORG_ID } from "@/hooks/useIsIedup";
+import { sanitizeStorageFileName } from "@/lib/utils";
 
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
-const MAX_RECORDS = 5000;
+// Imports now process in chained batches on the backend (see
+// process-bulk-import's claimAndProcessStagedBatches), so there's no longer
+// a practical record-count ceiling — MAX_RECORDS is just a sanity/abuse
+// guard matching the backend's ABSOLUTE_MAX_RECORDS. MAX_FILE_SIZE stays a
+// real constraint: it's bounded by Supabase storage's project-wide 50MB
+// upload limit, kept a little under that for safety margin.
+const MAX_FILE_SIZE = 45 * 1024 * 1024; // 45MB
+const MAX_RECORDS = 2000000;
 
 interface BulkUploadDialogProps {
   open: boolean;
@@ -23,7 +30,37 @@ export function BulkUploadDialog({ open, onOpenChange, orgId, onUploadStarted }:
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [validationError, setValidationError] = useState<string>("");
+  const [smartImportEnabled, setSmartImportEnabled] = useState(false);
+  // Orgs with staging cleanup on (organizations.settings.import_cleanup): their
+  // template carries source + game columns and the dialog lists the values the
+  // CRM maps uploads onto (stages, sources, games, call outcomes).
+  const [cleanup, setCleanup] = useState<{ users: string[] } | null>(null);
   const notification = useNotification();
+
+  useEffect(() => {
+    if (!open || !orgId) return;
+    supabase
+      .from('organizations')
+      .select('smart_import_enabled, settings')
+      .eq('id', orgId)
+      .single()
+      .then(async ({ data }) => {
+        setSmartImportEnabled(!!data?.smart_import_enabled);
+        const cfg = (data?.settings as any)?.import_cleanup;
+        if (!cfg?.enabled) { setCleanup(null); return; }
+        const { data: users } = await supabase
+          .from('profiles')
+          .select('first_name, last_name, is_active')
+          .eq('org_id', orgId)
+          .order('first_name');
+        setCleanup({
+          users: (users || [])
+            .filter((u: any) => u.is_active !== false)
+            .map((u: any) => `${u.first_name ?? ''} ${u.last_name ?? ''}`.trim())
+            .filter(Boolean),
+        });
+      });
+  }, [open, orgId]);
 
   // Error logging helper
   const logUploadError = async (step: string, error: any, details?: any) => {
@@ -56,8 +93,8 @@ export function BulkUploadDialog({ open, onOpenChange, orgId, onUploadStarted }:
       return error;
     }
 
-    if (file.size > 10 * 1024 * 1024) {
-      const error = 'File size must be less than 10MB';
+    if (file.size > MAX_FILE_SIZE) {
+      const error = 'File size must be less than 45MB';
       console.error('[FILE-VALIDATION-FAILED]', { reason: 'file_too_large', size: file.size });
       return error;
     }
@@ -128,7 +165,9 @@ export function BulkUploadDialog({ open, onOpenChange, orgId, onUploadStarted }:
     // IEDUP runs an action-driven flow: surface the trigger column as "Action"
     // and drop the generic lead "status" column (the status the client tracks —
     // Call made / Message Sent / Delivered / Opened — is auto-filled, not uploaded).
-    const headers = orgId === IEDUP_ORG_ID
+    const headers = cleanup
+      ? ['Full Name', 'Phone', 'Assigned to']
+      : orgId === IEDUP_ORG_ID
       ? baseHeaders.filter((h) => h !== 'status').map((h) => (h === 'pipeline_stage' ? 'Action' : h))
       : baseHeaders;
     const csvContent = headers.join(',') + '\n';
@@ -162,17 +201,20 @@ export function BulkUploadDialog({ open, onOpenChange, orgId, onUploadStarted }:
         return;
       }
 
-      // Check for required columns
-      const headers = lines[0].toLowerCase();
-      if (!headers.includes('first_name')) {
-        setValidationError("CSV must contain a 'first_name' column");
-        setIsUploading(false);
-        return;
-      }
-      if (!headers.includes('email')) {
-        setValidationError("CSV must contain an 'email' column");
-        setIsUploading(false);
-        return;
+      // Orgs with AI-assisted column mapping figure out the layout server-side,
+      // so skip the exact-header requirement for them.
+      if (!smartImportEnabled) {
+        const headers = lines[0].toLowerCase();
+        if (!headers.includes('first_name')) {
+          setValidationError("CSV must contain a 'first_name' column");
+          setIsUploading(false);
+          return;
+        }
+        if (!headers.includes('email')) {
+          setValidationError("CSV must contain an 'email' column");
+          setIsUploading(false);
+          return;
+        }
       }
 
       // Get current user
@@ -180,7 +222,7 @@ export function BulkUploadDialog({ open, onOpenChange, orgId, onUploadStarted }:
       if (!user) throw new Error("User not authenticated");
 
       // Upload file to storage
-      const fileName = `${Date.now()}-${file.name}`;
+      const fileName = `${Date.now()}-${sanitizeStorageFileName(file.name)}`;
       const filePath = `${orgId}/bulk-imports/${fileName}`;
 
       const { error: uploadError } = await supabase.storage
@@ -285,7 +327,9 @@ export function BulkUploadDialog({ open, onOpenChange, orgId, onUploadStarted }:
         <DialogHeader>
           <DialogTitle>Bulk Upload Contacts</DialogTitle>
           <DialogDescription>
-            Upload a CSV file with contact information. Maximum 5,000 records and 10MB file size.
+            {smartImportEnabled
+              ? "Upload a CSV file with contact information. AI will read your file's columns automatically — no fixed template needed. No practical limit on records — max file size 45MB."
+              : "Upload a CSV file with contact information. No practical limit on records — max file size 45MB."}
           </DialogDescription>
         </DialogHeader>
 
@@ -359,16 +403,35 @@ export function BulkUploadDialog({ open, onOpenChange, orgId, onUploadStarted }:
             )}
           </div>
 
+          {!cleanup && (
           <div className="bg-muted p-3 rounded-lg text-xs space-y-1">
             <p className="font-medium">Requirements:</p>
             <ul className="list-disc list-inside space-y-1 text-muted-foreground">
               <li>UTF-8 encoded CSV file</li>
-              <li>Required columns: <code className="bg-background px-1 rounded">first_name</code>, <code className="bg-background px-1 rounded">email</code></li>
+              {smartImportEnabled ? (
+                <li>Any column layout works — must include at least a name, email, or phone number to identify each record</li>
+              ) : (
+                <li>Required columns: <code className="bg-background px-1 rounded">first_name</code>, <code className="bg-background px-1 rounded">email</code></li>
+              )}
               <li>Optional <code className="bg-background px-1 rounded">Action</code> (or <code className="bg-background px-1 rounded">pipeline_stage</code>): must match a stage/action name; sets the contact's stage and triggers its automation on import</li>
-              <li>Maximum 5,000 records per upload</li>
-              <li>Maximum file size: 10MB</li>
+              <li>No practical limit on records per upload</li>
+              <li>Maximum file size: 45MB</li>
             </ul>
           </div>
+          )}
+
+          {cleanup && (
+            <div className="bg-muted p-3 rounded-lg text-xs space-y-1">
+              <p className="font-medium">The file needs three columns:</p>
+              <ul className="list-disc list-inside space-y-1 text-muted-foreground">
+                <li><span className="font-medium text-foreground">Full Name:</span> saved as the first name exactly as given; left blank, the lead is saved as "Unknown"</li>
+                <li><span className="font-medium text-foreground">Phone:</span> Indian mobile number, with or without +91; numbers that are not valid mobiles are dropped and noted on the lead</li>
+                <li><span className="font-medium text-foreground">Assigned to:</span> the user's name or login email{cleanup.users.length > 0 ? ` (${cleanup.users.join(', ')})` : ''}; left blank, the lead stays unassigned</li>
+                <li>Numbers already in the CRM are not added again; an unassigned one is given to the user named in the file</li>
+                <li>CSV file, up to 45MB</li>
+              </ul>
+            </div>
+          )}
 
           <div className="flex justify-end gap-2">
             <Button

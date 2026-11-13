@@ -4,7 +4,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Loader2 } from "lucide-react";
-import { AuthProvider } from "@/contexts/AuthProvider";
+import { AuthProvider, useAuth } from "@/contexts/AuthProvider";
 import { OrgContextProvider } from "@/contexts/OrgContextProvider";
 
 // Retry wrapper for lazy imports - handles chunk hash changes after deployment
@@ -29,6 +29,7 @@ import PublicForm from "./pages/PublicForm";
 import ProtectedRoute from "./components/Auth/ProtectedRoute";
 import LandingPage from "./pages/LandingPage";
 import Install from "./pages/Install";
+import { LedgerAccessTrail } from "@/lib/LedgerAccessTrail";
 
 // Page loader component
 const PageLoader = () => (
@@ -85,6 +86,7 @@ const OnboardingWizard = lazyRetry(() => import("./pages/OnboardingWizard"));
 // Lazy loaded pages - Other
 const DataExport = lazyRetry(() => import("./pages/admin/DataExport"));
 const DataProtection = lazyRetry(() => import("./pages/admin/DataProtection"));
+const AiCalling = lazyRetry(() => import("./pages/AiCalling"));
 const PrivacyPolicy = lazyRetry(() => import("./pages/PrivacyPolicy"));
 const DataRights = lazyRetry(() => import("./pages/DataRights"));
 const PlatformAdmin = lazyRetry(() => import("./pages/PlatformAdmin"));
@@ -99,6 +101,18 @@ const SdrTestRun = lazyRetry(() => import("./pages/recruit/SdrTestRun"));
 const SdrTestDone = lazyRetry(() => import("./pages/recruit/SdrTestDone"));
 const SdrTestAdmin = lazyRetry(() => import("./pages/recruit/SdrTestAdmin"));
 
+// The landing page is a public marketing page with no auth check of its own,
+// so a visitor arriving with an already-valid session (e.g. the RMPL OPM
+// SSO handoff, or just a returning user with a live session) saw the
+// marketing page instead of their dashboard. Redirect once session state
+// has loaded.
+function RootRoute() {
+  const { session, isLoading } = useAuth();
+  if (isLoading) return null;
+  if (session) return <Navigate to="/dashboard" replace />;
+  return <LandingPage />;
+}
+
 const App = () => (
   <AuthProvider>
     <OrgContextProvider>
@@ -106,10 +120,11 @@ const App = () => (
         <Toaster />
         <Sonner />
         <BrowserRouter>
+          <LedgerAccessTrail />
           <Suspense fallback={<PageLoader />}>
             <Routes>
           {/* Public routes */}
-          <Route path="/" element={<LandingPage />} />
+          <Route path="/" element={<RootRoute />} />
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<SignUp />} />
           <Route path="/install" element={<Install />} />
@@ -371,6 +386,12 @@ const App = () => (
             </ProtectedRoute>
           } />
           
+          <Route path="/ai-calling" element={
+            <ProtectedRoute requiredRole="admin">
+              <AiCalling />
+            </ProtectedRoute>
+          } />
+
           <Route path="/admin/data-export" element={
             <ProtectedRoute>
               <DataExport />

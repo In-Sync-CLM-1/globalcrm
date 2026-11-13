@@ -41,11 +41,14 @@ import {
 } from "@/components/FerventRepository/ferventBooleanSearch";
 import { Upload, Download, Search, X, Phone, MessageSquare, GitBranch, Lock, History, Pencil, ArrowUp, ArrowDown, ArrowUpDown, ChevronDown, ChevronUp } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { useUrlObjectState } from "@/hooks/useUrlState";
+import { useUrlState } from "@/hooks/useUrlState";
 
 export interface RepositoryRecord {
   id: string;
   unique_id: string | null;
   upload_status: string | null;
+  source_type: string | null;
   db_sourced_year: number | null;
   ucdb_status: string | null;
   company_name: string | null;
@@ -199,6 +202,7 @@ function DisabledAction({ icon: Icon, label }: { icon: any; label: string }) {
 const EXPORT_COLUMNS: { key: string; label: string; format?: (v: any, row: RepositoryRecord) => string }[] = [
   { key: "unique_id", label: "Unique ID" },
   { key: "upload_status", label: "Status", format: (v: string | null) => (v === "existing" ? "Updated" : "Fresh") },
+  { key: "source_type", label: "Source", format: (v: string | null) => (v === "international" ? "International" : v === "domestic" ? "Domestic" : "") },
   { key: "db_sourced_year", label: "DB Sourced Year" },
   { key: "ucdb_status", label: "UCDB Status" },
   { key: "company_name", label: "Company Name" },
@@ -211,10 +215,10 @@ const EXPORT_COLUMNS: { key: string; label: string; format?: (v: any, row: Repos
   { key: "state", label: "State" },
   { key: "country", label: "Country" },
   { key: "std_code", label: "STD Code" },
-  { key: "mobile_number_1", label: "Mobile Number 1" },
-  { key: "mobile_number_2", label: "Mobile Number 2" },
-  { key: "direct_number", label: "Direct Number" },
-  { key: "phone_number", label: "Phone Number" },
+  { key: "mobile_number_1", label: "Phone 1" },
+  { key: "mobile_number_2", label: "Phone 2" },
+  { key: "direct_number", label: "Phone 3" },
+  { key: "phone_number", label: "Phone 4" },
   { key: "official_email", label: "Official Email ID" },
   { key: "personal_email_1", label: "Personal Email ID 1" },
   { key: "personal_email_2", label: "Personal Email ID 2" },
@@ -247,8 +251,8 @@ export default function FerventRepository() {
     }
   }, [isImportRunning, queryClient]);
 
-  const [filters, setFilters] = useState<RepositoryFilters>(emptyFilters);
-  const [appliedFilters, setAppliedFilters] = useState<RepositoryFilters>(emptyFilters);
+  const [filters, setFilters] = useUrlObjectState<RepositoryFilters>("f", emptyFilters);
+  const [appliedFilters, setAppliedFilters] = useUrlObjectState<RepositoryFilters>("af", emptyFilters);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [showUpload, setShowUpload] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState<RepositoryRecord | null>(null);
@@ -259,7 +263,7 @@ export default function FerventRepository() {
   const [showImportHistory, setShowImportHistory] = useState(false);
   const [showBulkEdit, setShowBulkEdit] = useState(false);
   const [editingRecord, setEditingRecord] = useState<RepositoryRecord | null>(null);
-  const [searchMode, setSearchMode] = useState<"basic" | "advanced">("basic");
+  const [searchMode, setSearchMode] = useUrlState<"basic" | "advanced">("mode", "basic");
   const [filtersOpen, setFiltersOpen] = useState(true);
   const [advancedQuery, setAdvancedQuery] = useState<BooleanQuery>(emptyBooleanQuery);
   const [appliedAdvancedQuery, setAppliedAdvancedQuery] = useState<BooleanQuery | null>(null);
@@ -646,6 +650,7 @@ export default function FerventRepository() {
                       {[
                         ["unique_id", "Unique ID"],
                         ["upload_status", "Status"],
+                        ["source_type", "Source"],
                         ["db_sourced_year", "DB Sourced Year"],
                         ["ucdb_status", "UCDB Status"],
                         ["company_name", "Company Name"],
@@ -658,10 +663,10 @@ export default function FerventRepository() {
                         ["state", "State"],
                         ["country", "Country"],
                         ["std_code", "STD Code"],
-                        ["mobile_number_1", "Mobile Number 1"],
-                        ["mobile_number_2", "Mobile Number 2"],
-                        ["direct_number", "Direct Number"],
-                        ["phone_number", "Phone Number"],
+                        ["mobile_number_1", "Phone 1"],
+                        ["mobile_number_2", "Phone 2"],
+                        ["direct_number", "Phone 3"],
+                        ["phone_number", "Phone 4"],
                         ["official_email", "Official Email"],
                         ["personal_email_1", "Personal Email 1"],
                         ["personal_email_2", "Personal Email 2"],
@@ -696,6 +701,13 @@ export default function FerventRepository() {
                           <Badge variant={r.upload_status === "existing" ? "secondary" : "outline"}>
                             {r.upload_status === "existing" ? "Updated" : "Fresh"}
                           </Badge>
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap">
+                          {r.source_type ? (
+                            <Badge variant={r.source_type === "international" ? "secondary" : "outline"}>
+                              {r.source_type === "international" ? "International" : "Domestic"}
+                            </Badge>
+                          ) : "—"}
                         </TableCell>
                         <TableCell className="whitespace-nowrap">{r.db_sourced_year || "—"}</TableCell>
                         <TableCell className="whitespace-nowrap">{r.ucdb_status ? <Badge variant="outline">{r.ucdb_status}</Badge> : "—"}</TableCell>
@@ -774,6 +786,7 @@ export default function FerventRepository() {
               <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
                 {[
                   ["Unique ID", selectedRecord.unique_id],
+                  ["Source", selectedRecord.source_type === "international" ? "International" : selectedRecord.source_type === "domestic" ? "Domestic" : null],
                   ["DB Sourced Year", selectedRecord.db_sourced_year],
                   ["UCDB Status", selectedRecord.ucdb_status],
                   ["Company Name", selectedRecord.company_name],
@@ -786,10 +799,10 @@ export default function FerventRepository() {
                   ["State", selectedRecord.state],
                   ["Country", selectedRecord.country],
                   ["STD Code", selectedRecord.std_code],
-                  ["Mobile Number 1", selectedRecord.mobile_number_1],
-                  ["Mobile Number 2", selectedRecord.mobile_number_2],
-                  ["Direct Number", selectedRecord.direct_number],
-                  ["Phone Number", selectedRecord.phone_number],
+                  ["Phone 1", selectedRecord.mobile_number_1],
+                  ["Phone 2", selectedRecord.mobile_number_2],
+                  ["Phone 3", selectedRecord.direct_number],
+                  ["Phone 4", selectedRecord.phone_number],
                   ["Official Email", selectedRecord.official_email],
                   ["Personal Email 1", selectedRecord.personal_email_1],
                   ["Personal Email 2", selectedRecord.personal_email_2],

@@ -10,7 +10,6 @@ const BATCH = 40;
 
 Deno.serve(async () => {
   const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-  const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY");
   const since = new Date(Date.now() - 14 * 24 * 3600 * 1000).toISOString();
 
   const { data: calls } = await supabase
@@ -44,9 +43,9 @@ Deno.serve(async () => {
       let productLabel = "WorkSync";
       if (c.contact_id) {
         const { data: cc } = await supabase.from("contacts").select("product").eq("id", c.contact_id).maybeSingle();
-        if (String(cc?.product || "").toLowerCase() === "vendorverification") productLabel = "Vendor Verification";
+        if (String(cc?.product || "").toLowerCase() === "vendorsync") productLabel = "Vendorsync";
       }
-      const cls = anthropicKey ? await classifyCall(anthropicKey, { transcript, productLabel, outcomeKeys: keys }) : null;
+      const cls = await classifyCall({ transcript, productLabel, outcomeKeys: keys });
       if (cls) {
         outcomeKey = cls.outcome_key; demoDate = cls.demo_date; demoTime = cls.demo_time; optOut = cls.opt_out; summary = cls.summary;
         classified++;

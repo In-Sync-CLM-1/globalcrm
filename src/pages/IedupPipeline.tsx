@@ -41,6 +41,7 @@ import {
 } from "lucide-react";
 import { IEDUP_ORG_ID } from "@/hooks/useIsIedup";
 import { useNotification } from "@/hooks/useNotification";
+import { useUrlState } from "@/hooks/useUrlState";
 
 interface WindowSlot {
   start_min: number;
@@ -53,6 +54,7 @@ interface BeneficiaryRow {
   last_name: string | null;
   name_hi: string | null;
   phone: string | null;
+  email: string | null;
   do_not_call: boolean | null;
   status: string | null;
   created_at: string | null;
@@ -60,7 +62,8 @@ interface BeneficiaryRow {
   last_call_at?: string | null;
   attempts?: number;
   connected?: number;
-  action?: string | null;
+  action_channel?: string | null;
+  action_template?: string | null;
   disposition?: string | null;
 }
 
@@ -75,26 +78,23 @@ interface UploadRow {
   name_en: string;
   number: string;
   name_hi: string;
-  action: string;
+  email: string;
+  channel: string;
+  template: string;
   /** AI's best reading of a damaged name — shown for approval, never auto-applied. */
   suggestion?: { name: string; confidence: "high" | "medium" | "low" };
 }
 
-// Selectable actions = the IEDUP pipeline stages. Setting one on import triggers
-// that stage's automation (call or the mapped WhatsApp template).
-const IEDUP_ACTIONS = [
-  "Call",
-  "Send WhatsApp - After certificate",
-  "Send WhatsApp - After registration & payment verification",
-  "Send WhatsApp - Payment failed",
-  "Send WhatsApp - Add help desk number",
-  "Send WhatsApp - Photo rejected",
-  "Send WhatsApp - Short Attendance",
-  "Send WhatsApp - Assessment Link",
-  "Attendance",
+// Raw channel values. Templates are NOT hardcoded — they're fetched live from
+// the org's own Templates tab (communication_templates for WhatsApp,
+// email_templates for Email), same source used by the Templates page.
+const CHANNELS = [
+  { value: "call", label: "Call" },
+  { value: "whatsapp", label: "WhatsApp" },
+  { value: "email", label: "Email" },
 ];
 
-const CSV_TEMPLATE = `name,number,action\nVibhu Dixit,+917607359820,Call\n`;
+const CSV_TEMPLATE = `name,number,email,channel,template\nVibhu Dixit,+917607359820,vibhu@example.com,whatsapp,iedup_cmyuva_assessment_link_v1\n`;
 
 // A beneficiary name should only ever be English letters, Devanagari, or the
 // punctuation that shows up in real names. Anything else means the file lost
@@ -109,6 +109,31 @@ const READABLE_NAME = /^[A-Za-z0-9ऀ-ॿ‌‍\s.,'’\-/&()]+$/;
 function isUnreadableName(name: string): boolean {
   return !READABLE_NAME.test(name);
 }
+
+// A real phone number, once normalizePhone() runs, is a "+" and 10-15 digits.
+// The most common way it ISN'T that: Excel silently reformats a long digit
+// string as scientific notation ("7.607E+14") when a CSV is opened and
+// re-saved with the number column set to General/Number instead of Text —
+// the real digits beyond a few significant figures are gone for good, not
+// recoverable, so this can only be flagged for the uploader to re-enter.
+const VALID_PHONE = /^\+\d{10,15}$/;
+
+function isInvalidPhone(number: string): boolean {
+  return !VALID_PHONE.test(number);
+}
+
+function isScientificNotation(raw: string): boolean {
+  return /e[+-]?\d+$/i.test(raw.trim());
+}
+
+function phoneErrorReason(number: string): string {
+  if (isScientificNotation(number)) {
+    return `Phone number was corrupted by Excel's scientific notation ("${number}") and the original digits can't be recovered. Re-enter it in the source file with the number column formatted as Text, then re-upload this row.`;
+  }
+  return `Phone number "${number}" isn't valid — needs a country code and 10-12 digits (e.g. +917607359820).`;
+}
+
+const VALID_CHANNELS = new Set(["call", "whatsapp", "email"]);
 
 // One flavour of damage is reversible with certainty: Hindi saved as UTF-8 but
 // read back as Windows-1252 turns "हरि" into "à¤¹à¤°à¤¿". Every original byte is
@@ -147,10 +172,10 @@ export default function IedupPipeline() {
   });
 
   // Filter + pagination state (declared before the query that reads them).
-  const [filterFrom, setFilterFrom] = useState<string>("");
-  const [filterTo, setFilterTo] = useState<string>("");
-  const [hideCalled, setHideCalled] = useState(false);
-  const [page, setPage] = useState(0);
+  const [filterFrom, setFilterFrom] = useUrlState<string>("from", "");
+  const [filterTo, setFilterTo] = useUrlState<string>("to", "");
+  const [hideCalled, setHideCalled] = useUrlState("hide", false);
+  const [page, setPage] = useUrlState("page", 0);
 
   // Beneficiaries list — server-side paginated (one page at a time + exact total).
   const { data: pageData, refetch: refetchList } = useQuery({
@@ -158,7 +183,7 @@ export default function IedupPipeline() {
     queryFn: async () => {
       let q = supabase
         .from("contacts")
-        .select("id, first_name, last_name, name_hi, phone, do_not_call, status, created_at, pipeline_stage_id", { count: "exact" })
+        .select("id, first_name, last_name, name_hi, phone, email, do_not_call, status, created_at, action_channel, action_template", { count: "exact" })
         .eq("org_id", IEDUP_ORG_ID);
       if (filterFrom) q = q.gte("created_at", filterFrom);
       if (filterTo) q = q.lte("created_at", `${filterTo}T23:59:59.999`);
@@ -171,7 +196,7 @@ export default function IedupPipeline() {
       if (rows.length === 0) return { rows, total };
 
       const ids = rows.map((r) => r.id);
-      const [callsRes, statsRes, stagesRes, dispoRes] = await Promise.all([
+      const [callsRes, statsRes, dispoRes] = await Promise.all([
         supabase
           .from("call_logs")
           .select("contact_id, started_at")
@@ -180,8 +205,6 @@ export default function IedupPipeline() {
           .not("started_at", "is", null)
           .order("started_at", { ascending: false }),
         supabase.rpc("contact_ai_call_stats", { p_contact_ids: ids }),
-        // Action = the contact's pipeline stage (the "Send WhatsApp - …" / "Call" action).
-        supabase.from("pipeline_stages").select("id, name").eq("org_id", IEDUP_ORG_ID),
         // Disposition = latest call/WhatsApp outcome from the shared view.
         supabase.from("contact_latest_disposition").select("contact_id, disposition_name").eq("org_id", IEDUP_ORG_ID).in("contact_id", ids),
       ]);
@@ -195,10 +218,6 @@ export default function IedupPipeline() {
       for (const s of (statsRes.data || []) as Array<{ contact_id: string; attempts: number; connected: number }>) {
         stats.set(s.contact_id, { attempts: Number(s.attempts), connected: Number(s.connected) });
       }
-      const stageName = new Map<string, string>();
-      for (const s of (stagesRes.data || []) as Array<{ id: string; name: string }>) {
-        stageName.set(s.id, s.name);
-      }
       const dispo = new Map<string, string>();
       for (const d of (dispoRes.data || []) as Array<{ contact_id: string; disposition_name: string }>) {
         if (d.contact_id && d.disposition_name) dispo.set(d.contact_id, d.disposition_name);
@@ -210,7 +229,6 @@ export default function IedupPipeline() {
           last_call_at: latest.get(r.id) ?? null,
           attempts: stats.get(r.id)?.attempts || 0,
           connected: stats.get(r.id)?.connected || 0,
-          action: r.pipeline_stage_id ? (stageName.get(r.pipeline_stage_id) ?? null) : null,
           disposition: dispo.get(r.id) ?? null,
         })),
       };
@@ -220,6 +238,70 @@ export default function IedupPipeline() {
   const beneficiaries = (pageData?.rows ?? []) as BeneficiaryRow[];
   const total = pageData?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  // Templates available to fire — the org's OWN submitted/approved templates,
+  // same source the Templates tab reads (communication_templates / email_templates).
+  const { data: waTemplateNames } = useQuery({
+    queryKey: ["iedup-wa-template-names"],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("communication_templates")
+        .select("template_name")
+        .eq("org_id", IEDUP_ORG_ID)
+        .eq("status", "approved")
+        .order("template_name");
+      return (data || []).map((t: any) => t.template_name as string);
+    },
+  });
+  const { data: emailTemplateNames } = useQuery({
+    queryKey: ["iedup-email-template-names"],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("email_templates")
+        .select("name")
+        .eq("org_id", IEDUP_ORG_ID)
+        .eq("is_active", true)
+        .order("name");
+      return (data || []).map((t: any) => t.name as string);
+    },
+  });
+  function templatesForChannel(channel: string): string[] {
+    if (channel === "whatsapp") return waTemplateNames || [];
+    if (channel === "email") return emailTemplateNames || [];
+    return [];
+  }
+
+  // Fires a Channel + Template selection immediately against one or more
+  // beneficiaries. Replaces the old stage-driven automation entirely.
+  const [firingIds, setFiringIds] = useState<Set<string>>(new Set());
+  async function fireAction(contactIds: string[], channel: string, templateName: string | null) {
+    setFiringIds((prev) => new Set([...prev, ...contactIds]));
+    try {
+      const { data, error } = await supabase.functions.invoke("iedup-fire-action", {
+        body: { contact_ids: contactIds, channel, template_name: templateName },
+      });
+      if (error) throw new Error((data as any)?.error || error.message);
+      if (!data?.ok) throw new Error(data?.error || "Send failed");
+      const sent = data.sent ?? 0;
+      const failed = data.failed ?? 0;
+      if (sent > 0 && failed === 0) {
+        notify.success("Sent", `${sent} beneficiar${sent === 1 ? "y" : "ies"} messaged.`);
+      } else if (sent > 0) {
+        notify.info("Partially sent", `${sent} sent, ${failed} failed.`);
+      } else {
+        notify.error("Send failed", `${failed} failed — nothing went out.`);
+      }
+      refetchList();
+    } catch (err: any) {
+      notify.error("Could not send", err.message || "Try again.");
+    } finally {
+      setFiringIds((prev) => {
+        const next = new Set(prev);
+        for (const id of contactIds) next.delete(id);
+        return next;
+      });
+    }
+  }
 
   // Upload state
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -231,6 +313,22 @@ export default function IedupPipeline() {
   // can never reach a beneficiary's WhatsApp message or the AI caller's script.
   const unreadableRows = useMemo(
     () => uploadRows.filter((r) => isUnreadableName(r.name_en)).length,
+    [uploadRows],
+  );
+  const invalidPhoneRows = useMemo(
+    () => uploadRows.filter((r) => isInvalidPhone(r.number)).length,
+    [uploadRows],
+  );
+  // Everything that would be refused at import time — used to size the
+  // Import button and decide whether it's disabled (nothing importable left).
+  const problemRows = useMemo(
+    () =>
+      uploadRows.filter(
+        (r) =>
+          isUnreadableName(r.name_en) ||
+          isInvalidPhone(r.number) ||
+          (r.channel && !VALID_CHANNELS.has(r.channel)),
+      ).length,
     [uploadRows],
   );
   const [suggesting, setSuggesting] = useState(false);
@@ -266,12 +364,22 @@ export default function IedupPipeline() {
   const [manualNameEn, setManualNameEn] = useState("");
   const [manualNameHi, setManualNameHi] = useState("");
   const [manualNumber, setManualNumber] = useState("");
+  const [manualEmail, setManualEmail] = useState("");
   const [manualTransliterating, setManualTransliterating] = useState(false);
   const [manualSaving, setManualSaving] = useState(false);
 
   // Filter + selection state
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkDialing, setBulkDialing] = useState(false);
+
+  // A row mid-pick (channel chosen, template not yet chosen for WA/Email) needs
+  // to show that in-progress choice before anything is fired/persisted.
+  const [pendingChannel, setPendingChannel] = useState<Record<string, string>>({});
+
+  // Bulk Channel + Template + Send
+  const [bulkChannel, setBulkChannel] = useState("");
+  const [bulkTemplate, setBulkTemplate] = useState("");
+  const [bulkSending, setBulkSending] = useState(false);
 
   // Calling window editor state
   const [windowsDraft, setWindowsDraft] = useState<WindowSlot[]>([]);
@@ -297,10 +405,30 @@ export default function IedupPipeline() {
     URL.revokeObjectURL(a.href);
   }
 
+  function csvField(v: string): string {
+    return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+  }
+
+  // Rows that failed to import are handed back in the SAME columns as the
+  // upload template, plus one extra "error" column explaining why — so the
+  // file can be fixed and dragged straight back into Upload CSV.
+  function downloadErrorRows(rows: Array<UploadRow & { error: string }>) {
+    const header = "name,number,email,channel,template,error";
+    const lines = rows.map((r) =>
+      [r.name_en, r.number, r.email, r.channel, r.template, r.error].map(csvField).join(","),
+    );
+    const blob = new Blob(["﻿" + [header, ...lines].join("\n")], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "iedup_upload_errors.csv";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
   async function handleFilePicked(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     if (!f) return;
-    Papa.parse<{ name?: string; number?: string; action?: string }>(f, {
+    Papa.parse<{ name?: string; number?: string; email?: string; channel?: string; template?: string }>(f, {
       header: true,
       skipEmptyLines: true,
       complete: async (res) => {
@@ -316,7 +444,9 @@ export default function IedupPipeline() {
               name_en: fixed ?? raw,
               number: normalizePhone(String(r.number || "")),
               name_hi: "",
-              action: String(r.action || "").trim(),
+              email: String(r.email || "").trim(),
+              channel: String(r.channel || "").trim().toLowerCase(),
+              template: String(r.template || "").trim(),
             };
           })
           .filter((r) => r.name_en && r.number);
@@ -358,6 +488,26 @@ export default function IedupPipeline() {
     });
   }
 
+  function rowToInsert(r: UploadRow, userId: string) {
+    const parts = r.name_en.trim().split(/\s+/);
+    return {
+      org_id: IEDUP_ORG_ID,
+      created_by: userId,
+      first_name: parts[0] || r.name_en,
+      last_name: parts.slice(1).join(" ") || null,
+      name_hi: r.name_hi || r.name_en,
+      phone: r.number,
+      email: r.email || null,
+      product: "CM YUVA",
+      source: "iedup_csv_upload",
+      action_channel: r.channel || null,
+      action_template: r.template || null,
+    };
+  }
+
+  // Good rows import and fire immediately; bad rows are never sent to the
+  // database at all — they come back as a downloadable CSV so the file can
+  // be fixed and re-uploaded, instead of one bad row blocking everyone else.
   async function handleImport() {
     if (uploadRows.length === 0) return;
     setImporting(true);
@@ -366,74 +516,98 @@ export default function IedupPipeline() {
       const userId = userData?.user?.id;
       if (!userId) throw new Error("You must be signed in to import.");
 
-      // Backstop for the disabled Import button, so an unreadable name can't
-      // slip through and end up addressed to a real beneficiary.
-      const stillUnreadable = uploadRows.filter((r) => isUnreadableName(r.name_en));
-      if (stillUnreadable.length > 0) {
-        throw new Error(
-          `${stillUnreadable.length} name(s) still can't be read (e.g. "${stillUnreadable[0].name_en}"). ` +
-            "Retype them or remove those rows. Nothing was imported.",
-        );
+      const errorRows: Array<UploadRow & { error: string }> = [];
+      const goodRows: UploadRow[] = [];
+      for (const r of uploadRows) {
+        if (isUnreadableName(r.name_en)) {
+          errorRows.push({ ...r, error: "Name could not be read (file encoding issue) — retype and re-upload." });
+        } else if (isInvalidPhone(r.number)) {
+          errorRows.push({ ...r, error: phoneErrorReason(r.number) });
+        } else if (r.channel && !VALID_CHANNELS.has(r.channel)) {
+          errorRows.push({ ...r, error: `Unrecognized channel "${r.channel}" — must be call, whatsapp, or email.` });
+        } else {
+          goodRows.push(r);
+        }
       }
 
-      // Resolve the chosen Action to its pipeline stage so the import sets the
-      // stage (which fires that stage's automation via the enqueue trigger).
-      const { data: stages, error: stagesError } = await supabase
-        .from("pipeline_stages")
-        .select("id, name")
-        .eq("org_id", IEDUP_ORG_ID)
-        .eq("is_active", true);
-      if (stagesError || !stages || stages.length === 0) {
-        throw new Error(
-          "Could not load the Action list. Nothing was imported — please try again.",
+      if (goodRows.length === 0) {
+        downloadErrorRows(errorRows);
+        notify.error(
+          "Nothing to import",
+          `All ${errorRows.length} row(s) had errors. The error file was downloaded — fix and re-upload.`,
         );
-      }
-      const stageMap = new Map(
-        (stages || []).map((s: any) => [String(s.name).trim().toLowerCase(), s.id as string]),
-      );
-
-      // An action that doesn't match a known Action would import the row with
-      // nothing to send — refuse the whole file so it never fails silently.
-      const unmatched = [
-        ...new Set(
-          uploadRows
-            .map((r) => r.action.trim())
-            .filter((a) => a && !stageMap.has(a.toLowerCase())),
-        ),
-      ];
-      if (unmatched.length > 0) {
-        throw new Error(
-          `Unrecognized Action(s): ${unmatched.join(", ")}. ` +
-            "Fix the Action column (or pick one from the dropdown for each row) and import again. Nothing was imported.",
-        );
+        return;
       }
 
-      const inserts = uploadRows.map((r) => {
-        const parts = r.name_en.trim().split(/\s+/);
-        return {
-          org_id: IEDUP_ORG_ID,
-          created_by: userId,
-          first_name: parts[0] || r.name_en,
-          last_name: parts.slice(1).join(" ") || null,
-          name_hi: r.name_hi || r.name_en,
-          phone: r.number,
-          product: "CM YUVA",
-          source: "iedup_csv_upload",
-          pipeline_stage_id: r.action ? (stageMap.get(r.action.trim().toLowerCase()) || null) : null,
-        };
-      });
-      const { error } = await supabase.from("contacts").insert(inserts);
-      if (error) throw error;
-      notify.success(
-        "Beneficiaries imported",
-        `${inserts.length} row(s) added. Hindi names are being converted in the background.`,
-      );
-      // Kick off Devanagari conversion now (fire-and-forget); a cron also catches up.
-      supabase.functions.invoke("transliterate-pending", { body: { org_id: IEDUP_ORG_ID } }).catch(() => undefined);
+      const inserts = goodRows.map((r) => rowToInsert(r, userId));
+      let insertedRows: Array<{ id: string }> | null = null;
+      const { data, error } = await supabase.from("contacts").insert(inserts).select("id");
+      if (!error) {
+        insertedRows = data;
+      } else {
+        // Bulk insert failed as a whole (e.g. one row tripped a DB constraint).
+        // Fall back to inserting one at a time so we can isolate exactly which
+        // row(s) failed and still land every row that's actually fine.
+        insertedRows = [];
+        for (let i = 0; i < goodRows.length; i++) {
+          const { data: row, error: rowError } = await supabase
+            .from("contacts")
+            .insert(inserts[i])
+            .select("id")
+            .single();
+          if (rowError) {
+            errorRows.push({ ...goodRows[i], error: rowError.message });
+            goodRows[i] = null as any; // mark as not-inserted, filtered below
+          } else if (row) {
+            insertedRows.push(row);
+          }
+        }
+      }
+
+      // goodRows/inserts/insertedRows stay index-aligned on the fast path;
+      // on the fallback path, drop the ones we marked as failed above.
+      const importedRows = goodRows.filter((r): r is UploadRow => r !== null);
+
+      if (importedRows.length > 0) {
+        notify.success(
+          "Beneficiaries imported",
+          `${importedRows.length} row(s) added.` +
+            (errorRows.length > 0 ? ` ${errorRows.length} row(s) had errors — error file downloaded.` : "") +
+            " Hindi names are being converted in the background.",
+        );
+        // Kick off Devanagari conversion now (fire-and-forget); a cron also catches up.
+        supabase.functions.invoke("transliterate-pending", { body: { org_id: IEDUP_ORG_ID } }).catch(() => undefined);
+      } else {
+        notify.error("Import failed", "None of the rows could be saved. See the downloaded error file.");
+      }
+
+      if (errorRows.length > 0) downloadErrorRows(errorRows);
+
       setUploadOpen(false);
       setUploadRows([]);
       refetchList();
       qc.invalidateQueries({ queryKey: ["iedup-data-counts"] });
+
+      // Rows that arrived with a Channel + Template (Call needs no template)
+      // fire immediately, grouped by identical channel+template so each
+      // combination is a single send call. Insert order matches import order.
+      if (insertedRows && insertedRows.length === importedRows.length) {
+        const groups = new Map<string, { channel: string; template: string | null; ids: string[] }>();
+        importedRows.forEach((r, i) => {
+          if (!r.channel) return;
+          if (r.channel !== "call" && !r.template) return;
+          const key = `${r.channel}::${r.template}`;
+          const g = groups.get(key) || { channel: r.channel, template: r.channel === "call" ? null : r.template, ids: [] };
+          g.ids.push(insertedRows![i].id);
+          groups.set(key, g);
+        });
+        const FIRE_BATCH_SIZE = 200; // matches iedup-fire-action's per-call cap
+        for (const g of groups.values()) {
+          for (let i = 0; i < g.ids.length; i += FIRE_BATCH_SIZE) {
+            await fireAction(g.ids.slice(i, i + FIRE_BATCH_SIZE), g.channel, g.template);
+          }
+        }
+      }
     } catch (err: any) {
       notify.error("Import failed", err.message || "Could not save beneficiaries.");
     } finally {
@@ -483,6 +657,7 @@ export default function IedupPipeline() {
     setManualNameEn("");
     setManualNameHi("");
     setManualNumber("");
+    setManualEmail("");
     setManualOpen(true);
   }
 
@@ -523,6 +698,7 @@ export default function IedupPipeline() {
         last_name: parts.slice(1).join(" ") || null,
         name_hi: (manualNameHi || name).trim(),
         phone: num,
+        email: manualEmail.trim() || null,
         product: "CM YUVA",
         source: "iedup_manual_add",
       });
@@ -829,6 +1005,52 @@ export default function IedupPipeline() {
                         </>
                       )}
                     </Button>
+                    <select
+                      value={bulkChannel}
+                      onChange={(e) => {
+                        setBulkChannel(e.target.value);
+                        setBulkTemplate("");
+                      }}
+                      className="h-8 rounded-md border bg-background px-2 text-sm"
+                    >
+                      <option value="">Channel…</option>
+                      {CHANNELS.map((c) => (
+                        <option key={c.value} value={c.value}>{c.label}</option>
+                      ))}
+                    </select>
+                    {bulkChannel && bulkChannel !== "call" && (
+                      <select
+                        value={bulkTemplate}
+                        onChange={(e) => setBulkTemplate(e.target.value)}
+                        className="h-8 rounded-md border bg-background px-2 text-sm"
+                      >
+                        <option value="">Template…</option>
+                        {templatesForChannel(bulkChannel).map((t) => (
+                          <option key={t} value={t}>{t}</option>
+                        ))}
+                      </select>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={bulkSending || !bulkChannel || (bulkChannel !== "call" && !bulkTemplate)}
+                      onClick={async () => {
+                        setBulkSending(true);
+                        await fireAction(Array.from(selectedIds), bulkChannel, bulkChannel === "call" ? null : bulkTemplate);
+                        setBulkSending(false);
+                        setSelectedIds(new Set());
+                        setBulkChannel("");
+                        setBulkTemplate("");
+                      }}
+                    >
+                      {bulkSending ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Sending…
+                        </>
+                      ) : (
+                        <>Send ({selectedIds.size})</>
+                      )}
+                    </Button>
                   </>
                 )}
               </div>
@@ -859,7 +1081,9 @@ export default function IedupPipeline() {
                       <TableHead>Name (EN)</TableHead>
                       <TableHead>Name (HI)</TableHead>
                       <TableHead>Number</TableHead>
-                      <TableHead>Action</TableHead>
+                      <TableHead>Email</TableHead>
+                      <TableHead>Channel</TableHead>
+                      <TableHead>Template</TableHead>
                       <TableHead>Uploaded</TableHead>
                       <TableHead>Disposition</TableHead>
                       <TableHead>Last call</TableHead>
@@ -884,12 +1108,47 @@ export default function IedupPipeline() {
                           <TableCell>{[b.first_name, b.last_name].filter(Boolean).join(" ")}</TableCell>
                           <TableCell className="font-medium">{b.name_hi || "—"}</TableCell>
                           <TableCell className="font-mono text-sm">{b.phone}</TableCell>
+                          <TableCell className="text-sm">{b.email || <span className="text-xs text-muted-foreground">—</span>}</TableCell>
                           <TableCell>
-                            {b.action ? (
-                              <Badge variant="outline" className="whitespace-nowrap">{b.action}</Badge>
-                            ) : (
-                              <span className="text-xs text-muted-foreground">—</span>
-                            )}
+                            <select
+                              value={pendingChannel[b.id] ?? b.action_channel ?? ""}
+                              disabled={firingIds.has(b.id)}
+                              onChange={(e) => {
+                                const channel = e.target.value;
+                                setPendingChannel((prev) => ({ ...prev, [b.id]: channel }));
+                                if (channel === "call") fireAction([b.id], "call", null);
+                              }}
+                              className="h-8 rounded-md border bg-background px-2 text-sm"
+                            >
+                              <option value="">— none —</option>
+                              {CHANNELS.map((c) => (
+                                <option key={c.value} value={c.value}>{c.label}</option>
+                              ))}
+                            </select>
+                          </TableCell>
+                          <TableCell>
+                            {(() => {
+                              const channel = pendingChannel[b.id] ?? b.action_channel ?? "";
+                              if (!channel || channel === "call") {
+                                return <span className="text-xs text-muted-foreground">—</span>;
+                              }
+                              return (
+                                <select
+                                  value={channel === b.action_channel ? (b.action_template ?? "") : ""}
+                                  disabled={firingIds.has(b.id)}
+                                  onChange={(e) => {
+                                    const template = e.target.value;
+                                    if (template) fireAction([b.id], channel, template);
+                                  }}
+                                  className="h-8 rounded-md border bg-background px-2 text-sm"
+                                >
+                                  <option value="">— select —</option>
+                                  {templatesForChannel(channel).map((t) => (
+                                    <option key={t} value={t}>{t}</option>
+                                  ))}
+                                </select>
+                              );
+                            })()}
                           </TableCell>
                           <TableCell className="text-xs text-muted-foreground">
                             {b.created_at ? new Date(b.created_at).toLocaleDateString() : "—"}
@@ -1013,6 +1272,16 @@ export default function IedupPipeline() {
                   placeholder="+91 9876543210"
                 />
               </div>
+              <div>
+                <Label htmlFor="manual-email">Email (optional — needed for the Email channel)</Label>
+                <Input
+                  id="manual-email"
+                  type="email"
+                  value={manualEmail}
+                  onChange={(e) => setManualEmail(e.target.value)}
+                  placeholder="name@example.com"
+                />
+              </div>
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setManualOpen(false)} disabled={manualSaving}>
@@ -1054,14 +1323,31 @@ export default function IedupPipeline() {
                   </p>
                   <p className="text-muted-foreground">
                     The highlighted rows lost their characters when the file was saved — this happens when
-                    a file with Hindi names is saved as plain CSV instead of "CSV UTF-8". Retype those names,
-                    or remove the rows. Everything else will import normally.
+                    a file with Hindi names is saved as plain CSV instead of "CSV UTF-8". You can retype
+                    them here now, or just click Import: everything else will go through, and these rows
+                    will come back as a downloaded CSV to fix and re-upload.
                   </p>
                   {suggesting && (
                     <p className="mt-1 inline-flex items-center gap-1 text-muted-foreground">
                       <Loader2 className="h-3 w-3 animate-spin" /> Working out the likely spellings…
                     </p>
                   )}
+                </div>
+              </div>
+            )}
+            {invalidPhoneRows > 0 && (
+              <div className="flex items-start gap-2 rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+                <div>
+                  <p className="font-medium text-destructive">
+                    {invalidPhoneRows} phone number{invalidPhoneRows === 1 ? "" : "s"} look{invalidPhoneRows === 1 ? "s" : ""} wrong
+                  </p>
+                  <p className="text-muted-foreground">
+                    The highlighted numbers below aren't a real 10-12 digit phone number — often Excel turning
+                    a long number into scientific notation (e.g. "7.607E+14") when the file is saved, which
+                    destroys the real digits. Fix them here now, or click Import: everything else will go
+                    through, and these rows will come back as a downloaded CSV to fix and re-upload.
+                  </p>
                 </div>
               </div>
             )}
@@ -1072,7 +1358,9 @@ export default function IedupPipeline() {
                     <TableHead>Name (EN)</TableHead>
                     <TableHead>Name (HI) — editable</TableHead>
                     <TableHead>Number</TableHead>
-                    <TableHead>Action</TableHead>
+                    <TableHead>Email</TableHead>
+                    <TableHead>Channel</TableHead>
+                    <TableHead>Template</TableHead>
                     <TableHead className="w-10" />
                   </TableRow>
                 </TableHeader>
@@ -1156,22 +1444,69 @@ export default function IedupPipeline() {
                           className="h-8"
                         />
                       </TableCell>
-                      <TableCell className="font-mono text-sm">{r.number}</TableCell>
                       <TableCell>
-                        <select
-                          value={IEDUP_ACTIONS.includes(r.action) ? r.action : ""}
+                        <Input
+                          value={r.number}
                           onChange={(e) =>
                             setUploadRows((prev) =>
-                              prev.map((x, idx) => (idx === i ? { ...x, action: e.target.value } : x)),
+                              prev.map((x, idx) => (idx === i ? { ...x, number: e.target.value } : x)),
+                            )
+                          }
+                          className={
+                            isInvalidPhone(r.number)
+                              ? "h-8 font-mono text-sm border-destructive text-destructive focus-visible:ring-destructive"
+                              : "h-8 font-mono text-sm"
+                          }
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          value={r.email}
+                          onChange={(e) =>
+                            setUploadRows((prev) =>
+                              prev.map((x, idx) => (idx === i ? { ...x, email: e.target.value } : x)),
+                            )
+                          }
+                          placeholder="optional"
+                          className="h-8"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <select
+                          value={r.channel}
+                          onChange={(e) =>
+                            setUploadRows((prev) =>
+                              prev.map((x, idx) => (idx === i ? { ...x, channel: e.target.value, template: "" } : x)),
                             )
                           }
                           className="h-8 rounded-md border bg-background px-2 text-sm"
                         >
                           <option value="">— none —</option>
-                          {IEDUP_ACTIONS.map((a) => (
-                            <option key={a} value={a}>{a}</option>
+                          {CHANNELS.map((c) => (
+                            <option key={c.value} value={c.value}>{c.label}</option>
                           ))}
                         </select>
+                      </TableCell>
+                      <TableCell>
+                        {r.channel === "call" ? (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        ) : (
+                          <select
+                            value={r.template}
+                            onChange={(e) =>
+                              setUploadRows((prev) =>
+                                prev.map((x, idx) => (idx === i ? { ...x, template: e.target.value } : x)),
+                              )
+                            }
+                            disabled={!r.channel}
+                            className="h-8 rounded-md border bg-background px-2 text-sm"
+                          >
+                            <option value="">— select —</option>
+                            {templatesForChannel(r.channel).map((t) => (
+                              <option key={t} value={t}>{t}</option>
+                            ))}
+                          </select>
+                        )}
                       </TableCell>
                       <TableCell>
                         <Button
@@ -1196,14 +1531,17 @@ export default function IedupPipeline() {
               </Button>
               <Button
                 onClick={handleImport}
-                disabled={importing || transliterating || unreadableRows > 0 || uploadRows.length === 0}
+                disabled={importing || transliterating || uploadRows.length === problemRows || uploadRows.length === 0}
               >
                 {importing ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Importing…
                   </>
-                ) : unreadableRows > 0 ? (
-                  <>Fix {unreadableRows} name{unreadableRows === 1 ? "" : "s"} to import</>
+                ) : problemRows > 0 ? (
+                  <>
+                    Import {uploadRows.length - problemRows} row{uploadRows.length - problemRows === 1 ? "" : "s"}{" "}
+                    ({problemRows} error{problemRows === 1 ? "" : "s"} will be downloaded)
+                  </>
                 ) : (
                   <>Import {uploadRows.length} row{uploadRows.length === 1 ? "" : "s"}</>
                 )}

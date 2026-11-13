@@ -26,6 +26,9 @@ import { EmailAutomationJourney } from "@/components/Contact/EmailAutomationJour
 import { LeadScoreCard } from "@/components/Contact/LeadScoreCard";
 import { EnrichedFieldsSection } from "@/components/Contact/EnrichedFieldsSection";
 import { ConvertToClientButton } from "@/components/Clients/ConvertToClientButton";
+import { UrlTabs } from "@/components/UrlTabs";
+import { useGamingAccess } from "@/hooks/useGamingAccess";
+import { RevealContactDetails } from "@/components/Contact/RevealContactDetails";
 
 interface Contact {
   id: string;
@@ -81,6 +84,7 @@ export default function ContactDetail() {
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isFillFormOpen, setIsFillFormOpen] = useState(false);
   const [isWhatsAppOpen, setIsWhatsAppOpen] = useState(false);
+  const gaming = useGamingAccess();
   const [resendTemplateId, setResendTemplateId] = useState<string | null>(null);
   const [isEmailOpen, setIsEmailOpen] = useState(false);
   const [activityType, setActivityType] = useState<string>("note");
@@ -266,7 +270,10 @@ export default function ContactDetail() {
           <div className="space-y-6">
             <Card className="md:col-span-1">
               <CardHeader>
-                <CardTitle>Contact Information</CardTitle>
+                <div className="flex items-start justify-between gap-2">
+                  <CardTitle>Contact Information</CardTitle>
+                  <RevealContactDetails contactId={id!} />
+                </div>
               </CardHeader>
               <CardContent className="space-y-4">
               <div>
@@ -377,18 +384,20 @@ export default function ContactDetail() {
                   >
                     <Mail className="h-4 w-4" />
                   </Button>
-                  <Button 
-                    size="sm" 
-                    variant="outline"
-                    onClick={() => setIsWhatsAppOpen(true)}
-                  >
-                    <MessageCircle className="h-4 w-4" />
-                  </Button>
+                  {gaming.whatsapp && (
+                    <Button 
+                      size="sm" 
+                      variant="outline"
+                      onClick={() => setIsWhatsAppOpen(true)}
+                    >
+                      <MessageCircle className="h-4 w-4" />
+                    </Button>
+                  )}
                 </div>
               </div>
             </CardHeader>
             <CardContent>
-              <Tabs defaultValue="journey">
+              <UrlTabs param="tab" defaultValue="journey">
                 <TabsList className="grid w-full grid-cols-3">
                   <TabsTrigger value="journey">Journey</TabsTrigger>
                   <TabsTrigger value="automation">Automation</TabsTrigger>
@@ -415,7 +424,7 @@ export default function ContactDetail() {
                     <p className="text-sm text-muted-foreground">No notes yet</p>
                   )}
                 </TabsContent>
-              </Tabs>
+              </UrlTabs>
             </CardContent>
           </Card>
         </div>

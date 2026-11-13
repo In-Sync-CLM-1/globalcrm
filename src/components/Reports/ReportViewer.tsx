@@ -7,6 +7,7 @@ import { Download, X } from "lucide-react";
 import ReportCanvas from "./ReportCanvas";
 import { toast } from "sonner";
 import { useOrgContext } from "@/hooks/useOrgContext";
+import { useGamingAccess } from "@/hooks/useGamingAccess";
 
 interface ReportViewerProps {
   reportId: string | null;
@@ -32,6 +33,7 @@ export const ReportViewer = ({ reportId, open, onClose }: ReportViewerProps) => 
     enabled: !!reportId && open,
   });
 
+  const gaming = useGamingAccess();
   const handleExport = () => {
     toast.info("Export functionality coming soon");
   };
@@ -43,10 +45,12 @@ export const ReportViewer = ({ reportId, open, onClose }: ReportViewerProps) => 
           <div className="flex items-center justify-between">
             <DialogTitle>{report?.name || 'Loading...'}</DialogTitle>
             <div className="flex gap-2">
-              <Button size="sm" variant="outline" onClick={handleExport}>
-                <Download className="h-4 w-4 mr-2" />
-                Export
-              </Button>
+              {gaming.canExport && (
+                <Button size="sm" variant="outline" onClick={handleExport}>
+                  <Download className="h-4 w-4 mr-2" />
+                  Export
+                </Button>
+              )}
               <Button size="sm" variant="ghost" onClick={onClose}>
                 <X className="h-4 w-4" />
               </Button>
