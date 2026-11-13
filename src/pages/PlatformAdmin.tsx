@@ -37,6 +37,7 @@ interface Organization {
   lastPaymentDate?: string | null;
   nextDueDate?: string | null;
   nextDueAmount?: number | null;
+  lifetimePaid?: number;
 }
 
 interface OrgStats {
@@ -103,11 +104,12 @@ export default function PlatformAdmin() {
     if (!authorized) return;
     setLoading(true);
     try {
-      const [{ data: orgs, error: orgsError }, { data: platformStats }, { data: subs }, { data: dueInvoices }] = await Promise.all([
+      const [{ data: orgs, error: orgsError }, { data: platformStats }, { data: subs }, { data: dueInvoices }, { data: payments }] = await Promise.all([
         supabase.from("organizations").select("*").order("created_at", { ascending: false }),
         supabase.rpc("get_platform_admin_stats"),
         supabase.from("organization_subscriptions").select("org_id, subscription_status, last_payment_date, next_billing_date"),
         supabase.from("subscription_invoices").select("org_id, due_date, total_amount").in("payment_status", ["pending", "overdue"]),
+        supabase.from("payment_transactions").select("org_id, amount").eq("payment_status", "success"),
       ]);
 
       if (orgsError) throw orgsError;
@@ -122,6 +124,14 @@ export default function PlatformAdmin() {
         if (!cur || new Date(inv.due_date) < new Date(cur.due_date)) {
           nextDueByOrg.set(inv.org_id, { due_date: inv.due_date, total_amount: Number(inv.total_amount) });
         }
+      }
+      // Lifetime paid = every successful payment_transactions row, whichever
+      // channel it came through (Razorpay online or an admin-recorded offline
+      // payment) — both write to the same table (see record-offline-payment /
+      // verify-razorpay-payment).
+      const lifetimePaidByOrg = new Map<string, number>();
+      for (const p of payments || []) {
+        lifetimePaidByOrg.set(p.org_id, (lifetimePaidByOrg.get(p.org_id) || 0) + Number(p.amount || 0));
       }
 
       const orgsWithStats = await Promise.all(
@@ -145,6 +155,7 @@ export default function PlatformAdmin() {
             lastPaymentDate: sub?.last_payment_date || null,
             nextDueDate: nextDue?.due_date || sub?.next_billing_date || null,
             nextDueAmount: nextDue?.total_amount ?? null,
+            lifetimePaid: lifetimePaidByOrg.get(org.id) || 0,
           };
         })
       );
