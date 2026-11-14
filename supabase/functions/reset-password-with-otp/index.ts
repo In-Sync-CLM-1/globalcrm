@@ -1,4 +1,5 @@
 import { getSupabaseClient } from '../_shared/supabaseClient.ts';
+import { otpResetDisabledForUser, OTP_RESET_OFF_MESSAGE } from '../_shared/passwordResetPolicy.ts';
 
 // Second half of the OTP password-reset flow: verifies the code from
 // request-password-otp and sets the new password in one call, so there's no
@@ -89,6 +90,14 @@ Deno.serve(async (req) => {
     if (!profile) {
       return new Response(
         JSON.stringify({ error: 'Code expired or invalid. Please request a new one.' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // A code issued before the organisation switched code reset off cannot be used either.
+    if (await otpResetDisabledForUser(supabase, profile.id)) {
+      return new Response(
+        JSON.stringify({ error: OTP_RESET_OFF_MESSAGE }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }

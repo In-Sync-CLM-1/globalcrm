@@ -2,11 +2,13 @@ import { ReactNode, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
+import { ChangePasswordDialog } from "@/components/Auth/ChangePasswordDialog";
 import {
   LayoutDashboard,
   Settings,
   Users,
   LogOut,
+  KeyRound,
   Menu,
   X,
   Contact,
@@ -69,6 +71,7 @@ function DashboardLayout({ children }: DashboardLayoutProps) {
   const navigate = useNavigate();
   const notify = useNotification();
   const { user, signOut } = useAuth();
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const { canAccessFeature, loading: featureAccessLoading } = useFeatureAccess();
@@ -775,6 +778,15 @@ function DashboardLayout({ children }: DashboardLayoutProps) {
                 variant="ghost"
                 size="sm"
                 className="w-full justify-start text-sm text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-primary"
+                onClick={() => { setSidebarOpen(false); setChangePasswordOpen(true); }}
+              >
+                <KeyRound size={16} className="mr-2 text-sidebar-muted" />
+                Change Password
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="w-full justify-start text-sm text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-primary"
                 onClick={handleSignOut}
               >
                 <LogOut size={16} className="mr-2 text-sidebar-muted" />
@@ -783,6 +795,17 @@ function DashboardLayout({ children }: DashboardLayoutProps) {
             </div>
           </div>
         </aside>
+
+        <ChangePasswordDialog
+          open={changePasswordOpen}
+          onOpenChange={setChangePasswordOpen}
+          email={user?.email}
+          onChanged={async () => {
+            await signOut();
+            notify.success("Password changed", "Please sign in again with your new password");
+            navigate("/login");
+          }}
+        />
 
         {/* Overlay for mobile */}
         {sidebarOpen && (

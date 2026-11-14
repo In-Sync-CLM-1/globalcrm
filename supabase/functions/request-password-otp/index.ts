@@ -1,4 +1,5 @@
 import { getSupabaseClient } from '../_shared/supabaseClient.ts';
+import { otpResetDisabledForUser, OTP_RESET_OFF_MESSAGE } from '../_shared/passwordResetPolicy.ts';
 
 // Public entry point for the OTP-based password-reset flow (replaces the old
 // magic-link resetPasswordForEmail across the whole platform). One OTP is
@@ -59,6 +60,15 @@ Deno.serve(async (req) => {
       .select('id, phone')
       .ilike('email', emailAddr)
       .maybeSingle();
+
+    // Organisations with the code reset switched off get no code at all;
+    // the user is told to ask their administrator instead.
+    if (profile && await otpResetDisabledForUser(supabase, profile.id)) {
+      return new Response(
+        JSON.stringify({ error: OTP_RESET_OFF_MESSAGE }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
 
     const otpCode = generateOtp();
     const { data: otpRecord, error: insertError } = await supabase
