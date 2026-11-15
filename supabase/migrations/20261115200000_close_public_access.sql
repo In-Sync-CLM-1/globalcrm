@@ -186,16 +186,18 @@ BEGIN
   RAISE LOG 'Parameter p_org_id: %, p_days: %', p_org_id, p_days;
   RAISE LOG 'Current auth.uid(): %', auth.uid();
   
+  -- Columns named in full: the bare names clashed with this function's own output names, so the
+  -- dashboard's activity-trends figures always failed (found by the test agent on this PR).
   RETURN QUERY
-  SELECT 
-    DATE(created_at) as activity_date,
-    activity_type,
-    COUNT(*) as activity_count
-  FROM contact_activities
-  WHERE org_id = p_org_id
-    AND created_at >= CURRENT_DATE - (p_days || ' days')::INTERVAL
-  GROUP BY DATE(created_at), activity_type
-  ORDER BY activity_date DESC, activity_type;
+  SELECT
+    DATE(ca.created_at) AS activity_date,
+    ca.activity_type::text,
+    COUNT(*) AS activity_count
+  FROM contact_activities ca
+  WHERE ca.org_id = p_org_id
+    AND ca.created_at >= CURRENT_DATE - (p_days || ' days')::INTERVAL
+  GROUP BY DATE(ca.created_at), ca.activity_type
+  ORDER BY 1 DESC, 2;
   
   RAISE LOG '=== get_activity_trends END ===';
 END;
