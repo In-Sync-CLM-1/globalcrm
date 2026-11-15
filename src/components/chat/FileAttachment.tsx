@@ -1,6 +1,7 @@
  import { useState } from "react";
  import { File, Download, Image, Video, FileText, X } from "lucide-react";
  import { Button } from "@/components/ui/button";
+ import { useSignedFileUrl } from "@/lib/storedFiles";
  import {
    Dialog,
    DialogContent,
@@ -13,7 +14,9 @@
    size: number;
  }
  
- export function FileAttachment({ url, name, size }: FileAttachmentProps) {
+ export function FileAttachment({ url: storedUrl, name, size }: FileAttachmentProps) {
+   // Chat files are private; a fresh link is made each time the message is shown.
+   const url = useSignedFileUrl(storedUrl) ?? "";
    const [lightboxOpen, setLightboxOpen] = useState(false);
  
    const isImage = /\.(jpg|jpeg|png|gif|webp)$/i.test(name);
