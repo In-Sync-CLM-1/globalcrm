@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { openStoredFile, signedFileUrl, useSignedFileUrl } from "@/lib/storedFiles";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -34,6 +35,7 @@ export function ClientDocuments({ clientId, orgId }: ClientDocumentsProps) {
   const notify = useNotification();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [viewingFile, setViewingFile] = useState<string | null>(null);
+  const viewingLink = useSignedFileUrl(viewingFile);
   const [documentName, setDocumentName] = useState("");
   const [documentType, setDocumentType] = useState("other");
   const [description, setDescription] = useState("");
@@ -62,7 +64,7 @@ export function ClientDocuments({ clientId, orgId }: ClientDocumentsProps) {
 
       if (file) {
         const fileExt = file.name.split(".").pop();
-        const fileName = `${clientId}/${Date.now()}.${fileExt}`;
+        const fileName = `${orgId}/${clientId}/${Date.now()}.${fileExt}`;
         
         const { error: uploadError } = await supabase.storage
           .from("client-documents")
@@ -261,7 +263,7 @@ export function ClientDocuments({ clientId, orgId }: ClientDocumentsProps) {
                     <TableCell className="text-right space-x-1" onClick={(e) => e.stopPropagation()}>
                       {doc.file_url && (
                         <Button variant="ghost" size="icon" asChild title="Download">
-                          <a href={doc.file_url} download target="_blank" rel="noopener noreferrer">
+                          <a href="#" onClick={(e) => { e.preventDefault(); openStoredFile(doc.file_url, true); }}>
                             <Download className="h-4 w-4" />
                           </a>
                         </Button>
@@ -296,9 +298,9 @@ export function ClientDocuments({ clientId, orgId }: ClientDocumentsProps) {
           <DialogHeader>
             <DialogTitle>Document Viewer</DialogTitle>
           </DialogHeader>
-          {viewingFile && (
+          {viewingLink && (
             <iframe
-              src={`https://docs.google.com/viewer?url=${encodeURIComponent(viewingFile)}&embedded=true`}
+              src={`https://docs.google.com/viewer?url=${encodeURIComponent(viewingLink)}&embedded=true`}
               className="w-full h-full rounded-md border"
               title="Document Viewer"
             />

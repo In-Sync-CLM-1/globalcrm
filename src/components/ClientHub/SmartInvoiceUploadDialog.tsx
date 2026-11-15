@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { signedFileUrl } from "@/lib/storedFiles";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -139,7 +140,7 @@ export function SmartInvoiceUploadDialog({ open, onOpenChange }: SmartInvoiceUpl
     try {
       // Upload file to storage
       const fileExt = selectedFile.name.split('.').pop();
-      const tempFileName = `temp/${Date.now()}.${fileExt}`;
+      const tempFileName = `${effectiveOrgId}/temp/${Date.now()}.${fileExt}`;
       
       const { error: uploadError } = await supabase.storage
         .from('client-documents')
@@ -155,7 +156,7 @@ export function SmartInvoiceUploadDialog({ open, onOpenChange }: SmartInvoiceUpl
 
       // Extract data using AI
       const { data, error } = await supabase.functions.invoke('extract-invoice-client-data', {
-        body: { fileUrl: urlData.publicUrl }
+        body: { fileUrl: await signedFileUrl(urlData.publicUrl, 600) }
       });
 
       if (error) throw error;

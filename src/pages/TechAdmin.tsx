@@ -116,7 +116,7 @@ export default function TechAdmin() {
 
       // Create unique filename
       const fileExt = file.name.split('.').pop();
-      const fileName = `${profile.org_id}-${Date.now()}.${fileExt}`;
+      const fileName = `${profile.org_id}/logo-${Date.now()}.${fileExt}`;
       const filePath = `${fileName}`;
 
       // Upload to storage

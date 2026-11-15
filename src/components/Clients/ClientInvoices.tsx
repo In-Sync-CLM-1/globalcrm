@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { openStoredFile, signedFileUrl, useSignedFileUrl } from "@/lib/storedFiles";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -55,6 +56,7 @@ export function ClientInvoices({ clientId, orgId }: ClientInvoicesProps) {
   const notify = useNotification();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [viewingFile, setViewingFile] = useState<string | null>(null);
+  const viewingLink = useSignedFileUrl(viewingFile);
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [invoiceDate, setInvoiceDate] = useState("");
   const [dueDate, setDueDate] = useState("");
@@ -108,7 +110,7 @@ export function ClientInvoices({ clientId, orgId }: ClientInvoicesProps) {
     try {
       // First upload the file temporarily to get a public URL
       const fileExt = uploadedFile.name.split(".").pop();
-      const tempFileName = `${clientId}/temp/${Date.now()}.${fileExt}`;
+      const tempFileName = `${orgId}/${clientId}/temp/${Date.now()}.${fileExt}`;
       
       const { error: uploadError } = await supabase.storage
         .from("client-documents")
@@ -122,7 +124,7 @@ export function ClientInvoices({ clientId, orgId }: ClientInvoicesProps) {
 
       // Call the extraction edge function
       const { data, error } = await supabase.functions.invoke('extract-document-data', {
-        body: { fileUrl: urlData.publicUrl, documentType: 'invoice' }
+        body: { fileUrl: await signedFileUrl(urlData.publicUrl, 600), documentType: 'invoice' }
       });
 
       if (error) throw error;
@@ -168,7 +170,7 @@ export function ClientInvoices({ clientId, orgId }: ClientInvoicesProps) {
 
       if (file) {
         const fileExt = file.name.split(".").pop();
-        const fileName = `${clientId}/invoices/${Date.now()}.${fileExt}`;
+        const fileName = `${orgId}/${clientId}/invoices/${Date.now()}.${fileExt}`;
         
         const { error: uploadError } = await supabase.storage
           .from("client-documents")
@@ -827,7 +829,7 @@ export function ClientInvoices({ clientId, orgId }: ClientInvoicesProps) {
                         )}
                         {invoice.file_url && (
                           <Button variant="ghost" size="icon" asChild title="Download" className="h-8 w-8">
-                            <a href={invoice.file_url} download target="_blank" rel="noopener noreferrer">
+                            <a href="#" onClick={(e) => { e.preventDefault(); openStoredFile(invoice.file_url, true); }}>
                               <Download className="h-4 w-4" />
                             </a>
                           </Button>
@@ -859,9 +861,9 @@ export function ClientInvoices({ clientId, orgId }: ClientInvoicesProps) {
               Document Viewer
             </DialogTitle>
           </DialogHeader>
-          {viewingFile && (
+          {viewingLink && (
             <iframe
-              src={`https://docs.google.com/viewer?url=${encodeURIComponent(viewingFile)}&embedded=true`}
+              src={`https://docs.google.com/viewer?url=${encodeURIComponent(viewingLink)}&embedded=true`}
               className="w-full h-full rounded-md border"
               title="Document Viewer"
             />
