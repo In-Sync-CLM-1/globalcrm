@@ -65,16 +65,12 @@ export default function SignUp() {
 
   const fetchInviteDetails = async () => {
     try {
-      const { data, error } = await supabase
-        .from("org_invites")
-        .select("*, organizations(name, slug)")
-        .eq("invite_code", inviteCode)
-        .is("used_at", null)
-        .gt("expires_at", new Date().toISOString())
-        .single();
+      // One invite, looked up by its code (the invite list itself is not readable without a sign-in).
+      const { data: rows, error } = await (supabase.rpc as any)("get_invite_by_code", { p_code: inviteCode });
       if (error) throw error;
+      const data = Array.isArray(rows) ? rows[0] : null;
       if (data) {
-        setInviteData(data);
+        setInviteData({ ...data, organizations: { name: data.org_name, slug: data.org_slug } });
         if (data.email) setFormData(prev => ({ ...prev, email: data.email }));
       } else {
         notify.error("Invalid invite", new Error("This invite link is invalid or has expired"));
@@ -230,17 +226,13 @@ export default function SignUp() {
               first_name: formData.firstName,
               last_name: formData.lastName,
               phone: `+91${formData.phone.replace(/\D/g, "")}`,
-              org_id: inviteData.org_id,
+              // The database checks this code and adds the person to the inviting organisation.
+              invite_code: inviteCode,
             },
           },
         });
         if (authError) throw authError;
         if (!authData.user) throw new Error("No user returned");
-
-        await supabase
-          .from("org_invites")
-          .update({ used_at: new Date().toISOString(), used_by: authData.user.id })
-          .eq("id", inviteData.id);
 
         notify.success("Account created!", `Welcome to ${inviteData.organizations.name}`);
       } else {
