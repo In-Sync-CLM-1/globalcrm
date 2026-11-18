@@ -3,6 +3,8 @@ import { format } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
 
 export const GAMING_ORG_ID = "f07a3fa9-3a30-43bb-af2a-4c35bda2fce8";
+/** Ajimos is the GlobalCRM organisation above (the Gaming CRM org); callers dial from their own phones and save outcomes by hand. */
+export const AJIMOS_ORG_ID = GAMING_ORG_ID;
 
 /** Daily targets shown on the caller dashboard. */
 export const DAILY_TARGETS = { calls: 100, clean: 35, registrations: 8, activations: 4 };

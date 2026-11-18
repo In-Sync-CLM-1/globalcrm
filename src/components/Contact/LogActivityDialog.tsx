@@ -14,6 +14,7 @@ import { ParticipantSelector } from "./ParticipantSelector";
 import { useNotification } from "@/hooks/useNotification";
 import { Plus, X } from "lucide-react";
 import { ActivityData } from "@/types/common";
+import { AJIMOS_ORG_ID } from "@/components/Gaming/gamingStats";
 
 interface CallDisposition {
   id: string;
@@ -182,6 +183,23 @@ export function LogActivityDialog({
         .single();
 
       if (activityError) throw activityError;
+
+      // Ajimos: a call logged here with an outcome counts like any other call (Pipeline and dashboards).
+      if (
+        profile.org_id === AJIMOS_ORG_ID &&
+        formData.activity_type === "call" &&
+        formData.call_disposition_id
+      ) {
+        const { error: manualError } = await supabase.rpc("save_manual_call_outcome" as never, {
+          _contact_id: contactId,
+          _disposition_id: formData.call_disposition_id,
+          _sub_disposition_id: formData.call_sub_disposition_id || null,
+          _notes: formData.description || null,
+          _follow_up_at: null,
+          _activity_id: activity.id,
+        } as never);
+        if (manualError) throw manualError;
+      }
 
       // For meetings: handle participants
       if (formData.activity_type === 'meeting') {
