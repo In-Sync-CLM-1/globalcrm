@@ -39,6 +39,7 @@ import { useUrlState } from "@/hooks/useUrlState";
 import { useGamingAccess } from "@/hooks/useGamingAccess";
 import { useManualOutcomeAccess } from "@/hooks/useManualOutcomeAccess";
 import { SaveOutcomeDialog } from "@/components/Pipeline/SaveOutcomeDialog";
+import { InlineOutcomePicker } from "@/components/Pipeline/InlineOutcomePicker";
 import { useFullPhones } from "@/hooks/useFullPhoneView";
 import { ProtectedScreen } from "@/components/Security/ProtectedScreen";
 import { BulkUploadDialog } from "@/components/Contacts/BulkUpload/BulkUploadDialog";
@@ -452,16 +453,16 @@ export default function PipelineBoard() {
   const { data: latestDispositionsByContact } = useQuery({
     queryKey: ['pipeline-latest-dispositions', contactsData?.data?.map(c => c.id)],
     queryFn: async () => {
-      if (!contactsData?.data?.length) return {} as Record<string, { name: string; category: string | null; callLogId: string | null }>;
+      if (!contactsData?.data?.length) return {} as Record<string, { id: string | null; name: string; category: string | null; callLogId: string | null }>;
       const ids = contactsData.data.map(c => c.id);
       const { data, error } = await supabase
         .from("contact_latest_disposition")
-        .select("contact_id, disposition_name, disposition_category, call_log_id")
+        .select("contact_id, disposition_id, disposition_name, disposition_category, call_log_id")
         .in("contact_id", ids);
       if (error) throw error;
-      const map: Record<string, { name: string; category: string | null; callLogId: string | null }> = {};
+      const map: Record<string, { id: string | null; name: string; category: string | null; callLogId: string | null }> = {};
       (data || []).forEach((r: any) => {
-        map[r.contact_id] = { name: r.disposition_name, category: r.disposition_category, callLogId: r.call_log_id };
+        map[r.contact_id] = { id: r.disposition_id, name: r.disposition_name, category: r.disposition_category, callLogId: r.call_log_id };
       });
       return map;
     },
@@ -479,14 +480,14 @@ export default function PipelineBoard() {
     queryFn: async () => {
       const byLog = new Map<string, string>(); // call_log_id -> contact_id
       Object.entries(latestDispositionsByContact ?? {}).forEach(([contactId, d]) => { if (d.callLogId) byLog.set(d.callLogId, contactId); });
-      if (!byLog.size) return {} as Record<string, string>;
+      if (!byLog.size) return {} as Record<string, { id: string; name: string }>;
       const { data: logs } = await supabase.from("call_logs").select("id, sub_disposition_id").in("id", [...byLog.keys()]).not("sub_disposition_id", "is", null);
       const subIds = [...new Set((logs ?? []).map((l) => l.sub_disposition_id as string))];
-      if (!subIds.length) return {} as Record<string, string>;
+      if (!subIds.length) return {} as Record<string, { id: string; name: string }>;
       const { data: subs } = await supabase.from("call_sub_dispositions").select("id, name").in("id", subIds);
       const nameById = new Map((subs ?? []).map((s) => [s.id, s.name]));
-      const out: Record<string, string> = {};
-      (logs ?? []).forEach((l) => { const c = byLog.get(l.id); const n = nameById.get(l.sub_disposition_id as string); if (c && n) out[c] = n; });
+      const out: Record<string, { id: string; name: string }> = {};
+      (logs ?? []).forEach((l) => { const c = byLog.get(l.id); const n = nameById.get(l.sub_disposition_id as string); if (c && n) out[c] = { id: l.sub_disposition_id as string, name: n }; });
       return out;
     },
     enabled: gaming.isGaming && !!latestDispositionsByContact && Object.keys(latestDispositionsByContact).length > 0,
@@ -1175,6 +1176,14 @@ export default function PipelineBoard() {
                            )}
                          </div>
                          {manualOutcome.canSaveFor(contact.assigned_to) && (
+                           <InlineOutcomePicker
+                             layout="stack"
+                             contactId={contact.id}
+                             dispositionId={latestDispositionsByContact?.[contact.id]?.id}
+                             subDispositionId={subDispositionByContact?.[contact.id]?.id}
+                           />
+                         )}
+                         {manualOutcome.canSaveFor(contact.assigned_to) && (
                            <Button
                              size="sm"
                              variant="outline"
@@ -1466,6 +1475,15 @@ export default function PipelineBoard() {
                               </Button>
                             )}
                           </TableCell>
+                          {manualOutcome.canSaveFor(contact.assigned_to) ? (
+                            <TableCell className="py-1.5" colSpan={gaming.isGaming ? 2 : 1}>
+                              <InlineOutcomePicker
+                                contactId={contact.id}
+                                dispositionId={latestDispositionsByContact?.[contact.id]?.id}
+                                subDispositionId={subDispositionByContact?.[contact.id]?.id}
+                              />
+                            </TableCell>
+                          ) : (
                           <TableCell className="py-1.5">
                             {(() => {
                               const d = latestDispositionsByContact?.[contact.id];
@@ -1478,10 +1496,13 @@ export default function PipelineBoard() {
                               );
                             })()}
                           </TableCell>
+                          )}
                           {gaming.isGaming ? (
+                            !manualOutcome.canSaveFor(contact.assigned_to) && (
                             <TableCell className="py-1.5 text-xs">
-                              {subDispositionByContact?.[contact.id] ?? <span className="text-[10px] text-muted-foreground">-</span>}
+                              {subDispositionByContact?.[contact.id]?.name ?? <span className="text-[10px] text-muted-foreground">-</span>}
                             </TableCell>
+                            )
                           ) : (
                             <>
                           <TableCell onClick={() => navigate(`/contacts/${contact.id}`)} className="py-1.5 cursor-pointer">
