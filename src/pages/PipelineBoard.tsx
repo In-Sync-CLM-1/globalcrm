@@ -39,6 +39,8 @@ import { useUrlState } from "@/hooks/useUrlState";
 import { useGamingAccess } from "@/hooks/useGamingAccess";
 import { useManualOutcomeAccess } from "@/hooks/useManualOutcomeAccess";
 import { SaveOutcomeDialog } from "@/components/Pipeline/SaveOutcomeDialog";
+import { useFullPhones } from "@/hooks/useFullPhoneView";
+import { ProtectedScreen } from "@/components/Security/ProtectedScreen";
 import { BulkUploadDialog } from "@/components/Contacts/BulkUpload/BulkUploadDialog";
 interface PipelineStage {
   id: string;
@@ -534,6 +536,8 @@ export default function PipelineBoard() {
   // Derive contacts: table view uses server-filtered baseContacts directly;
   // board view falls back to client-side filteredContacts (which only filters loaded rows)
   const contacts = activeTab === "table" ? baseContacts : (filteredContacts ?? baseContacts);
+  // Ajimos: full phone numbers come from the server for the contacts this user may see.
+  const fullPhones = useFullPhones(contacts.map((c) => c.id));
 
   const stages = stagesData || [];
   const loading = !stagesData || !contactsData;
@@ -999,6 +1003,7 @@ export default function PipelineBoard() {
 
   return (
     <DashboardLayout>
+      <ProtectedScreen active={fullPhones.enabled}>
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <div>
@@ -1134,7 +1139,10 @@ export default function PipelineBoard() {
                             );
                           })()}
                           <div className="flex items-center justify-between mt-2">
-                           <div className="flex gap-2">
+                           <div className="flex gap-2 items-center">
+                             {fullPhones.phoneFor(contact.id) && (
+                               <span className="text-xs font-mono tabular-nums">{fullPhones.phoneFor(contact.id)}</span>
+                             )}
                              {contact.email && (
                                <Mail className="h-3 w-3 text-muted-foreground" />
                              )}
@@ -1362,6 +1370,9 @@ export default function PipelineBoard() {
                               <span className="font-medium text-xs">
                                 {contact.first_name} {contact.last_name}
                               </span>
+                              {fullPhones.phoneFor(contact.id) && (
+                                <span className="text-[11px] font-mono tabular-nums">{fullPhones.phoneFor(contact.id)}</span>
+                              )}
                               {contact.job_title && (
                                 <span className="text-[10px] text-muted-foreground truncate max-w-[140px]">
                                   {contact.job_title}
@@ -1803,6 +1814,7 @@ export default function PipelineBoard() {
           }}
         />
       </div>
+      </ProtectedScreen>
     </DashboardLayout>
   );
 }

@@ -19,9 +19,11 @@ interface ContactPhonesProps {
   contactId: string;
   orgId: string;
   readOnly?: boolean;
+  /** phone row id -> full number, for organisations that show full numbers */
+  fullPhones?: Record<string, string>;
 }
 
-export function ContactPhones({ contactId, orgId, readOnly = false }: ContactPhonesProps) {
+export function ContactPhones({ contactId, orgId, readOnly = false, fullPhones }: ContactPhonesProps) {
   const notify = useNotification();
   const gaming = useGamingAccess();
   const [phones, setPhones] = useState<ContactPhone[]>([]);
@@ -120,7 +122,9 @@ export function ContactPhones({ contactId, orgId, readOnly = false }: ContactPho
         {phones.map((item) => (
           <div key={item.id} className="flex items-center gap-2">
             <PhoneIcon className="h-4 w-4 text-muted-foreground" />
-            {gaming.masked ? (
+            {fullPhones?.[item.id] ? (
+              <span className="text-sm font-mono tabular-nums">{fullPhones[item.id]}</span>
+            ) : gaming.masked ? (
               <span className="text-sm">{gaming.phone(item.phone)}</span>
             ) : (
               <a href={`tel:${item.phone}`} className="text-sm hover:underline">

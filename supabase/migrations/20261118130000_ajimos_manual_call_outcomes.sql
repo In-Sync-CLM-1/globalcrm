@@ -19,7 +19,7 @@ SECURITY DEFINER
 SET search_path TO 'public'
 AS $function$
 DECLARE
-  c_ajimos constant uuid := '819f6346-30c4-46a9-95e5-5851554ba8cd';
+  c_ajimos uuid := (SELECT id FROM public.organizations WHERE slug = 'ajimos');
   v_user uuid := auth.uid();
   v_contact record;
   v_privileged boolean;
@@ -29,6 +29,7 @@ DECLARE
   v_contacted_stage uuid;
 BEGIN
   IF v_user IS NULL THEN RAISE EXCEPTION 'Not authenticated'; END IF;
+  IF c_ajimos IS NULL THEN RAISE EXCEPTION 'Not available for this organisation'; END IF;
   IF public.get_user_org_id(v_user) IS DISTINCT FROM c_ajimos THEN
     RAISE EXCEPTION 'Not available for this organisation';
   END IF;
