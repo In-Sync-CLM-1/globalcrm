@@ -38,7 +38,6 @@ import { IEDUP_ORG_ID } from "@/hooks/useIsIedup";
 import { useUrlState } from "@/hooks/useUrlState";
 import { useGamingAccess } from "@/hooks/useGamingAccess";
 import { useManualOutcomeAccess } from "@/hooks/useManualOutcomeAccess";
-import { SaveOutcomeDialog } from "@/components/Pipeline/SaveOutcomeDialog";
 import { InlineOutcomePicker } from "@/components/Pipeline/InlineOutcomePicker";
 import { useFullPhones } from "@/hooks/useFullPhoneView";
 import { ProtectedScreen } from "@/components/Security/ProtectedScreen";
@@ -472,7 +471,6 @@ export default function PipelineBoard() {
   // Gaming CRM Demo shows the sub-disposition of each lead's latest call.
   const gaming = useGamingAccess();
   const manualOutcome = useManualOutcomeAccess();
-  const [outcomeContact, setOutcomeContact] = useState<{ id: string; name: string } | null>(null);
   const [bulkUploadOpen, setBulkUploadOpen] = useState(false);
   const [aiQueueing, setAiQueueing] = useState(false);
   const { data: subDispositionByContact } = useQuery({
@@ -1183,16 +1181,6 @@ export default function PipelineBoard() {
                              subDispositionId={subDispositionByContact?.[contact.id]?.id}
                            />
                          )}
-                         {manualOutcome.canSaveFor(contact.assigned_to) && (
-                           <Button
-                             size="sm"
-                             variant="outline"
-                             className="w-full h-8 mt-2 text-xs"
-                             onClick={(e) => { e.stopPropagation(); setOutcomeContact({ id: contact.id, name: `${contact.first_name} ${contact.last_name || ''}`.trim() }); }}
-                           >
-                             Save outcome
-                           </Button>
-                         )}
                          <p className="text-[10px] text-muted-foreground mt-1">
                            Updated: {contact.updated_at ? format(new Date(contact.updated_at), 'MMM d, h:mm a') : '-'}
                          </p>
@@ -1415,17 +1403,6 @@ export default function PipelineBoard() {
                                   title="Send WhatsApp"
                                 >
                                   <MessageSquare className="h-4 w-4" />
-                                </Button>
-                              )}
-                              {manualOutcome.canSaveFor(contact.assigned_to) && (
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  className="h-8 px-2 text-xs whitespace-nowrap"
-                                  onClick={(e) => { e.stopPropagation(); setOutcomeContact({ id: contact.id, name: `${contact.first_name} ${contact.last_name || ''}`.trim() }); }}
-                                  title="Save the outcome of a call dialled by hand"
-                                >
-                                  Save outcome
                                 </Button>
                               )}
                               <Button
@@ -1666,15 +1643,6 @@ export default function PipelineBoard() {
             contactName={`${selectedContactForWhatsapp.first_name} ${selectedContactForWhatsapp.last_name || ''}`.trim()}
             phoneNumber={selectedContactForWhatsapp.primaryPhone || selectedContactForWhatsapp.phone || ""}
             onMessageSent={() => queryClient.invalidateQueries({ queryKey: ['pipeline-contacts'] })}
-          />
-        )}
-
-        {outcomeContact && (
-          <SaveOutcomeDialog
-            open
-            onOpenChange={(o) => { if (!o) setOutcomeContact(null); }}
-            contactId={outcomeContact.id}
-            contactName={outcomeContact.name}
           />
         )}
 
