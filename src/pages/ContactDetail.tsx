@@ -16,6 +16,8 @@ import { CustomerJourney } from "@/components/Contact/CustomerJourney";
 import { LogActivityDialog } from "@/components/Contact/LogActivityDialog";
 import { EditContactDialog } from "@/components/Contact/EditContactDialog";
 import { ContactEmails } from "@/components/Contact/ContactEmails";
+import { useFullPhones } from "@/hooks/useFullPhoneView";
+import { ProtectedScreen } from "@/components/Security/ProtectedScreen";
 import { ContactPhones } from "@/components/Contact/ContactPhones";
 import { FillFormDialog } from "@/components/Contact/FillFormDialog";
 import { SendWhatsAppDialog } from "@/components/Contact/SendWhatsAppDialog";
@@ -85,6 +87,7 @@ export default function ContactDetail() {
   const [isFillFormOpen, setIsFillFormOpen] = useState(false);
   const [isWhatsAppOpen, setIsWhatsAppOpen] = useState(false);
   const gaming = useGamingAccess();
+  const fullPhones = useFullPhones(id ? [id] : []);
   const [resendTemplateId, setResendTemplateId] = useState<string | null>(null);
   const [isEmailOpen, setIsEmailOpen] = useState(false);
   const [activityType, setActivityType] = useState<string>("note");
@@ -215,6 +218,7 @@ export default function ContactDetail() {
 
   return (
     <DashboardLayout>
+      <ProtectedScreen active={fullPhones.enabled}>
       <div className="space-y-6">
         <div className="flex items-center justify-between sticky top-0 z-10 bg-background py-2 -mt-2">
           <div className="flex items-center gap-4">
@@ -297,7 +301,7 @@ export default function ContactDetail() {
 
               <div>
                 <p className="text-sm font-medium mb-2">Phone Numbers</p>
-                <ContactPhones contactId={id!} orgId={contact.org_id} readOnly />
+                <ContactPhones contactId={id!} orgId={contact.org_id} readOnly fullPhones={fullPhones.enabled ? fullPhones.phones.byPhoneId : undefined} />
               </div>
 
               {contact.linkedin_url && (
@@ -367,6 +371,7 @@ export default function ContactDetail() {
                     <ClickToCall
                       contactId={id!}
                       phoneNumber={contact.phone}
+                      displayPhone={fullPhones.phoneFor(id!)}
                       contactName={`${contact.first_name} ${contact.last_name || ''}`}
                     />
                   )}
@@ -482,6 +487,7 @@ export default function ContactDetail() {
         }}
       />
 
+      </ProtectedScreen>
     </DashboardLayout>
   );
 }

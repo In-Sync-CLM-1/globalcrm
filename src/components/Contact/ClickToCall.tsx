@@ -13,6 +13,8 @@ import { format } from "date-fns";
 interface ClickToCallProps {
   contactId: string;
   phoneNumber: string;
+  /** Full number to show on the call screens (organisations that use full phone view). */
+  displayPhone?: string | null;
   contactName: string;
 }
 
@@ -35,7 +37,7 @@ interface SubDisposition {
   disposition_id: string;
 }
 
-export const ClickToCall = ({ contactId, phoneNumber, contactName }: ClickToCallProps) => {
+export const ClickToCall = ({ contactId, phoneNumber, displayPhone, contactName }: ClickToCallProps) => {
   const notify = useNotification();
   const [isLoading, setIsLoading] = useState(false);
   const [activeSession, setActiveSession] = useState<CallSession | null>(null);
@@ -417,6 +419,7 @@ export const ClickToCall = ({ contactId, phoneNumber, contactName }: ClickToCall
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Call Disposition</DialogTitle>
+            {displayPhone && <p className="text-sm font-mono tabular-nums">{contactName} · {displayPhone}</p>}
           </DialogHeader>
           <div className="space-y-4">
             <div>
