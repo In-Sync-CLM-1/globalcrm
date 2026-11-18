@@ -43,7 +43,7 @@ export function useFullPhones(contactIds: string[]) {
         const { data, error } = await supabase.rpc("view_contact_phones" as never, { _ids: contactIds.slice(i, i + 200) } as never);
         if (error) throw error;
         ((data ?? []) as { contact_id: string; phone: string | null; is_contact_phone: boolean; is_primary: boolean; phone_id: string | null }[]).forEach((r) => {
-          if (!r.phone) return;
+          if (!r.phone || r.phone.includes("•")) return; // never show masked text as the "full" number
           if (r.is_contact_phone) out.contact[r.contact_id] = r.phone;
           if (r.phone_id) out.byPhoneId[r.phone_id] = r.phone;
           if (!r.is_contact_phone && r.is_primary) out.primary[r.contact_id] = r.phone;

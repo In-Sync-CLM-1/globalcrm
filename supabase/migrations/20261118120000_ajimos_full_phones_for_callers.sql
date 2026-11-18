@@ -34,12 +34,23 @@ begin
   insert into public.pii_access_log (org_id, user_id, table_name, column_name, contact_id, purpose)
     select _org, auth.uid(), 'contacts', 'phone', k, 'caller_view' from unnest(_ok) k;
 
+  -- Only real numbers are returned; a row that holds nothing but masked text is left out.
+  -- Most Ajimos extra-phone rows were copied from the contact's own (masked) phone and have no locked copy
+  -- of their own, so those fall back to the contact's locked number when the masked text matches.
   return query
-    select c.id, coalesce(public.decrypt_pii(c.phone_encrypted), c.phone), true, false, null::uuid
-      from public.contacts c where c.id = any(_ok)
-    union all
-    select p.contact_id, coalesce(public.decrypt_pii(p.phone_encrypted), p.phone), false, coalesce(p.is_primary, false), p.id
-      from public.contact_phones p where p.contact_id = any(_ok);
+    select x.contact_id, x.phone, x.is_contact_phone, x.is_primary, x.phone_id from (
+      select c.id as contact_id, public.decrypt_pii(c.phone_encrypted) as phone, true as is_contact_phone,
+             false as is_primary, null::uuid as phone_id
+        from public.contacts c where c.id = any(_ok)
+      union all
+      select p.contact_id,
+             coalesce(public.decrypt_pii(p.phone_encrypted),
+                      case when p.phone = c.phone then public.decrypt_pii(c.phone_encrypted) end),
+             false, coalesce(p.is_primary, false), p.id
+        from public.contact_phones p join public.contacts c on c.id = p.contact_id
+       where p.contact_id = any(_ok)
+    ) x
+    where x.phone is not null and not public.pii_is_masked(x.phone);
 end $$;
 
 revoke all on function public.full_phone_view_enabled() from public, anon;
