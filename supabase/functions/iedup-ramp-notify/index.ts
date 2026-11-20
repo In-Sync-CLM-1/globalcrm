@@ -11,6 +11,7 @@ import {
 } from "../_shared/pipelineActions.ts";
 
 const IEDUP_ORG_ID = "6dcf4229-6902-4cd4-9c7f-2d6ed4a6045d";
+const CLASS_STARTED_TEMPLATE = "iedup_ramp_class_started_v1";
 const WA_TEMPLATE = "iedup_registration_programme_info_v2"; // no attachment; the brochure goes by email
 const SITE = "https://ramp.in-sync.co.in";
 const BROCHURE_URL = `${SITE}/IEDUP-Brochure.pdf`;
@@ -155,11 +156,18 @@ serve(async (req) => {
     return json(202, { queued: items.length });
   }
 
-  // Messages for many people at once (stage changes and new classes): answer straight away and send in the background.
+  // Messages for many people at once (stage changes, new classes, a class that has started): answer straight away and send in the background.
   // Each person gets the WhatsApp and, when an email address and text are given, the same message by email.
-  if ((body.kind === "application_status" || body.kind === "class_scheduled") && Array.isArray(body.items)) {
+  if ((body.kind === "application_status" || body.kind === "class_scheduled" || body.kind === "class_started") && Array.isArray(body.items)) {
     const items = (body.items as Record<string, unknown>[]).slice(0, 200);
     const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    const isStarted = body.kind === "class_started";
+    // The "class has started" template is new: RAMP waits (and tries again) until Meta has approved it.
+    if (isStarted) {
+      const { data: ok } = await db.from("communication_templates").select("id").eq("org_id", IEDUP_ORG_ID).eq("template_type", "whatsapp")
+        .eq("template_name", CLASS_STARTED_TEMPLATE).eq("status", "approved").limit(1).maybeSingle();
+      if (!ok) return json(409, { error: `template ${CLASS_STARTED_TEMPLATE} is not approved yet` });
+    }
     const gate = await orgServiceGate(db, IEDUP_ORG_ID);
     if (!gate.allowed) return json(402, { error: gate.reason });
     const floor = typeof gate.floor === "number" ? gate.floor : null;
@@ -170,7 +178,7 @@ serve(async (req) => {
           const m = String(it.mobile ?? "").replace(/\D/g, "").slice(-10);
           const nm = String(it.name ?? "").replace(/\s+/g, " ").trim().slice(0, 60) || "Participant";
           const appNo = String(it.application_no ?? "").trim().slice(0, 40);
-          if (m.length !== 10 || (!isClass && !appNo)) continue;
+          if (m.length !== 10 || (!isClass && !isStarted && !appNo)) continue;
           const ph = `+91${m}`;
           const em = String(it.email ?? "").trim();
           let { data: c } = await db.from("contacts").select("id, first_name, email, phone").eq("org_id", IEDUP_ORG_ID).eq("phone", ph).limit(1).maybeSingle();
@@ -180,11 +188,13 @@ serve(async (req) => {
             c = ins.data;
           }
           const cut = (v: unknown, n: number) => String(v ?? "").trim().slice(0, n);
-          const bodyParams = isClass
+          const bodyParams = isStarted
+            ? [nm, cut(it.topic, 100) || "Live class", cut(it.time, 60), cut(it.expert, 80) || "Our expert"]
+            : isClass
             ? [nm, cut(it.course, 100) || "UP RAMP", cut(it.topic, 100) || "Live class", cut(it.date, 60), cut(it.time, 60), cut(it.expert, 80) || "Our expert"]
             : [nm, appNo, cut(it.course, 100) || "UP RAMP programme", cut(it.detail, 100) || "Update", cut(it.next_step, 150) || "We will keep you posted"];
           await sendWhatsAppTemplate(db, {
-            orgId: IEDUP_ORG_ID, sender: WA_SENDER_BY_ORG[IEDUP_ORG_ID], contact: c, phone: ph, templateName: isClass ? "iedup_ramp_class_scheduled_v2" : "iedup_application_status_v4", languageCode: "en", floor,
+            orgId: IEDUP_ORG_ID, sender: WA_SENDER_BY_ORG[IEDUP_ORG_ID], contact: c, phone: ph, templateName: isStarted ? CLASS_STARTED_TEMPLATE : isClass ? "iedup_ramp_class_scheduled_v2" : "iedup_application_status_v4", languageCode: "en", floor,
             bodyParams,
           });
           const lines = Array.isArray(it.email_lines) ? (it.email_lines as unknown[]).map((l) => cut(l, 600)).filter(Boolean).slice(0, 8) : [];
