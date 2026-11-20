@@ -1,6 +1,7 @@
 // Called by the UP RAMP portal's staff Message log (TASK-0168, AVG org).
 // Read-only: returns the IEDUP org's WhatsApp and email send records for a date range, with their delivery status
-// (WhatsApp: queued / sent / delivered / read / failed from Exotel's callbacks; email: sent / failed).
+// (WhatsApp: queued / sent / delivered / read / failed from Exotel's callbacks; email: sent / failed plus the
+// delivered / opened / bounced stage from Resend's webhook).
 // RAMP matches the rows to its trainees by mobile / email, so nothing here knows about RAMP participants.
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.58.0";
@@ -37,7 +38,7 @@ serve(async (req) => {
     const [whatsapp, email] = await Promise.all([
       all(() => db.from("whatsapp_logs").select("id,to_number,template_name,status,error_text,sent_at,delivered_at,read_at,failed_at,created_at")
         .eq("org_id", IEDUP_ORG_ID).gte("created_at", from.toISOString()).lt("created_at", to.toISOString()).order("created_at", { ascending: false })),
-      all(() => db.from("pipeline_email_log").select("id,to_email,subject,status,error_text,sent_at,failed_at,created_at")
+      all(() => db.from("pipeline_email_log").select("id,to_email,subject,status,error_text,sent_at,failed_at,created_at,last_event,delivered_at,opened_at,bounced_at")
         .eq("org_id", IEDUP_ORG_ID).gte("created_at", from.toISOString()).lt("created_at", to.toISOString()).order("created_at", { ascending: false })),
     ]);
     return json(200, { ok: true, whatsapp, email });
