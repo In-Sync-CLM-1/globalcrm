@@ -98,6 +98,9 @@ async function tick(env) {
 
   const intOrgs = await pgSelect(env, "organizations", "is_internal=eq.true&select=id");
   const internal = new Set((intOrgs || []).map((r) => r.id));
+  // Billed-monthly orgs have no wallet: never send low/exhausted wallet alerts.
+  const monthlyOrgs = await pgSelect(env, "organizations", "settings->billing->>mode=eq.monthly_postpaid&select=id");
+  for (const r of monthlyOrgs || []) internal.add(r.id);
 
   const results = [];
   for (const s of subs) {

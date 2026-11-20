@@ -5,6 +5,7 @@ import DashboardLayout from "@/components/Layout/DashboardLayout";
 import { useOrgContext } from "@/hooks/useOrgContext";
 import { useNotification } from "@/hooks/useNotification";
 import { LoadingState } from "@/components/common/LoadingState";
+import { useBilledMonthly } from "@/hooks/useBilledMonthly";
 import { TopUpWalletDialog } from "@/components/Subscription/TopUpWalletDialog";
 import { ManualPaymentDetails } from "@/components/Subscription/ManualPaymentDetails";
 import { RazorpayPayNowButton } from "@/components/Subscription/RazorpayPayNowButton";
@@ -46,6 +47,7 @@ export default function Billing() {
   const [topUpOpen, setTopUpOpen] = useState(false);
   const [paying, setPaying] = useState(false);
   const [showManualPay, setShowManualPay] = useState(false);
+  const billedMonthly = useBilledMonthly(effectiveOrgId);
 
   useEffect(() => { loadRazorpay().catch(() => undefined); }, []);
 
@@ -201,15 +203,20 @@ export default function Billing() {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Billing</h1>
-            <p className="text-sm text-muted-foreground">Your subscription, wallet, and usage in one place.</p>
+            <p className="text-sm text-muted-foreground">{billedMonthly ? "Your subscription and usage in one place." : "Your subscription, wallet, and usage in one place."}</p>
           </div>
           <RazorpayPayNowButton />
         </div>
 
         {/* Snapshot */}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <SnapCard icon={<Wallet size={16} />} tone="blue" label="Wallet balance" value={inr(balance)}
-            hint={balance <= 500 ? "At the ₹500 reserve — calls & messages are paused until you top up" : balance <= 1000 ? "Low balance" : undefined} />
+          {billedMonthly ? (
+            <SnapCard icon={<Wallet size={16} />} tone="blue" label="AI usage" value="Billed monthly"
+              hint="AI usage is billed monthly" />
+          ) : (
+            <SnapCard icon={<Wallet size={16} />} tone="blue" label="Wallet balance" value={inr(balance)}
+              hint={balance <= 500 ? "At the ₹500 reserve — calls & messages are paused until you top up" : balance <= 1000 ? "Low balance" : undefined} />
+          )}
           <SnapCard icon={<CheckCircle2 size={16} />} tone="emerald" label="Subscription"
             value={<span className="capitalize">{inTrial ? "Trial" : trialEnded ? "Trial ended" : status}</span>}
             hint={
@@ -274,22 +281,29 @@ export default function Billing() {
         </Card>
 
         {/* Wallet */}
-        <Card>
-          <CardHeader className="pb-3"><CardTitle className="text-base">Wallet (calls & WhatsApp)</CardTitle></CardHeader>
-          <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="text-sm text-muted-foreground">
-              Balance <span className="text-lg font-semibold text-foreground">{inr(balance)}</span>
-              <p className="mt-1 text-xs">AI calls deduct ₹3/min; WhatsApp messages deduct ₹0.20 (utility) or ₹1 (marketing) each. Calls & messages pause once the balance reaches the ₹500 reserve. Minimum recharge ₹5,000.</p>
-            </div>
-            <Button variant="outline" onClick={() => setTopUpOpen(true)} className="gap-2"><IndianRupee className="h-4 w-4" /> Add funds</Button>
-          </CardContent>
-        </Card>
+        {billedMonthly ? (
+          <Card>
+            <CardHeader className="pb-3"><CardTitle className="text-base">AI usage</CardTitle></CardHeader>
+            <CardContent className="text-sm text-muted-foreground">AI usage is billed monthly.</CardContent>
+          </Card>
+        ) : (
+          <Card>
+            <CardHeader className="pb-3"><CardTitle className="text-base">Wallet (calls & WhatsApp)</CardTitle></CardHeader>
+            <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="text-sm text-muted-foreground">
+                Balance <span className="text-lg font-semibold text-foreground">{inr(balance)}</span>
+                <p className="mt-1 text-xs">AI calls deduct ₹3/min; WhatsApp messages deduct ₹0.20 (utility) or ₹1 (marketing) each. Calls & messages pause once the balance reaches the ₹500 reserve. Minimum recharge ₹5,000.</p>
+              </div>
+              <Button variant="outline" onClick={() => setTopUpOpen(true)} className="gap-2"><IndianRupee className="h-4 w-4" /> Add funds</Button>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Detail tabs */}
         <UrlTabs param="tab" defaultValue="usage">
           <TabsList>
             <TabsTrigger value="usage" className="gap-1.5"><TrendingUp className="h-4 w-4" /> Usage</TabsTrigger>
-            <TabsTrigger value="transactions" className="gap-1.5"><Receipt className="h-4 w-4" /> Transactions</TabsTrigger>
+            {!billedMonthly && <TabsTrigger value="transactions" className="gap-1.5"><Receipt className="h-4 w-4" /> Transactions</TabsTrigger>}
             <TabsTrigger value="invoices" className="gap-1.5"><FileText className="h-4 w-4" /> Invoices</TabsTrigger>
           </TabsList>
 
@@ -306,7 +320,7 @@ export default function Billing() {
             </CardContent></Card>
           </TabsContent>
 
-          <TabsContent value="transactions">
+          {!billedMonthly && <TabsContent value="transactions">
             <Card><CardContent className="p-0">
               {(txns || []).length === 0 ? <p className="py-8 text-center text-sm text-muted-foreground">No transactions yet.</p> : (
                 <Table>
@@ -325,7 +339,7 @@ export default function Billing() {
                 </Table>
               )}
             </CardContent></Card>
-          </TabsContent>
+          </TabsContent>}
 
           <TabsContent value="invoices">
             <Card><CardContent className="p-0">
@@ -348,7 +362,7 @@ export default function Billing() {
         </UrlTabs>
       </div>
 
-      <TopUpWalletDialog open={topUpOpen} onOpenChange={setTopUpOpen} orgId={effectiveOrgId || ""} />
+      {!billedMonthly && <TopUpWalletDialog open={topUpOpen} onOpenChange={setTopUpOpen} orgId={effectiveOrgId || ""} />}
     </DashboardLayout>
   );
 }

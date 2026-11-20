@@ -1,3 +1,4 @@
+import { orgIsBilledMonthly } from "../_shared/billingGate.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.58.0";
 import {
@@ -413,6 +414,9 @@ async function recordUsage(
       .select("id")
       .single();
     if (!usageRow) return;
+
+    // Billed-monthly org: usage is logged, the wallet is never touched.
+    if (await orgIsBilledMonthly(supabase, args.orgId)) return;
 
     // Deduct from wallet if a subscription row exists
     const { data: sub } = await supabase

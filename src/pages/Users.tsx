@@ -112,6 +112,10 @@ async function ensureBillingOkForUserAdd(
   const inTrial = !sub.last_payment_date && sub.next_billing_date && sub.next_billing_date >= today;
   if (inTrial) return { ok: true, reason: "" };
 
+  // Billed-monthly orgs pay seats with the monthly bill: no wallet to check.
+  const { data: orgRow } = await supabase.from("organizations").select("settings").eq("id", orgId).maybeSingle();
+  if ((orgRow?.settings as any)?.billing?.mode === "monthly_postpaid") return { ok: true, reason: "" };
+
   const seatCost = Number(pricing?.per_user_monthly_cost ?? 799);
   const wallet = Number(sub.wallet_balance ?? 0);
   if (wallet >= seatCost) return { ok: true, reason: "" };

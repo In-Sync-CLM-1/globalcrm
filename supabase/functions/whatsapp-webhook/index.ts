@@ -104,12 +104,18 @@ async function refundWalletForFailedMessage(
   try {
     const { data: usage } = await supabaseClient
       .from('service_usage_logs')
-      .select('id, cost')
+      .select('id, cost, wallet_deducted')
       .eq('org_id', args.orgId)
       .eq('service_type', 'whatsapp')
       .eq('reference_id', args.waLogId)
       .maybeSingle();
     if (!usage) return; // never charged, or already refunded
+
+    // Billed-monthly org: nothing was taken from the wallet, so nothing to credit back.
+    if (usage.wallet_deducted === false) {
+      await supabaseClient.from('service_usage_logs').delete().eq('id', usage.id);
+      return;
+    }
 
     const cost = Number(usage.cost ?? args.cost ?? 0);
     if (!(cost > 0)) return;
