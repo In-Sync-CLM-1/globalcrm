@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/select";
 import { Loader2, IndianRupee, Wallet, ReceiptText } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { useBilledMonthly } from "@/hooks/useBilledMonthly";
 import { useNotification } from "@/hooks/useNotification";
 
 interface Props {
@@ -56,6 +57,8 @@ export function RecordOfflinePaymentDialog({ open, onOpenChange, org, onRecorded
   const [billingPeriod, setBillingPeriod] = useState<string>("quarterly");
   const [notes, setNotes] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
+  // Billed-monthly orgs have no wallet: payments are monthly bill / subscription payments.
+  const billedMonthly = useBilledMonthly(org?.id);
 
   // Active GST rate — the entered amount is GST-inclusive; we show how much of it
   // is GST and how much actually lands in the wallet.
@@ -87,6 +90,13 @@ export function RecordOfflinePaymentDialog({ open, onOpenChange, org, onRecorded
       setNotes("");
     }
   }, [open]);
+
+  useEffect(() => {
+    if (open && billedMonthly) {
+      setPaymentFor("subscription");
+      setBillingPeriod("monthly");
+    }
+  }, [open, billedMonthly]);
 
   async function handleSubmit() {
     if (!org) return;
@@ -152,8 +162,8 @@ export function RecordOfflinePaymentDialog({ open, onOpenChange, org, onRecorded
 
         <div className="space-y-4 py-2">
           {/* What the money is for */}
-          <div className="grid grid-cols-2 gap-2">
-            <button
+          <div className={`grid gap-2 ${billedMonthly ? "grid-cols-1" : "grid-cols-2"}`}>
+            {!billedMonthly && <button
               type="button"
               onClick={() => setPaymentFor("wallet")}
               className={`flex items-center gap-2 rounded-lg border p-3 text-left text-sm transition-all ${
@@ -165,7 +175,7 @@ export function RecordOfflinePaymentDialog({ open, onOpenChange, org, onRecorded
                 <span className="font-medium">Wallet top-up</span>
                 <span className="block text-xs text-muted-foreground">Calls & WhatsApp credit</span>
               </span>
-            </button>
+            </button>}
             <button
               type="button"
               onClick={() => setPaymentFor("subscription")}
@@ -175,8 +185,8 @@ export function RecordOfflinePaymentDialog({ open, onOpenChange, org, onRecorded
             >
               <ReceiptText className="h-4 w-4" />
               <span>
-                <span className="font-medium">Subscription</span>
-                <span className="block text-xs text-muted-foreground">Reactivates the account</span>
+                <span className="font-medium">{billedMonthly ? "Monthly bill / subscription" : "Subscription"}</span>
+                <span className="block text-xs text-muted-foreground">{billedMonthly ? "AI usage is billed monthly — no wallet" : "Reactivates the account"}</span>
               </span>
             </button>
           </div>

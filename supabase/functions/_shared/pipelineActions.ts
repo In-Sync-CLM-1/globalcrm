@@ -2,6 +2,7 @@
 // action against one contact. Used by pipeline-action-dispatcher (stage-driven,
 // queued) and iedup-fire-action (raw, manually-fired) so both paths share one
 // proven implementation of sending + wallet billing instead of drifting apart.
+import { orgIsBilledMonthly } from "./billingGate.ts";
 import { replaceVariables } from "./templateVariables.ts";
 import { resolveWhatsAppFieldMappings } from "./whatsappFieldMappings.ts";
 import { AI_CALLING_ENABLED, AI_CALLING_DISABLED_REASON, logBlockedCall } from "./aiCallingSwitch.ts";
@@ -46,6 +47,13 @@ export async function reserveFunds(
       .eq("reference_id", args.referenceId)
       .maybeSingle();
     if (existing) return { ok: true };
+
+    // Billed-monthly org: record the usage, never touch the wallet.
+    if (await orgIsBilledMonthly(supabase, args.orgId)) {
+      await supabase.from("service_usage_logs")
+        .insert({ org_id: args.orgId, service_type: args.serviceType, reference_id: args.referenceId, quantity: args.quantity, cost: args.cost, wallet_deducted: false });
+      return { ok: true };
+    }
 
     const effectiveFloor = args.floor ?? -1e15;
     const { data: newBal, error } = await supabase.rpc("reserve_wallet_funds", {
@@ -95,6 +103,12 @@ export async function refundFunds(
       .eq("reference_id", args.referenceId)
       .maybeSingle();
     if (!usage) return;
+
+    // Billed-monthly org: nothing was charged to the wallet, so nothing to credit back.
+    if (await orgIsBilledMonthly(supabase, args.orgId)) {
+      await supabase.from("service_usage_logs").delete().eq("id", usage.id);
+      return;
+    }
 
     const { data: newBal, error } = await supabase.rpc("credit_wallet_funds", {
       p_org: args.orgId, p_amount: args.cost,

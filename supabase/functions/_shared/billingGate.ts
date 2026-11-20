@@ -23,6 +23,19 @@ export interface GateResult {
   locked: boolean;      // true = subscription lockout (not just low wallet)
   balance?: number;
   floor?: number;
+  billedMonthly?: boolean; // true = invoiced monthly, no wallet check or deduction
+}
+
+// Organisations billed monthly (organizations.settings.billing.mode =
+// 'monthly_postpaid') have no prepaid wallet: sends are never checked against
+// or charged to it. Account lock (non-payment) still applies.
+export function isBilledMonthly(settings: any): boolean {
+  return settings?.billing?.mode === "monthly_postpaid";
+}
+
+export async function orgIsBilledMonthly(supabase: any, orgId: string): Promise<boolean> {
+  const { data } = await supabase.from("organizations").select("settings").eq("id", orgId).maybeSingle();
+  return isBilledMonthly(data?.settings);
 }
 
 export async function orgServiceGate(supabase: any, orgId: string): Promise<GateResult> {
@@ -31,7 +44,7 @@ export async function orgServiceGate(supabase: any, orgId: string): Promise<Gate
   // Internal/demo orgs are never billed or gated.
   const { data: org } = await supabase
     .from("organizations")
-    .select("is_internal")
+    .select("is_internal, settings")
     .eq("id", orgId)
     .maybeSingle();
   if (org?.is_internal) return { allowed: true, reason: "internal org", locked: false };
@@ -47,6 +60,11 @@ export async function orgServiceGate(supabase: any, orgId: string): Promise<Gate
 
   if (sub.subscription_status === "suspended_locked" || sub.subscription_status === "cancelled") {
     return { allowed: false, reason: `account locked (${sub.subscription_status})`, locked: true };
+  }
+
+  // Billed monthly: no wallet to check. Only the lock above applies.
+  if (isBilledMonthly(org?.settings)) {
+    return { allowed: true, reason: "billed monthly", locked: false, billedMonthly: true };
   }
 
   const balance = Number(sub.wallet_balance ?? 0);

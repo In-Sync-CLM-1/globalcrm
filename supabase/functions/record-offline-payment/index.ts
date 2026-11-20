@@ -72,13 +72,20 @@ Deno.serve(async (req) => {
 
     // 4. Validate input.
     const body: RecordRequest = await req.json();
-    const { org_id, payment_for, method, reference, notes, billing_period, invoice_id, received_on } = body;
+    const { org_id, method, reference, notes, billing_period, invoice_id, received_on } = body;
+    let payment_for = body.payment_for;
     const amount = Number(body.amount);
 
     if (!org_id) throw new Error('Organisation is required.');
     if (!(amount > 0)) throw new Error('Amount must be greater than zero.');
     if (payment_for !== 'wallet' && payment_for !== 'subscription') {
       throw new Error('payment_for must be "wallet" or "subscription".');
+    }
+    // Billed-monthly orgs have no wallet: whatever the screen sent, the payment is
+    // a monthly bill / subscription payment, never a wallet top-up.
+    const { data: orgSettingsRow } = await db.from('organizations').select('settings').eq('id', org_id).maybeSingle();
+    if ((orgSettingsRow?.settings as any)?.billing?.mode === 'monthly_postpaid') {
+      payment_for = 'subscription';
     }
     const methodLabel = METHOD_LABEL[method] ?? 'Offline';
     const refSuffix = reference ? ` · ${reference}` : '';
