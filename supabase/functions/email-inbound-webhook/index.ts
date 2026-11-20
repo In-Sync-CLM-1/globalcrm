@@ -247,7 +247,27 @@ Deno.serve(async (req) => {
           }
         }
 
-        if (!recipient && !conversation) {
+        // 3) Pipeline sends (IEDUP / UP RAMP stage, class and status emails): record the delivery stage for the RAMP Message log.
+        //    Events can arrive out of order, so a later stage is never overwritten by an earlier one.
+        const RANK: Record<string, number> = { 'email.sent': 1, 'email.delivered': 2, 'email.opened': 3, 'email.clicked': 4, 'email.bounced': 5, 'email.complained': 5 };
+        const { data: pipe } = await supabaseClient
+          .from('pipeline_email_log')
+          .select('id, last_event, delivered_at, opened_at')
+          .eq('resend_message_id', emailId)
+          .maybeSingle();
+        if (pipe && RANK[payload.type]) {
+          const pipeUpd: Record<string, unknown> = {};
+          if ((RANK[pipe.last_event ?? ''] ?? 0) <= RANK[payload.type]) pipeUpd.last_event = payload.type.replace('email.', '');
+          if (payload.type === 'email.delivered' && !pipe.delivered_at) pipeUpd.delivered_at = now;
+          if ((payload.type === 'email.opened' || payload.type === 'email.clicked') && !pipe.opened_at) { pipeUpd.opened_at = now; if (!pipe.delivered_at) pipeUpd.delivered_at = now; }
+          if (payload.type === 'email.bounced') { pipeUpd.bounced_at = now; pipeUpd.error_text = bounceReason; }
+          if (Object.keys(pipeUpd).length > 0) {
+            const { error: pipeErr } = await supabaseClient.from('pipeline_email_log').update(pipeUpd).eq('id', pipe.id);
+            if (pipeErr) console.error('Error updating pipeline email log:', pipeErr);
+          }
+        }
+
+        if (!recipient && !conversation && !pipe) {
           console.log('No recipient or conversation found for email ID:', emailId);
         }
       }
