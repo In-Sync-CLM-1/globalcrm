@@ -24,6 +24,8 @@ export interface DayStat {
   registrations: number;
   activations: number;
   talk_secs: number;
+  /** Calls the In-Sync Phone app reported (answered or not). */
+  phone_calls: number;
 }
 
 export interface HourlyRow {
@@ -33,6 +35,7 @@ export interface HourlyRow {
   new_dials: number;
   connected_calls: number;
   clean_calls: number;
+  phone_calls: number;
 }
 
 export interface DispoCount {
@@ -51,6 +54,8 @@ export interface Totals {
   clean_calls: number;
   registrations: number;
   activations: number;
+  talk_secs: number;
+  phone_calls: number;
 }
 
 export const sumStats = (rows: DayStat[]): Totals =>
@@ -64,8 +69,10 @@ export const sumStats = (rows: DayStat[]): Totals =>
       clean_calls: t.clean_calls + r.clean_calls,
       registrations: t.registrations + r.registrations,
       activations: t.activations + r.activations,
+      talk_secs: t.talk_secs + (r.talk_secs ?? 0),
+      phone_calls: t.phone_calls + (r.phone_calls ?? 0),
     }),
-    { work_secs: 0, idle_secs: 0, calls: 0, new_dials: 0, connected_calls: 0, clean_calls: 0, registrations: 0, activations: 0 },
+    { work_secs: 0, idle_secs: 0, calls: 0, new_dials: 0, connected_calls: 0, clean_calls: 0, registrations: 0, activations: 0, talk_secs: 0, phone_calls: 0 },
   );
 
 export const pct = (num: number, den: number) => (den > 0 ? Math.round((100 * num) / den) : 0);

@@ -3,12 +3,14 @@ import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { ChangePasswordDialog } from "@/components/Auth/ChangePasswordDialog";
+import { usePhoneAppStatus } from "@/hooks/usePhoneApp";
 import {
   LayoutDashboard,
   Settings,
   Users,
   LogOut,
   KeyRound,
+  Smartphone,
   Menu,
   X,
   Contact,
@@ -72,6 +74,7 @@ function DashboardLayout({ children }: DashboardLayoutProps) {
   const notify = useNotification();
   const { user, signOut } = useAuth();
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
+  const { data: phoneApp } = usePhoneAppStatus();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const { canAccessFeature, loading: featureAccessLoading } = useFeatureAccess();
@@ -774,6 +777,19 @@ function DashboardLayout({ children }: DashboardLayoutProps) {
 
             {/* Sign out - Compact */}
             <div className="p-2 border-t border-sidebar-border">
+              {phoneApp?.enabled && (
+                <Button
+                  asChild
+                  variant="ghost"
+                  size="sm"
+                  className="w-full justify-start text-sm text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-primary"
+                >
+                  <Link to="/phone-app" onClick={() => setSidebarOpen(false)}>
+                    <Smartphone size={16} className="mr-2 text-sidebar-muted" />
+                    Phone app
+                  </Link>
+                </Button>
+              )}
               <Button
                 variant="ghost"
                 size="sm"

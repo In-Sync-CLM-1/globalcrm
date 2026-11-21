@@ -14,6 +14,8 @@ import { CallsByDateHour } from "./CallsByDateHour";
 import { Fig, NUM, CELL, Person, ROW, TH, TableCard } from "./GamingTable";
 import { CallsOverTime } from "./CallsOverTime";
 import { useFeatureAccess } from "@/hooks/useFeatureAccess";
+import { usePhoneAppStatus } from "@/hooks/usePhoneApp";
+import { PhoneCallTiles } from "@/components/PhoneApp/PhoneCallTiles";
 import { DAILY_TARGETS, fmtClock, fmtHM, pct, sumStats, useCallers, useDayStats, useDispoCounts, useDispositionCatalog, useHourlyCounts, useLatestCallDay } from "./gamingStats";
 
 function Tile({ label, value, hint }: { label: string; value: string | number; hint?: string }) {
@@ -29,6 +31,7 @@ function Tile({ label, value, hint }: { label: string; value: string | number; h
 export function GamingCallerDashboard({ orgId }: { orgId: string }) {
   const { canAccessFeature } = useFeatureAccess();
   const showAttendance = canAccessFeature("attendance");
+  const { data: phoneApp } = usePhoneAppStatus();
   const [userId, setUserId] = useState<string | null>(null);
   useEffect(() => { supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null)); }, []);
 
@@ -128,9 +131,11 @@ export function GamingCallerDashboard({ orgId }: { orgId: string }) {
         <Tile label="New dials" value={today.new_dials} hint="first-ever call to a lead" />
       </div>
 
+      {phoneApp?.enabled && <PhoneCallTiles totals={today} />}
+
       <CallsOverTime rows={myDays.data ?? []} note="Your calls, last 14 days." />
 
-      <CallsByDateHour measures={["calls", "new_dials"]} rows={hourly.data ?? []} note="Your calls, last 14 days." />
+      <CallsByDateHour measures={phoneApp?.enabled ? ["calls", "new_dials", "phone_calls", "connected_calls"] : ["calls", "new_dials"]} rows={hourly.data ?? []} note="Your calls, last 14 days." />
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="p-4">

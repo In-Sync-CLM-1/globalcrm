@@ -93,6 +93,7 @@ const PlatformAdmin = lazyRetry(() => import("./pages/PlatformAdmin"));
 const Calendar = lazyRetry(() => import("./pages/Calendar"));
 const Chat = lazyRetry(() => import("./pages/Chat"));
 const Attendance = lazyRetry(() => import("./pages/Attendance"));
+const PhoneApp = lazyRetry(() => import("./pages/PhoneApp"));
 const LeaveManagement = lazyRetry(() => import("./pages/LeaveManagement"));
 const HRApprovals = lazyRetry(() => import("./pages/HRApprovals"));
 const SDRAttendanceReport = lazyRetry(() => import("./pages/admin/SDRAttendanceReport"));
@@ -249,6 +250,11 @@ const App = () => (
           {/* Campaigns are external: wa.in-sync.co.in / email.in-sync.co.in */}
           
           {/* HR Routes */}
+          <Route path="/phone-app" element={
+            <ProtectedRoute>
+              <PhoneApp />
+            </ProtectedRoute>
+          } />
           <Route path="/attendance" element={
             <ProtectedRoute>
               <Attendance />

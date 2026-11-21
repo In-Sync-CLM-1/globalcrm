@@ -9,6 +9,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { LoadingState } from "@/components/common/LoadingState";
 import { useUrlState } from "@/hooks/useUrlState";
 import { useFeatureAccess } from "@/hooks/useFeatureAccess";
+import { usePhoneAppStatus, useTeamPhones, type TeamPhone } from "@/hooks/usePhoneApp";
+import { PhoneCallTiles } from "@/components/PhoneApp/PhoneCallTiles";
 import { CallsByDateHour } from "./CallsByDateHour";
 import { CELL, DayChip, Fig, NUM, Person, ROW, StatusChip, TH, TableCard, type Tone } from "./GamingTable";
 import { CallsOverTime } from "./CallsOverTime";
@@ -64,9 +66,26 @@ function attendanceCode(row: AttendanceRow | undefined): AttCode {
 const ATT_TONE: Record<AttCode, Tone> = { P: "good", L: "warn", H: "info", A: "bad", "-": "neutral" };
 const ATT_LABEL: Record<AttCode, string> = { P: "Present", L: "Late", H: "Half day", A: "Absent", "-": "No record" };
 
+/** A phone is silent when it has not checked in for at least one full working day. */
+function phoneState(p: TeamPhone | undefined): { tone: Tone; label: string; silent: boolean } {
+  if (!p) return { tone: "bad", label: "App not installed", silent: true };
+  if (p.connected) return { tone: "good", label: "Connected now", silent: false };
+  if (!p.call_log_allowed) return { tone: "bad", label: "Call history permission off", silent: true };
+  if (!p.last_seen_at) return { tone: "bad", label: "Never checked in", silent: true };
+  const last = new Date(p.last_seen_at);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const d = new Date(last); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() + 1);
+  let missed = 0;
+  for (; d < today; d.setDate(d.getDate() + 1)) if (isWorkingDay(d)) missed++;
+  return missed >= 1 ? { tone: "bad", label: `Silent for ${missed} working day${missed > 1 ? "s" : ""}`, silent: true } : { tone: "neutral", label: "Checked in today or last working day", silent: false };
+}
+
 export function GamingManagerDashboard({ orgId }: { orgId: string }) {
   const { canAccessFeature } = useFeatureAccess();
   const showAttendance = canAccessFeature("attendance");
+  const { data: phoneApp } = usePhoneAppStatus();
+  const usesPhoneApp = !!phoneApp?.enabled;
+  const teamPhones = useTeamPhones(usesPhoneApp);
   const { data: latest, isLoading: latestLoading } = useLatestCallDay(orgId);
   const [dayParam, setDayParam] = useUrlState("day", "");
   const [fromParam, setFromParam] = useUrlState("from", "");
@@ -156,9 +175,40 @@ export function GamingManagerDashboard({ orgId }: { orgId: string }) {
         <p className="text-xs text-muted-foreground">Leads by stage: {(stages.data ?? []).map((s) => `${s.name} ${s.count.toLocaleString("en-IN")}`).join(" · ")}</p>
       )}
 
+      {usesPhoneApp && <PhoneCallTiles totals={rangeTotals} />}
+
       <CallsOverTime rows={rangeStats.data ?? []} />
 
-      <CallsByDateHour measures={["calls", "new_dials"]} rows={hourly.data ?? []} />
+      <CallsByDateHour measures={usesPhoneApp ? ["calls", "new_dials", "phone_calls", "connected_calls"] : ["calls", "new_dials"]} rows={hourly.data ?? []} />
+
+      {usesPhoneApp && (
+        <TableCard
+          title="Callers' phones"
+          subtitle={`${callers.filter((c) => phoneState((teamPhones.data ?? []).find((p) => p.user_id === c.id)).silent).length} of ${callers.length} phones are not reporting calls. A phone is flagged when the In-Sync Phone app has not checked in for a full working day.`}
+        >
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent"><TH>Caller</TH><TH>Phone</TH><TH>Status</TH><TH>Last checked in</TH><TH>Last calls sent</TH></TableRow>
+            </TableHeader>
+            <TableBody>
+              {callers.map((c) => {
+                const p = (teamPhones.data ?? []).find((x) => x.user_id === c.id);
+                const st = phoneState(p);
+                const when = (iso: string | null | undefined) => iso ? new Date(iso).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" }) : "—";
+                return (
+                  <TableRow key={c.id} className={ROW}>
+                    <TableCell className={CELL}><Person name={c.name} /></TableCell>
+                    <TableCell className={CELL}>{p?.device_name ?? "—"}</TableCell>
+                    <TableCell className={CELL}><StatusChip tone={st.tone}>{st.label}</StatusChip></TableCell>
+                    <TableCell className={`${CELL} tabular-nums`}>{when(p?.last_seen_at)}</TableCell>
+                    <TableCell className={`${CELL} tabular-nums`}>{when(p?.last_sync_at)}</TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </TableCard>
+      )}
 
         <TableCard
           title="Callers on one day"
@@ -175,6 +225,7 @@ export function GamingManagerDashboard({ orgId }: { orgId: string }) {
               <TableRow className="hover:bg-transparent">
                 <TH>Caller</TH>{showAttendance && <TH>Attendance</TH>}<TH>Login</TH><TH>Logout</TH>
                 <TH right>Work hrs</TH><TH right>Idle hrs</TH><TH right>Calls</TH><TH right>New dials</TH>
+                {usesPhoneApp && <><TH right>Phone calls</TH><TH right>Connected</TH><TH right>Talk time</TH></>}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -191,6 +242,11 @@ export function GamingManagerDashboard({ orgId }: { orgId: string }) {
                     <TableCell className={NUM}>{r ? fmtHM(r.idle_secs) : <Fig v={0} />}</TableCell>
                     <TableCell className={NUM}><Fig v={r?.calls} /></TableCell>
                     <TableCell className={NUM}><Fig v={r?.new_dials} /></TableCell>
+                    {usesPhoneApp && <>
+                      <TableCell className={NUM}><Fig v={r?.phone_calls} /></TableCell>
+                      <TableCell className={NUM}><Fig v={r?.connected_calls} /></TableCell>
+                      <TableCell className={NUM}>{fmtHM(r?.talk_secs ?? 0)}</TableCell>
+                    </>}
                   </TableRow>
                 );
               })}
@@ -198,6 +254,11 @@ export function GamingManagerDashboard({ orgId }: { orgId: string }) {
                 <TableCell className={CELL}>Team</TableCell><TableCell /><TableCell /><TableCell />
                 <TableCell className={NUM}>{fmtHM(dayTotals.work_secs)}</TableCell><TableCell className={NUM}>{fmtHM(dayTotals.idle_secs)}</TableCell>
                 <TableCell className={NUM}>{dayTotals.calls.toLocaleString("en-IN")}</TableCell><TableCell className={NUM}>{dayTotals.new_dials.toLocaleString("en-IN")}</TableCell>
+                {usesPhoneApp && <>
+                  <TableCell className={NUM}>{dayTotals.phone_calls.toLocaleString("en-IN")}</TableCell>
+                  <TableCell className={NUM}>{dayTotals.connected_calls.toLocaleString("en-IN")}</TableCell>
+                  <TableCell className={NUM}>{fmtHM(dayTotals.talk_secs)}</TableCell>
+                </>}
               </TableRow>
             </TableBody>
           </Table>
