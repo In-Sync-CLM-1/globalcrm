@@ -38,13 +38,13 @@ export function callsLineOption(points: DayPoint[], variant: LineVariant = "line
         const i = (ps as { dataIndex: number }[])[0].dataIndex;
         const p = points[i];
         const row = (c: string, n: string, v: number) => `<div style="display:flex;justify-content:space-between;gap:20px"><span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${c};margin-right:6px"></span>${n}</span><b>${num(v)}</b></div>`;
-        return `<div style="font-weight:600;margin-bottom:6px">${p.label}</div>${row(SERIES.dialled, "Dialled", p.calls)}${row(SERIES.connected, "Connected", p.connected)}${row(SERIES.clean, "Clean", p.clean)}`;
+        return `<div style="font-weight:600;margin-bottom:6px">${p.label}</div>${row(SERIES.dialled, "Calls", p.calls)}`;
       },
     },
     grid: { left: 8, right: 84, top: 16, bottom: 8, containLabel: true },
     xAxis: { type: "category", data: points.map((p) => p.label), boundaryGap: false, axisLine: { lineStyle: { color: GRID } }, axisTick: { show: false }, axisLabel: { color: MUTED, fontSize: 11 } },
     yAxis: { type: "value", min: 0, axisLine: { show: false }, axisTick: { show: false }, axisLabel: { color: MUTED, fontSize: 11 }, splitLine: { lineStyle: { color: GRID } } },
-    series: [line("Dialled", "calls", SERIES.dialled, "circle", 16), line("Connected", "connected", SERIES.connected, "diamond", 22), line("Clean", "clean", SERIES.clean, "roundRect", 15)],
+    series: [line("Calls", "calls", SERIES.dialled, "circle", 16)],
   } as EChartsOption;
 }
 
