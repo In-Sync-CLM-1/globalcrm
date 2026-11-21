@@ -79,25 +79,24 @@ export function GamingCallerDashboard({ orgId }: { orgId: string }) {
     }
     return (catalog.data?.dispositions ?? []).map((d) => ({
       id: d.id, name: d.name, total: byDispo.get(d.id) ?? 0,
-      subs: (catalog.data?.subs ?? []).filter((s) => s.disposition_id === d.id).map((s) => ({ name: s.name, n: bySub.get(s.id) ?? 0 })).filter((x) => x.n > 0).sort((a, b) => b.n - a.n),
-    })).filter((x) => x.total > 0);
+      subs: (catalog.data?.subs ?? []).filter((s) => s.disposition_id === d.id).map((s) => ({ name: s.name, n: bySub.get(s.id) ?? 0 })),
+    }));
   }, [dispoCounts.data, catalog.data]);
 
   const board = useMemo(() => {
-    const by = new Map<string, { id: string; registrations: number; activations: number }>();
+    const by = new Map<string, { id: string; calls: number }>();
     for (const r of teamWeek.data ?? []) {
-      const e = by.get(r.agent_id) ?? { id: r.agent_id, registrations: 0, activations: 0 };
-      e.registrations += r.registrations; e.activations += r.activations;
+      const e = by.get(r.agent_id) ?? { id: r.agent_id, calls: 0 };
+      e.calls += r.calls;
       by.set(r.agent_id, e);
     }
-    return [...by.values()].sort((a, b) => b.registrations + b.activations - (a.registrations + a.activations));
+    return [...by.values()].sort((a, b) => b.calls - a.calls);
   }, [teamWeek.data]);
 
   if (latestLoading || !userId) return <LoadingState message="Loading your dashboard..." />;
 
   const status = attendance.data?.status;
   const attLabel = status === "present" ? "Present" : status === "half_day" ? "Half day" : status === "absent" ? "Absent" : "No record";
-  const metTargets = [today.calls >= DAILY_TARGETS.calls, today.clean_calls >= DAILY_TARGETS.clean, today.registrations >= DAILY_TARGETS.registrations, today.activations >= DAILY_TARGETS.activations].filter(Boolean).length;
 
   return (
     <div className="space-y-4">
@@ -105,8 +104,8 @@ export function GamingCallerDashboard({ orgId }: { orgId: string }) {
         <div>
           <h1 className="text-xl font-semibold text-foreground">Hello{me ? `, ${me.name.split(" ")[0]}` : ""}</h1>
           <p className="mt-1 max-w-3xl text-base text-foreground">
-            You dialled {today.calls} calls on {format(parseISO(day), "EEE d MMM")}: {pct(today.clean_calls, today.calls)}% were clean, {today.registrations} became registrations and {today.activations} activated.
-            {" "}You met {metTargets} of 4 daily targets.
+            You saved {today.calls} call outcomes on {format(parseISO(day), "EEE d MMM")}.
+            {" "}{today.calls >= DAILY_TARGETS.calls ? "You met" : "You have not yet met"} the daily target of {DAILY_TARGETS.calls}.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -124,24 +123,20 @@ export function GamingCallerDashboard({ orgId }: { orgId: string }) {
         {showAttendance && <Link to="/attendance" className="ml-auto text-sm text-primary underline">My attendance</Link>}
       </Card>
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-        <Tile label="Dialled" value={`${today.calls} / ${DAILY_TARGETS.calls}`} hint={today.calls >= DAILY_TARGETS.calls ? "target met" : `${DAILY_TARGETS.calls - today.calls} to go`} />
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-2 xl:grid-cols-2">
+        <Tile label="Calls (outcomes saved)" value={`${today.calls} / ${DAILY_TARGETS.calls}`} hint={today.calls >= DAILY_TARGETS.calls ? "target met" : `${DAILY_TARGETS.calls - today.calls} to go`} />
         <Tile label="New dials" value={today.new_dials} hint="first-ever call to a lead" />
-        <Tile label="Connected" value={today.connected_calls} hint={`${pct(today.connected_calls, today.calls)}% of dialled`} />
-        <Tile label="Clean calls" value={`${today.clean_calls} / ${DAILY_TARGETS.clean}`} hint={today.clean_calls >= DAILY_TARGETS.clean ? "target met" : `${DAILY_TARGETS.clean - today.clean_calls} to go`} />
-        <Tile label="Registrations" value={`${today.registrations} / ${DAILY_TARGETS.registrations}`} hint={`${pct(today.registrations, today.clean_calls)}% of clean calls`} />
-        <Tile label="Activations" value={`${today.activations} / ${DAILY_TARGETS.activations}`} hint={`${pct(today.activations, today.registrations)}% of registrations`} />
       </div>
 
       <CallsOverTime rows={myDays.data ?? []} note="Your calls, last 14 days." />
 
-      <CallsByDateHour rows={hourly.data ?? []} note="Your calls, last 14 days." />
+      <CallsByDateHour measures={["calls", "new_dials"]} rows={hourly.data ?? []} note="Your calls, last 14 days." />
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="p-4">
-          <h2 className="text-sm font-semibold text-foreground">How your calls ended on {format(parseISO(day), "d MMM")}</h2>
+          <h2 className="text-sm font-semibold text-foreground">Your call outcomes on {format(parseISO(day), "d MMM")}</h2>
           {ended.length === 0 ? (
-            <p className="mt-2 text-sm text-muted-foreground">No calls on this day.</p>
+            <p className="mt-2 text-sm text-muted-foreground">No outcomes saved on this day.</p>
           ) : (
             <div className="mt-3 space-y-3">
               {ended.map((d) => (
@@ -172,9 +167,9 @@ export function GamingCallerDashboard({ orgId }: { orgId: string }) {
               </ul>
             )}
           </Card>
-          <TableCard title="Team, last 7 days" subtitle="Registrations and activations">
+          <TableCard title="Team, last 7 days" subtitle="Calls (outcomes saved)">
             <Table>
-              <TableHeader><TableRow className="hover:bg-transparent"><TH className="w-10">#</TH><TH>Caller</TH><TH right>Registrations</TH><TH right>Activations</TH></TableRow></TableHeader>
+              <TableHeader><TableRow className="hover:bg-transparent"><TH className="w-10">#</TH><TH>Caller</TH><TH right>Calls</TH></TableRow></TableHeader>
               <TableBody>
                 {board.map((b, i) => {
                   const name = callers.find((c) => c.id === b.id)?.name ?? "Caller";
@@ -183,8 +178,7 @@ export function GamingCallerDashboard({ orgId }: { orgId: string }) {
                     <TableRow key={b.id} className={`${ROW} ${you ? "bg-primary/5 hover:bg-primary/10" : ""}`}>
                       <TableCell className={`${CELL} tabular-nums text-muted-foreground`}>{i + 1}</TableCell>
                       <TableCell className={CELL}><Person name={name} sub={you ? "You" : undefined} /></TableCell>
-                      <TableCell className={NUM}><Fig v={b.registrations} bold /></TableCell>
-                      <TableCell className={NUM}><Fig v={b.activations} bold /></TableCell>
+                      <TableCell className={NUM}><Fig v={b.calls} bold /></TableCell>
                     </TableRow>
                   );
                 })}

@@ -6,10 +6,8 @@ import { dateHourHeatmapOption } from "./gamingCharts";
 import type { HourlyRow } from "./gamingStats";
 
 const MEASURES = [
-  { key: "calls", label: "Dialled" },
+  { key: "calls", label: "Calls" },
   { key: "new_dials", label: "New dials" },
-  { key: "connected_calls", label: "Connected" },
-  { key: "clean_calls", label: "Clean" },
 ] as const;
 type MeasureKey = (typeof MEASURES)[number]["key"];
 

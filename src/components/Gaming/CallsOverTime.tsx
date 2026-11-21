@@ -7,7 +7,7 @@ import { callsLineOption, type LineVariant } from "./gamingCharts";
 export interface DayCounts { day: string; calls: number; connected_calls: number; clean_calls: number }
 
 /**
- * The dashboards' one graph: Dialled, Connected and Clean calls on a date line (absolute counts).
+ * The dashboards' one graph: Calls (outcomes saved) on a date line (absolute counts).
  * The title states the finding; the rows are summed per date, whoever made the calls.
  */
 export function CallsOverTime({ rows, note }: { rows: DayCounts[]; note?: string }) {
@@ -25,8 +25,8 @@ export function CallsOverTime({ rows, note }: { rows: DayCounts[]; note?: string
       const hi = days.reduce((a, b) => (b.calls > a.calls ? b : a));
       const lo = days.reduce((a, b) => (b.calls < a.calls ? b : a));
       headline = days.length === 1
-        ? `${hi.calls.toLocaleString("en-IN")} calls dialled on ${format(parseISO(hi.day), "EEE d MMM")}.`
-        : `Dialled calls ranged from ${lo.calls.toLocaleString("en-IN")} (${format(parseISO(lo.day), "EEE d MMM")}) to ${hi.calls.toLocaleString("en-IN")} (${format(parseISO(hi.day), "EEE d MMM")}) a day.`;
+        ? `${hi.calls.toLocaleString("en-IN")} calls on ${format(parseISO(hi.day), "EEE d MMM")}.`
+        : `Calls ranged from ${lo.calls.toLocaleString("en-IN")} (${format(parseISO(lo.day), "EEE d MMM")}) to ${hi.calls.toLocaleString("en-IN")} (${format(parseISO(hi.day), "EEE d MMM")}) a day.`;
     }
     return {
       title: headline,
@@ -40,7 +40,7 @@ export function CallsOverTime({ rows, note }: { rows: DayCounts[]; note?: string
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="text-sm font-semibold text-foreground">{title}</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">Dialled = every call placed. Connected = answered. Clean = lasted a minute or more.{note ? ` ${note}` : ""}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">Calls = outcomes saved by callers.{note ? ` ${note}` : ""}</p>
         </div>
         <div className="inline-flex rounded-md border bg-muted/40 p-0.5 text-xs" role="group" aria-label="Chart style">
           {(["line", "area"] as const).map((v) => (

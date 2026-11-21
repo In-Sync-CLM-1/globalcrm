@@ -137,8 +137,7 @@ export function GamingManagerDashboard({ orgId }: { orgId: string }) {
         <div>
           <h1 className="text-xl font-semibold text-foreground">Calling Manager Dashboard</h1>
           <p className="mt-1 max-w-3xl text-base text-foreground">
-            Callers dialled {rangeTotals.calls.toLocaleString("en-IN")} calls. {pct(rangeTotals.clean_calls, rangeTotals.calls)}% were clean (a minute or more),
-            {" "}{pct(rangeTotals.registrations, rangeTotals.clean_calls)}% of clean calls became registrations, and {pct(rangeTotals.activations, rangeTotals.registrations)}% of registrations activated.
+            Callers saved {rangeTotals.calls.toLocaleString("en-IN")} call outcomes in these dates. The counts below are the outcomes exactly as callers picked them.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -149,13 +148,9 @@ export function GamingManagerDashboard({ orgId }: { orgId: string }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-        <Tile label="Dialled" value={rangeTotals.calls.toLocaleString("en-IN")} />
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-2 xl:grid-cols-2">
+        <Tile label="Calls (outcomes saved)" value={rangeTotals.calls.toLocaleString("en-IN")} />
         <Tile label="New dials" value={rangeTotals.new_dials.toLocaleString("en-IN")} hint="first-ever call to a lead" />
-        <Tile label="Connected" value={rangeTotals.connected_calls.toLocaleString("en-IN")} hint={`${pct(rangeTotals.connected_calls, rangeTotals.calls)}% of dialled`} />
-        <Tile label="Clean calls" value={rangeTotals.clean_calls.toLocaleString("en-IN")} hint={`${pct(rangeTotals.clean_calls, rangeTotals.calls)}% of dialled`} />
-        <Tile label="Registrations" value={rangeTotals.registrations.toLocaleString("en-IN")} hint={`${pct(rangeTotals.registrations, rangeTotals.clean_calls)}% of clean calls`} />
-        <Tile label="Activations" value={rangeTotals.activations.toLocaleString("en-IN")} hint={`${pct(rangeTotals.activations, rangeTotals.registrations)}% of registrations`} />
       </div>
       {(stages.data ?? []).length > 0 && (
         <p className="text-xs text-muted-foreground">Leads by stage: {(stages.data ?? []).map((s) => `${s.name} ${s.count.toLocaleString("en-IN")}`).join(" · ")}</p>
@@ -163,11 +158,11 @@ export function GamingManagerDashboard({ orgId }: { orgId: string }) {
 
       <CallsOverTime rows={rangeStats.data ?? []} />
 
-      <CallsByDateHour rows={hourly.data ?? []} />
+      <CallsByDateHour measures={["calls", "new_dials"]} rows={hourly.data ?? []} />
 
         <TableCard
           title="Callers on one day"
-          subtitle={`${dayTotals.calls.toLocaleString("en-IN")} dialled · ${fmtHM(dayTotals.work_secs)} work hours · ${fmtHM(dayTotals.idle_secs)} idle hours. A clean call lasts a minute or more.`}
+          subtitle={`${dayTotals.calls.toLocaleString("en-IN")} calls · ${fmtHM(dayTotals.work_secs)} work hours · ${fmtHM(dayTotals.idle_secs)} idle hours.`}
           action={
             <div className="flex items-center gap-2">
               <label htmlFor="gaming-day" className="text-sm text-muted-foreground">Day</label>
@@ -179,7 +174,7 @@ export function GamingManagerDashboard({ orgId }: { orgId: string }) {
             <TableHeader>
               <TableRow className="hover:bg-transparent">
                 <TH>Caller</TH>{showAttendance && <TH>Attendance</TH>}<TH>Login</TH><TH>Logout</TH>
-                <TH right>Work hrs</TH><TH right>Idle hrs</TH><TH right>Calls</TH><TH right>New dials</TH><TH right>Clean calls</TH><TH right>Registrations</TH><TH right>Activations</TH>
+                <TH right>Work hrs</TH><TH right>Idle hrs</TH><TH right>Calls</TH><TH right>New dials</TH>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -196,9 +191,6 @@ export function GamingManagerDashboard({ orgId }: { orgId: string }) {
                     <TableCell className={NUM}>{r ? fmtHM(r.idle_secs) : <Fig v={0} />}</TableCell>
                     <TableCell className={NUM}><Fig v={r?.calls} /></TableCell>
                     <TableCell className={NUM}><Fig v={r?.new_dials} /></TableCell>
-                    <TableCell className={NUM}><Fig v={r?.clean_calls} /></TableCell>
-                    <TableCell className={NUM}><Fig v={r?.registrations} bold /></TableCell>
-                    <TableCell className={NUM}><Fig v={r?.activations} bold /></TableCell>
                   </TableRow>
                 );
               })}
@@ -206,16 +198,14 @@ export function GamingManagerDashboard({ orgId }: { orgId: string }) {
                 <TableCell className={CELL}>Team</TableCell><TableCell /><TableCell /><TableCell />
                 <TableCell className={NUM}>{fmtHM(dayTotals.work_secs)}</TableCell><TableCell className={NUM}>{fmtHM(dayTotals.idle_secs)}</TableCell>
                 <TableCell className={NUM}>{dayTotals.calls.toLocaleString("en-IN")}</TableCell><TableCell className={NUM}>{dayTotals.new_dials.toLocaleString("en-IN")}</TableCell>
-                <TableCell className={NUM}>{dayTotals.clean_calls.toLocaleString("en-IN")}</TableCell><TableCell className={NUM}>{dayTotals.registrations.toLocaleString("en-IN")}</TableCell>
-                <TableCell className={NUM}>{dayTotals.activations.toLocaleString("en-IN")}</TableCell>
               </TableRow>
             </TableBody>
           </Table>
         </TableCard>
 
         <TableCard
-          title="Dispositions and sub-dispositions"
-          subtitle={<>Every call ends with one disposition and one sub-disposition chosen by the caller. Registration Completed (or Registered) counts as a registration and Deposit Completed (or Activated) as an activation. <Link to="/admin/call-dispositions" className="text-primary underline">Edit the list</Link></>}
+          title="Call outcomes"
+          subtitle={<>Each count is the number of outcomes callers saved in the chosen dates, per caller and in total. <Link to="/admin/call-dispositions" className="text-primary underline">Edit the list</Link></>}
         >
           <Table>
             <TableHeader>
