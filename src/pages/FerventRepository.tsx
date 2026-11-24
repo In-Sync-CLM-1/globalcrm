@@ -442,7 +442,7 @@ export default function FerventRepository() {
               Your vendor/lead database — import, filter, and export. Calling and pipeline actions are shown below but not active on your plan.
             </p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <FerventSavedSearches
               orgId={effectiveOrgId || ""}
               currentDefinition={currentSavedSearchDefinition}

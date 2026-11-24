@@ -74,7 +74,7 @@ export function ExportHistoryDialog({ open, onOpenChange }: ExportHistoryDialogP
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[95vw] sm:max-w-[900px] max-h-[80vh] overflow-y-auto">
+      <DialogContent className="max-w-[95vw] sm:max-w-[1000px] max-h-[80vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Export History</DialogTitle>
           <DialogDescription>Files can be downloaded again for 7 days. You can leave the page while one is being prepared.</DialogDescription>
@@ -91,12 +91,12 @@ export function ExportHistoryDialog({ open, onOpenChange }: ExportHistoryDialogP
               <TableHeader>
                 <TableRow>
                   <TableHead>When</TableHead>
+                  <TableHead>Status</TableHead>
                   <TableHead>By</TableHead>
                   <TableHead>Export</TableHead>
                   <TableHead>Filters Used</TableHead>
                   <TableHead className="text-right">Records</TableHead>
                   <TableHead className="text-right">Size</TableHead>
-                  <TableHead>Status</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -104,16 +104,16 @@ export function ExportHistoryDialog({ open, onOpenChange }: ExportHistoryDialogP
                   const what = describeExport(job);
                   return (
                     <TableRow key={job.id}>
-                      <TableCell className="whitespace-nowrap">{new Date(job.created_at).toLocaleString()}</TableCell>
+                      <TableCell className="sm:whitespace-nowrap">{new Date(job.created_at).toLocaleString()}</TableCell>
+                      <TableCell>
+                        {status(job)}
+                        {job.status === "failed" && job.error && <p className="text-xs text-muted-foreground mt-1">{job.error}</p>}
+                      </TableCell>
                       <TableCell className="whitespace-nowrap">{actorName(job.profiles)}</TableCell>
                       <TableCell className="whitespace-nowrap">{EXPORT_KIND_LABELS[job.kind] ?? job.kind}</TableCell>
                       <TableCell className="text-xs text-muted-foreground max-w-[220px] truncate" title={what}>{what}</TableCell>
                       <TableCell className="text-right">{job.row_count?.toLocaleString() ?? "—"}</TableCell>
                       <TableCell className="text-right whitespace-nowrap">{formatBytes(job.byte_count)}</TableCell>
-                      <TableCell>
-                        {status(job)}
-                        {job.status === "failed" && job.error && <p className="text-xs text-muted-foreground mt-1">{job.error}</p>}
-                      </TableCell>
                     </TableRow>
                   );
                 })}
