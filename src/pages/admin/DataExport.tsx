@@ -4,6 +4,9 @@ import DashboardLayout from "@/components/Layout/DashboardLayout";
 import { useOrgContext } from "@/hooks/useOrgContext";
 import { useAuth } from "@/contexts/AuthProvider";
 import { supabase } from "@/integrations/supabase/client";
+import { requestExport } from "@/lib/exportJobs";
+import { useDbExports } from "@/hooks/useDbExports";
+import { ExportHistoryButton } from "@/components/Exports/ExportHistoryButton";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -117,6 +120,7 @@ export default function DataExport() {
   const { isPlatformAdmin, isLoading: orgLoading } = useOrgContext();
   const { session } = useAuth();
   const navigate = useNavigate();
+  const dbExports = useDbExports();
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [rowCounts, setRowCounts] = useState<Record<string, number>>({});
@@ -131,6 +135,11 @@ export default function DataExport() {
       }
       setDownloading(table);
       try {
+        if (dbExports.enabled) {
+          await requestExport("table", { table }, `${table}_${new Date().toISOString().split("T")[0]}.csv`);
+          toast.success(`Preparing ${table}`, { description: "It will download by itself when ready." });
+          return true;
+        }
         const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
         const resp = await fetch(
           `https://${projectId}.supabase.co/functions/v1/export-table-csv`,
@@ -173,7 +182,7 @@ export default function DataExport() {
         setDownloading(null);
       }
     },
-    [session]
+    [session, dbExports.enabled]
   );
 
   if (!orgLoading && !isPlatformAdmin) {
@@ -211,8 +220,10 @@ export default function DataExport() {
       if (ok) successCount++;
     }
     setBulkDownloading(false);
-    toast.success("Bulk export complete", {
-      description: `${successCount}/${selected.size} tables exported`,
+    toast.success(dbExports.enabled ? "Bulk export started" : "Bulk export complete", {
+      description: dbExports.enabled
+        ? `${successCount}/${selected.size} tables are being prepared and will download by themselves`
+        : `${successCount}/${selected.size} tables exported`,
     });
   };
 
@@ -232,7 +243,8 @@ export default function DataExport() {
               Export database tables as CSV files. Platform admin only.
             </p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            {dbExports.enabled && <ExportHistoryButton />}
             <Button variant="outline" size="sm" onClick={toggleAll}>
               {allSelected ? (
                 <><Square className="h-4 w-4 mr-1" /> Deselect All</>
@@ -243,7 +255,7 @@ export default function DataExport() {
             <Button
               size="sm"
               onClick={bulkExport}
-              disabled={selected.size === 0 || bulkDownloading}
+              disabled={selected.size === 0 || bulkDownloading || !dbExports.ready}
             >
               {bulkDownloading ? (
                 <Loader2 className="h-4 w-4 mr-1 animate-spin" />
@@ -294,7 +306,7 @@ export default function DataExport() {
                       size="icon"
                       className="h-7 w-7 shrink-0"
                       onClick={() => exportTable(table)}
-                      disabled={downloading === table}
+                      disabled={downloading === table || !dbExports.ready}
                     >
                       {downloading === table ? (
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />

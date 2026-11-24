@@ -13,6 +13,9 @@ import { Plus, Pencil, Trash2, Mail, Phone as PhoneIcon, Download, Upload, Build
 import { SendEmailDialog } from "@/components/Contact/SendEmailDialog";
 import { SendWhatsAppDialog } from "@/components/Contact/SendWhatsAppDialog";
 import { exportToCSV, formatDateForExport } from "@/utils/exportUtils";
+import { requestExport } from "@/lib/exportJobs";
+import { useDbExports } from "@/hooks/useDbExports";
+import { ExportHistoryButton } from "@/components/Exports/ExportHistoryButton";
 import { useOrgContext } from "@/hooks/useOrgContext";
 import { Checkbox } from "@/components/ui/checkbox";
 import { usePagination } from "@/hooks/usePagination";
@@ -73,6 +76,7 @@ export default function Contacts() {
   const [selectedContacts, setSelectedContacts] = useState<string[]>([]);
   const [showBulkUpload, setShowBulkUpload] = useState(false);
   const gaming = useGamingAccess();
+  const dbExports = useDbExports();
   const [exporting, setExporting] = useState(false);
   const [callingContactId, setCallingContactId] = useState<string | null>(null);
   const [emailDialogOpen, setEmailDialogOpen] = useState(false);
@@ -425,6 +429,17 @@ Jane,Smith,jane.smith@example.com,+0987654321,Tech Inc,CEO,contacted,Referral`;
     
     setExporting(true);
     try {
+      if (dbExports.enabled) {
+        await requestExport(
+          "contacts",
+          selectedContacts.length > 0 ? { ids: selectedContacts } : { filters: appliedFilters },
+          `contacts_export_${new Date().toISOString().split("T")[0]}.csv`,
+        );
+        queryClient.invalidateQueries({ queryKey: ["export-jobs"] });
+        notify.success("Preparing your export", "It will download by itself when ready. You can keep working, and it also stays in Export History for 7 days.");
+        return;
+      }
+
       let dataToExport: Contact[] = [];
       
       if (selectedContacts.length > 0) {
@@ -509,11 +524,12 @@ Jane,Smith,jane.smith@example.com,+0987654321,Tech Inc,CEO,contacted,Referral`;
           </div>
           <div className="flex gap-2">
             {gaming.canExport && (
-              <Button variant="outline" size="sm" onClick={handleExport} disabled={exporting} className="flex-1 sm:flex-none">
+              <Button variant="outline" size="sm" onClick={handleExport} disabled={exporting || !dbExports.ready} className="flex-1 sm:flex-none">
                 <Download className="h-4 w-4 sm:mr-2" />
-                <span className="hidden sm:inline">{exporting ? "Exporting..." : selectedContacts.length > 0 ? `Download (${selectedContacts.length})` : "Download All"}</span>
+                <span className="hidden sm:inline">{exporting ? "Exporting..." : selectedContacts.length > 0 ? `Download (${selectedContacts.length})` : dbExports.enabled && Object.values(appliedFilters).some(Boolean) ? "Download Filtered" : "Download All"}</span>
               </Button>
             )}
+            {gaming.canExport && dbExports.enabled && <ExportHistoryButton className="flex-1 sm:flex-none" />}
             {gaming.canUpload && (
               <Button size="sm" onClick={() => setShowBulkUpload(true)} className="flex-1 sm:flex-none">
                 <Upload className="h-4 w-4 sm:mr-2" />

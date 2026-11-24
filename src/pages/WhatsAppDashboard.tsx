@@ -12,6 +12,9 @@ import { format } from "date-fns";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import { exportToCSV, ExportColumn, formatDateForExport } from "@/utils/exportUtils";
+import { requestExport } from "@/lib/exportJobs";
+import { useDbExports } from "@/hooks/useDbExports";
+import { ExportHistoryButton } from "@/components/Exports/ExportHistoryButton";
 
 interface WhatsAppMessage {
   id: string;
@@ -36,6 +39,7 @@ interface WhatsAppMessage {
 const WhatsAppDashboard = () => {
   const { effectiveOrgId } = useOrgContext();
   const notify = useNotification();
+  const dbExports = useDbExports();
 
   // Fetch messages using useOrgData for automatic caching
   const { data: messages = [], isLoading, refetch: refetchMessages } = useOrgData<WhatsAppMessage>(
@@ -79,7 +83,16 @@ const WhatsAppDashboard = () => {
     intervalMs: 900000, // 15 minutes
   });
 
-  const handleExport = () => {
+  const handleExport = async () => {
+    if (dbExports.enabled) {
+      try {
+        await requestExport("whatsapp_messages", {}, `whatsapp-messages-${new Date().toISOString().split("T")[0]}.csv`);
+        notify.success("Preparing your export", "It will download by itself when ready. You can keep working, and it also stays in Export History for 7 days.");
+      } catch (err) {
+        notify.error("Export failed", (err as Error).message);
+      }
+      return;
+    }
     try {
       const columns: ExportColumn[] = [
         { 
@@ -155,7 +168,8 @@ const WhatsAppDashboard = () => {
               <RefreshCw className="mr-2 h-4 w-4" />
               Refresh
             </Button>
-            <Button variant="outline" size="sm" onClick={handleExport} disabled={messages.length === 0}>
+            {dbExports.enabled && <ExportHistoryButton />}
+            <Button variant="outline" size="sm" onClick={handleExport} disabled={messages.length === 0 || !dbExports.ready}>
               <Download className="mr-2 h-4 w-4" />
               Export
             </Button>
