@@ -54,7 +54,7 @@ function plainEmailHtml(name: string, lines: string[], button?: { text: string; 
 
 // One email through the IEDUP sender, logged and charged to the IEDUP wallet (refunded if the send fails).
 // deno-lint-ignore no-explicit-any
-async function sendIedupEmail(db: any, o: { contactId: string; to: string; subject: string; html: string; floor: number | null }) {
+async function sendIedupEmail(db: any, o: { contactId: string | null; to: string; subject: string; html: string; floor: number | null }) {
   const senderCfg = EMAIL_SENDER_BY_ORG[IEDUP_ORG_ID];
   const apiKey = Deno.env.get(senderCfg.resendKeyEnv);
   if (!o.to || !apiKey) return { ok: false, error: o.to ? "no email key" : "no email" };
@@ -89,6 +89,33 @@ serve(async (req) => {
   if (!secret || req.headers.get("x-ramp-secret") !== secret) return json(401, { error: "Unauthorized" });
 
   const body = await req.json().catch(() => ({}));
+
+  // How many messages RAMP sent straight to WhatsApp (login codes), per day, for the dashboard's message table. Counts only, nothing is sent or charged.
+  if (body.kind === "direct_counts" && Array.isArray(body.items)) {
+    const rows = (body.items as Record<string, unknown>[]).slice(0, 2000).map((it) => ({
+      org_id: IEDUP_ORG_ID, source: "ramp", channel: "WhatsApp", day: String(it.day ?? ""), template: String(it.template ?? "").trim().slice(0, 100),
+      sent: Math.max(0, Math.floor(Number(it.sent) || 0)), updated_at: new Date().toISOString(),
+    })).filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.day) && r.template);
+    const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    if (rows.length) {
+      const { error } = await db.from("direct_message_counts").upsert(rows);
+      if (error) return json(500, { error: error.message });
+    }
+    return json(200, { saved: rows.length });
+  }
+
+  // One email to a RAMP staff member (password reset code): no WhatsApp and no CRM contact, charged at the email rate.
+  if (body.kind === "staff_email") {
+    const cut = (v: unknown, n: number) => String(v ?? "").trim().slice(0, n);
+    const to = cut(body.email, 200), subject = cut(body.email_subject, 150);
+    const lines = Array.isArray(body.email_lines) ? (body.email_lines as unknown[]).map((l) => cut(l, 600)).filter(Boolean).slice(0, 8) : [];
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to) || !subject || !lines.length) return json(400, { error: "email, subject and text are required" });
+    const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    const gate = await orgServiceGate(db, IEDUP_ORG_ID);
+    if (!gate.allowed) return json(402, { error: gate.reason });
+    const r = await sendIedupEmail(db, { contactId: null, to, subject, floor: typeof gate.floor === "number" ? gate.floor : null, html: plainEmailHtml(cut(body.name, 60) || "Staff", lines) });
+    return json(r.ok ? 200 : 502, r);
+  }
 
   // Email-only messages to trainers (for example "your trainer account is approved"): no WhatsApp, charged at the email rate.
   if (body.kind === "trainer_email" && Array.isArray(body.items)) {

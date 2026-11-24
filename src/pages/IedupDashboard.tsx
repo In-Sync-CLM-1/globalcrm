@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { useIsIedup, IEDUP_ORG_ID } from "@/hooks/useIsIedup";
 import { useUrlDateRange } from "@/hooks/useUrlDateRange";
+import MessageTable, { totalOf, type MessageRow } from "@/components/iedup/MessageTable";
 
 const REFRESH_MS = 30_000;
 
@@ -70,6 +71,17 @@ export default function IedupDashboard() {
     refetchInterval: REFRESH_MS,
   });
 
+  // Every message by template and channel, however it was sent (RAMP login codes included)
+  const { data: messages } = useQuery({
+    queryKey: ["iedup-message-table", rangeKey],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("get_iedup_message_table" as any, { p_org: IEDUP_ORG_ID, p_from: fromIso, p_to: toIso });
+      if (error) throw error;
+      return data as unknown as MessageRow[];
+    },
+    refetchInterval: REFRESH_MS,
+  });
+
   const { data: settings } = useQuery({
     queryKey: ["iedup-org-settings"],
     queryFn: async () => (await supabase.from("organization_settings").select("dialing_active, calling_windows, updated_at").eq("org_id", IEDUP_ORG_ID).maybeSingle()).data,
@@ -96,9 +108,11 @@ export default function IedupDashboard() {
 
   const email = useMemo(() => {
     const e = stats?.email || {};
-    const sent = Number(e.sent || 0), failed = Number(e.failed || 0);
+    // the same totals as the table below
+    const t = messages ? totalOf(messages, "Email") : null;
+    const sent = t ? t.sent : Number(e.sent || 0), failed = t ? Number(t.failed) : Number(e.failed || 0);
     return { sent, failed, cost: Number(e.cost || 0), total: sent + failed };
-  }, [stats]);
+  }, [stats, messages]);
 
   // Per-bucket time series (daily, or weekly for long ranges)
   const trend = useMemo(() => {
@@ -163,7 +177,7 @@ export default function IedupDashboard() {
         {/* Headline KPIs */}
         <div className="grid shrink-0 grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
           <KpiCard icon={<UsersIcon size={16} />} label="Beneficiaries" value={dataCounts?.total ?? "—"} tone="slate" />
-          <KpiCard icon={<Send size={16} />} label="Messages sent" value={wa.sent} tone="blue" />
+          <KpiCard icon={<Send size={16} />} label="WhatsApp sent" value={messages ? totalOf(messages, "WhatsApp").sent : wa.sent} tone="blue" />
           <KpiCard icon={<CheckCircle2 size={16} />} label="Delivery rate" value={`${wa.deliveryRate}%`} tone="emerald" />
           <KpiCard icon={<Eye size={16} />} label="Open rate" value={`${wa.openRate}%`} tone="violet" />
           <KpiCard icon={<PhoneCall size={16} />} label="Calls placed" value={calls.placed} tone="indigo" />
@@ -202,7 +216,7 @@ export default function IedupDashboard() {
 
         {/* Per-channel detail */}
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
-          <ChartCard title="WhatsApp delivery funnel" subtitle="This period">
+          <ChartCard title="WhatsApp delivery funnel" subtitle="This period, login codes left out (they have no delivery reports)">
             <div className="flex h-full flex-col justify-center gap-3 px-1">
               <FunnelBar label="Sent" value={wa.sent} total={wa.sent} color={C.sent} />
               <FunnelBar label="Delivered" value={wa.delivered} total={wa.sent} color={C.delivered} />
@@ -232,6 +246,8 @@ export default function IedupDashboard() {
             </div>
           </ChartCard>
         </div>
+
+        <MessageTable rows={messages} calls={calls} from={dateRange.from} to={dateRange.to} />
 
         {/* By message type */}
         <ChartCard title="WhatsApp by message type" subtitle="Sent vs Opened">
