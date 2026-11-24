@@ -9,13 +9,15 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { LoadingState } from "@/components/common/LoadingState";
 import { useUrlState } from "@/hooks/useUrlState";
 import { useFeatureAccess } from "@/hooks/useFeatureAccess";
+import { useUserRole } from "@/hooks/useUserRole";
 import { usePhoneAppStatus, useTeamPhones, type TeamPhone } from "@/hooks/usePhoneApp";
 import { PhoneCallTiles } from "@/components/PhoneApp/PhoneCallTiles";
+import { CallerDayReport } from "./CallerDayReport";
 import { CallsByDateHour } from "./CallsByDateHour";
 import { CELL, DayChip, Fig, NUM, Person, ROW, StatusChip, TH, TableCard, type Tone } from "./GamingTable";
 import { CallsOverTime } from "./CallsOverTime";
 import {
-  fmtClock, fmtHM, pct, sumStats, useCallers, useDayStats, useDispoCounts, useDispositionCatalog, useHourlyCounts, useLatestCallDay,
+  pct, sumStats, useCallers, useDayOutcomes, useDayStats, useDispoCounts, useDispositionCatalog, useHourlyCounts, useLatestCallDay,
 } from "./gamingStats";
 
 const LATE_AFTER_MINUTES = 10 * 60 + 15; // 10:00 shift start + 15 min grace
@@ -82,22 +84,23 @@ function phoneState(p: TeamPhone | undefined): { tone: Tone; label: string; sile
 
 export function GamingManagerDashboard({ orgId }: { orgId: string }) {
   const { canAccessFeature } = useFeatureAccess();
+  const { isAdmin } = useUserRole();
   const showAttendance = canAccessFeature("attendance");
   const { data: phoneApp } = usePhoneAppStatus();
   const usesPhoneApp = !!phoneApp?.enabled;
   const teamPhones = useTeamPhones(usesPhoneApp);
   const { data: latest, isLoading: latestLoading } = useLatestCallDay(orgId);
-  const [dayParam, setDayParam] = useUrlState("day", "");
   const [fromParam, setFromParam] = useUrlState("from", "");
   const [toParam, setToParam] = useUrlState("to", "");
 
-  const day = dayParam || latest || format(new Date(), "yyyy-MM-dd");
-  const to = toParam || day;
-  const from = fromParam || format(addDays(parseISO(to), -13), "yyyy-MM-dd");
+  const lastDay = toParam || latest || format(new Date(), "yyyy-MM-dd");
+  const firstDay = fromParam || format(addDays(parseISO(lastDay), -13), "yyyy-MM-dd");
+  // Dates picked the wrong way round are read as the same range.
+  const [from, to] = firstDay <= lastDay ? [firstDay, lastDay] : [lastDay, firstDay];
 
   const { data: callers = [] } = useCallers(orgId);
-  const dayStats = useDayStats(orgId, day, day);
   const rangeStats = useDayStats(orgId, from, to);
+  const dayOutcomes = useDayOutcomes(orgId, from, to);
   const hourly = useHourlyCounts(orgId, from, to);
   const dispoCounts = useDispoCounts(orgId, from, to);
   const catalog = useDispositionCatalog(orgId);
@@ -127,8 +130,6 @@ export function GamingManagerDashboard({ orgId }: { orgId: string }) {
   });
 
   const rangeTotals = sumStats(rangeStats.data ?? []);
-  const dayRows = dayStats.data ?? [];
-  const dayTotals = sumStats(dayRows);
   const attByKey = useMemo(() => new Map((attendance.data ?? []).map((a) => [`${a.user_id}|${a.date}`, a])), [attendance.data]);
 
   const { byDispo, bySub, byCaller } = useMemo(() => {
@@ -210,59 +211,17 @@ export function GamingManagerDashboard({ orgId }: { orgId: string }) {
         </TableCard>
       )}
 
-        <TableCard
-          title="Callers on one day"
-          subtitle={`${dayTotals.calls.toLocaleString("en-IN")} calls · ${fmtHM(dayTotals.work_secs)} work hours · ${fmtHM(dayTotals.idle_secs)} idle hours.`}
-          action={
-            <div className="flex items-center gap-2">
-              <label htmlFor="gaming-day" className="text-sm text-muted-foreground">Day</label>
-              <Input id="gaming-day" type="date" className="h-9 w-40" value={day} max={format(new Date(), "yyyy-MM-dd")} onChange={(e) => e.target.value && setDayParam(e.target.value)} />
-            </div>
-          }
-        >
-          <Table>
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <TH>Caller</TH>{showAttendance && <TH>Attendance</TH>}<TH>Login</TH><TH>Logout</TH>
-                <TH right>Work hrs</TH><TH right>Idle hrs</TH><TH right>Calls</TH><TH right>New dials</TH>
-                {usesPhoneApp && <><TH right>Phone calls</TH><TH right>Connected</TH><TH right>Talk time</TH></>}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {callers.map((c) => {
-                const r = dayRows.find((x) => x.agent_id === c.id);
-                const code = attendanceCode(attByKey.get(`${c.id}|${day}`));
-                return (
-                  <TableRow key={c.id} className={ROW}>
-                    <TableCell className={CELL}><Person name={c.name} /></TableCell>
-                    {showAttendance && <TableCell className={CELL}><StatusChip tone={ATT_TONE[code]}>{ATT_LABEL[code]}</StatusChip></TableCell>}
-                    <TableCell className={`${CELL} tabular-nums`}>{fmtClock(r?.login_at ?? null)}</TableCell>
-                    <TableCell className={`${CELL} tabular-nums`}>{fmtClock(r?.logout_at ?? null)}</TableCell>
-                    <TableCell className={NUM}>{r ? fmtHM(r.work_secs) : <Fig v={0} />}</TableCell>
-                    <TableCell className={NUM}>{r ? fmtHM(r.idle_secs) : <Fig v={0} />}</TableCell>
-                    <TableCell className={NUM}><Fig v={r?.calls} /></TableCell>
-                    <TableCell className={NUM}><Fig v={r?.new_dials} /></TableCell>
-                    {usesPhoneApp && <>
-                      <TableCell className={NUM}><Fig v={r?.phone_calls} /></TableCell>
-                      <TableCell className={NUM}><Fig v={r?.connected_calls} /></TableCell>
-                      <TableCell className={NUM}>{fmtHM(r?.talk_secs ?? 0)}</TableCell>
-                    </>}
-                  </TableRow>
-                );
-              })}
-              <TableRow className="border-t-2 bg-muted/50 font-semibold hover:bg-muted/50">
-                <TableCell className={CELL}>Team</TableCell><TableCell /><TableCell /><TableCell />
-                <TableCell className={NUM}>{fmtHM(dayTotals.work_secs)}</TableCell><TableCell className={NUM}>{fmtHM(dayTotals.idle_secs)}</TableCell>
-                <TableCell className={NUM}>{dayTotals.calls.toLocaleString("en-IN")}</TableCell><TableCell className={NUM}>{dayTotals.new_dials.toLocaleString("en-IN")}</TableCell>
-                {usesPhoneApp && <>
-                  <TableCell className={NUM}>{dayTotals.phone_calls.toLocaleString("en-IN")}</TableCell>
-                  <TableCell className={NUM}>{dayTotals.connected_calls.toLocaleString("en-IN")}</TableCell>
-                  <TableCell className={NUM}>{fmtHM(dayTotals.talk_secs)}</TableCell>
-                </>}
-              </TableRow>
-            </TableBody>
-          </Table>
-        </TableCard>
+        <CallerDayReport
+          callers={callers}
+          outcomes={dayOutcomes.data ?? []}
+          stats={rangeStats.data ?? []}
+          attendance={attendance.data ?? []}
+          showAttendance={showAttendance}
+          from={from}
+          to={to}
+          onFrom={setFromParam}
+          onTo={setToParam}
+        />
 
         <TableCard
           title="Call outcomes"
@@ -308,7 +267,7 @@ export function GamingManagerDashboard({ orgId }: { orgId: string }) {
         {showAttendance && (
         <TableCard
           title="Attendance"
-          subtitle={<>Shift starts 10:00 with a 15 minute grace. Late = login after 10:15. Half day = under 8 hours logged in. Sundays and the 2nd and 4th Saturdays are off. <Link to="/admin/attendance-report" className="text-primary underline">Full attendance report</Link></>}
+          subtitle={<>Shift starts 10:00 with a 15 minute grace. Late = login after 10:15. Half day = under 8 hours logged in. Sundays and the 2nd and 4th Saturdays are off. {isAdmin && <Link to="/admin/attendance-report" className="text-primary underline">Full attendance report</Link>}</>}
           action={<div className="flex items-center gap-1.5 text-xs text-muted-foreground">{(["P", "L", "H", "A"] as AttCode[]).map((k) => <span key={k} className="inline-flex items-center gap-1"><DayChip code={k} label={ATT_LABEL[k]} />{ATT_LABEL[k]}</span>)}</div>}
         >
           <Table>

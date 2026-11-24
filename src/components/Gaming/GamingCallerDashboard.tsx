@@ -72,7 +72,6 @@ export function GamingCallerDashboard({ orgId }: { orgId: string }) {
   });
 
   const today = sumStats(dayStats.data ?? []);
-  const row = dayStats.data?.[0];
 
   const ended = useMemo(() => {
     const bySub = new Map<string, number>(); const byDispo = new Map<string, number>();
@@ -117,14 +116,15 @@ export function GamingCallerDashboard({ orgId }: { orgId: string }) {
         </div>
       </div>
 
-      <Card className="flex flex-wrap items-center gap-x-8 gap-y-2 p-4">
-        {showAttendance && <div><p className="text-xs text-muted-foreground">Attendance</p><Badge variant={status === "present" ? "default" : "secondary"}>{attLabel}</Badge></div>}
-        <div><p className="text-xs text-muted-foreground">Login</p><p className="font-medium tabular-nums">{fmtClock(row?.login_at ?? attendance.data?.sign_in_time ?? null)}</p></div>
-        <div><p className="text-xs text-muted-foreground">Logout</p><p className="font-medium tabular-nums">{fmtClock(row?.logout_at ?? attendance.data?.sign_out_time ?? null)}</p></div>
-        <div><p className="text-xs text-muted-foreground">Work hours</p><p className="font-medium tabular-nums">{fmtHM(today.work_secs)}</p></div>
-        <div><p className="text-xs text-muted-foreground">Idle hours</p><p className="font-medium tabular-nums">{fmtHM(today.idle_secs)}</p></div>
-        {showAttendance && <Link to="/attendance" className="ml-auto text-sm text-primary underline">My attendance</Link>}
-      </Card>
+      {showAttendance && (
+        <Card className="flex flex-wrap items-center gap-x-8 gap-y-2 p-4">
+          <div><p className="text-xs text-muted-foreground">Attendance</p><Badge variant={status === "present" ? "default" : "secondary"}>{attLabel}</Badge></div>
+          <div><p className="text-xs text-muted-foreground">Check-in</p><p className="font-medium tabular-nums">{fmtClock(attendance.data?.sign_in_time ?? null)}</p></div>
+          <div><p className="text-xs text-muted-foreground">Check-out</p><p className="font-medium tabular-nums">{fmtClock(attendance.data?.sign_out_time ?? null)}</p></div>
+          <div><p className="text-xs text-muted-foreground">Hours</p><p className="font-medium tabular-nums">{attendance.data?.total_hours ? fmtHM(attendance.data.total_hours * 3600) : "—"}</p></div>
+          <Link to="/attendance" className="ml-auto text-sm text-primary underline">My attendance</Link>
+        </Card>
+      )}
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-2 xl:grid-cols-2">
         <Tile label="Calls (outcomes saved)" value={`${today.calls} / ${DAILY_TARGETS.calls}`} hint={today.calls >= DAILY_TARGETS.calls ? "target met" : `${DAILY_TARGETS.calls - today.calls} to go`} />

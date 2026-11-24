@@ -9,7 +9,7 @@ const MEASURES = [
   { key: "calls", label: "Calls" },
   { key: "new_dials", label: "New dials" },
   { key: "phone_calls", label: "Phone" },
-  { key: "connected_calls", label: "Connected" },
+  { key: "connected_calls", label: "Answered" },
 ] as const;
 type MeasureKey = (typeof MEASURES)[number]["key"];
 

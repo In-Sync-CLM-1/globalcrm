@@ -10,6 +10,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { ChevronLeft, ChevronRight, Download, Users } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useOrgContext } from "@/hooks/useOrgContext";
+import { useGamingAccess } from "@/hooks/useGamingAccess";
 import { useUrlState } from "@/hooks/useUrlState";
 
 type Profile = { id: string; first_name: string | null; last_name: string | null; email: string | null; designation_id: string | null };
@@ -57,13 +58,14 @@ function fmtTimeISO(t: string | null): string {
 
 export default function SDRAttendanceReport() {
   const { effectiveOrgId } = useOrgContext();
+  const { isGaming } = useGamingAccess();
   const [monthKey, setMonthKey] = useUrlState("month", format(startOfMonth(new Date()), "yyyy-MM"));
   const monthStart = useMemo(() => {
     const [y, m] = monthKey.split("-").map(Number);
     return y && m ? new Date(y, m - 1, 1) : startOfMonth(new Date());
   }, [monthKey]);
   const setMonthStart = (d: Date) => setMonthKey(format(startOfMonth(d), "yyyy-MM"));
-  const [designationFilter, setDesignationFilter] = useUrlState<string>("desig", "SDR");
+  const [designationFilter, setDesignationFilter] = useUrlState<string>("desig", isGaming ? "ALL" : "SDR");
 
   const monthEnd = endOfMonth(monthStart);
   const monthLabel = format(monthStart, "MMMM yyyy");
@@ -323,7 +325,7 @@ export default function SDRAttendanceReport() {
       <div className="container mx-auto p-6 space-y-6">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
-            <h1 className="text-3xl font-bold">SDR Attendance Report</h1>
+            <h1 className="text-3xl font-bold">{isGaming ? "Attendance Report" : "SDR Attendance Report"}</h1>
             <p className="text-muted-foreground">Monthly attendance, approved leaves & working-day breakdown</p>
           </div>
           <div className="flex items-center gap-2">
