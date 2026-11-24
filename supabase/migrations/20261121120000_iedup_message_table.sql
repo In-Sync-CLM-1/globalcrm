@@ -1,3 +1,4 @@
+-- Dated before the waiting 20261121130000 change so that one can still go live.
 -- TASK-0165: IEDUP dashboard, messages by template and channel, whichever way they were sent (automatic, from RAMP, or from the CRM).
 -- RAMP login codes go straight to WhatsApp and are not in whatsapp_logs; RAMP reports how many it sent per day here.
 create table if not exists public.direct_message_counts (
