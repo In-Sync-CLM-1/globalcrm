@@ -42,6 +42,9 @@ import { InlineOutcomePicker } from "@/components/Pipeline/InlineOutcomePicker";
 import { useFullPhones } from "@/hooks/useFullPhoneView";
 import { ProtectedScreen } from "@/components/Security/ProtectedScreen";
 import { BulkUploadDialog } from "@/components/Contacts/BulkUpload/BulkUploadDialog";
+import { usePhoneAppStatus, usePhoneCallAccess } from "@/hooks/usePhoneApp";
+import { PhoneAppBar } from "@/components/PhoneApp/PhoneAppBar";
+import { PhoneCallDialog, type PhoneCallTarget } from "@/components/PhoneApp/PhoneCallDialog";
 interface PipelineStage {
   id: string;
   name: string;
@@ -471,6 +474,15 @@ export default function PipelineBoard() {
   // Gaming CRM Demo shows the sub-disposition of each lead's latest call.
   const gaming = useGamingAccess();
   const manualOutcome = useManualOutcomeAccess();
+  // In-Sync Phone app: Call buttons dial on the caller's own phone (organisations that have it switched on).
+  const { data: phoneApp } = usePhoneAppStatus();
+  const callViaPhone = !!phoneApp?.enabled;
+  const phoneAccess = usePhoneCallAccess(callViaPhone);
+  const [phoneTarget, setPhoneTarget] = useState<PhoneCallTarget | null>(null);
+  // Contacts already dialled in this Next-call run. The list is ordered by last update, so a called
+  // contact moves to the top of it; without this it would be offered as the next one again.
+  const [dialledIds, setDialledIds] = useState<string[]>([]);
+  const [nextCallMode, setNextCallMode] = useUrlState("nextcall", "");
   const [bulkUploadOpen, setBulkUploadOpen] = useState(false);
   const [aiQueueing, setAiQueueing] = useState(false);
   const { data: subDispositionByContact } = useQuery({
@@ -535,6 +547,14 @@ export default function PipelineBoard() {
   // Derive contacts: table view uses server-filtered baseContacts directly;
   // board view falls back to client-side filteredContacts (which only filters loaded rows)
   const contacts = activeTab === "table" ? baseContacts : (filteredContacts ?? baseContacts);
+  // Next-call mode: the next contact down this list that the caller may call.
+  const nextPhoneTarget: PhoneCallTarget | null = (() => {
+    if (nextCallMode !== "1" || !phoneTarget) return null;
+    const i = contacts.findIndex((c) => c.id === phoneTarget.id);
+    const n = contacts.slice(i + 1).find((c) =>
+      (c.primaryPhone || c.phone) && !dialledIds.includes(c.id) && phoneAccess.canCall(c.assigned_to));
+    return n ? { id: n.id, name: [n.first_name, n.last_name].filter(Boolean).join(" ") } : null;
+  })();
   // Ajimos: full phone numbers come from the server for the contacts this user may see.
   const fullPhones = useFullPhones(contacts.map((c) => c.id));
 
@@ -585,6 +605,12 @@ export default function PipelineBoard() {
 
     // Use primary phone from contact_phones table, fallback to contact.phone
     const phoneToCall = contact.primaryPhone || contact.phone;
+
+    if (callViaPhone) {
+      setDialledIds([contact.id]);
+      setPhoneTarget({ id: contact.id, name: [contact.first_name, contact.last_name].filter(Boolean).join(" ") });
+      return;
+    }
 
     if (!phoneToCall) {
       notify.error("No phone number", "This contact doesn't have a phone number");
@@ -1003,6 +1029,15 @@ export default function PipelineBoard() {
   return (
     <DashboardLayout>
       <ProtectedScreen active={fullPhones.enabled}>
+      {callViaPhone && effectiveOrgId && (
+        <PhoneCallDialog
+          orgId={effectiveOrgId}
+          target={phoneTarget}
+          onClose={() => setPhoneTarget(null)}
+          next={nextPhoneTarget}
+          onAdvance={(n) => { setDialledIds((ids) => [...ids, n.id]); setPhoneTarget(n); }}
+        />
+      )}
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <div>
@@ -1023,6 +1058,10 @@ export default function PipelineBoard() {
             <QuickDial />
           </div>
         </div>
+
+        {callViaPhone && phoneApp && (
+          <PhoneAppBar status={phoneApp} nextCall={nextCallMode === "1"} onNextCallChange={(v) => setNextCallMode(v ? "1" : "")} />
+        )}
 
         {/* Field-Based Filters */}
         <PipelineFilters

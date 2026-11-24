@@ -9,6 +9,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { DateTimePicker } from "@/components/ui/date-time-picker";
 import { format } from "date-fns";
+import { usePhoneAppStatus } from "@/hooks/usePhoneApp";
+import { useOrgContext } from "@/hooks/useOrgContext";
+import { PhoneCallDialog, type PhoneCallTarget } from "@/components/PhoneApp/PhoneCallDialog";
 
 interface ClickToCallProps {
   contactId: string;
@@ -37,7 +40,25 @@ interface SubDisposition {
   disposition_id: string;
 }
 
-export const ClickToCall = ({ contactId, phoneNumber, displayPhone, contactName }: ClickToCallProps) => {
+export const ClickToCall = (props: ClickToCallProps) => {
+  // Organisations with the In-Sync Phone app switched on dial through the caller's own phone.
+  const { data: phoneApp } = usePhoneAppStatus();
+  const { effectiveOrgId } = useOrgContext();
+  const [phoneTarget, setPhoneTarget] = useState<PhoneCallTarget | null>(null);
+  if (phoneApp?.enabled && effectiveOrgId) {
+    return (
+      <>
+        <Button size="icon" variant="default" onClick={() => setPhoneTarget({ id: props.contactId, name: props.contactName })} title="Call on my phone">
+          <Phone className="h-4 w-4" />
+        </Button>
+        <PhoneCallDialog orgId={effectiveOrgId} target={phoneTarget} onClose={() => setPhoneTarget(null)} />
+      </>
+    );
+  }
+  return <ExotelClickToCall {...props} />;
+};
+
+const ExotelClickToCall = ({ contactId, phoneNumber, displayPhone, contactName }: ClickToCallProps) => {
   const notify = useNotification();
   const [isLoading, setIsLoading] = useState(false);
   const [activeSession, setActiveSession] = useState<CallSession | null>(null);

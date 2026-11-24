@@ -1,0 +1,3 @@
+/downloads/*.apk
+  Content-Type: application/vnd.android.package-archive
+  Cache-Control: no-cache
