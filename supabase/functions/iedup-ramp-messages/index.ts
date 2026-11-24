@@ -29,7 +29,13 @@ serve(async (req) => {
   if (req.method !== "POST") return json(405, { error: "POST only" });
   const secret = Deno.env.get("RAMP_NOTIFY_SECRET");
   if (!secret || req.headers.get("x-ramp-secret") !== secret) return json(401, { error: "Unauthorized" });
-  const body = await req.json().catch(() => ({})) as { from?: string; to?: string };
+  const body = await req.json().catch(() => ({})) as { kind?: string; from?: string; to?: string };
+  // The text of every IEDUP template and email, for the tooltip on RAMP's message names
+  if (body.kind === "bodies") {
+    const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    const { data, error } = await db.rpc("get_iedup_message_bodies", { p_org: IEDUP_ORG_ID });
+    return error ? json(500, { error: error.message.slice(0, 200) }) : json(200, { ok: true, bodies: data });
+  }
   const from = new Date(body.from ?? ""), to = new Date(body.to ?? "");
   if (isNaN(+from) || isNaN(+to) || to <= from) return json(400, { error: "from and to dates are needed" });
   if (+to - +from > MAX_DAYS * 86400000) return json(400, { error: `At most ${MAX_DAYS} days at a time` });
