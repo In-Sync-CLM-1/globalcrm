@@ -184,11 +184,13 @@ GRANT EXECUTE ON FUNCTION public.phone_app_register(text, text, text, text, bool
 -- Fingerprints of the numbers the caller may log calls for: callers their assigned contacts,
 -- the calling manager and admins every contact in the organisation.
 -- One comma-separated text value (a set would be cut at the API's 1,000-row limit).
+-- Unlocking ~10,000 protected numbers takes 4-6 s; the API's usual 8 s limit is too close (the app waits 30 s).
 CREATE OR REPLACE FUNCTION public.phone_app_fingerprints(_device_key text)
 RETURNS text
 LANGUAGE plpgsql
 STABLE SECURITY DEFINER
 SET search_path TO 'public', 'extensions'
+SET statement_timeout TO '25s'
 AS $function$
 DECLARE
   v_org uuid := public.phone_app_org();
