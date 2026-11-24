@@ -78,7 +78,7 @@ export function CallerDayReport({ callers, outcomes, stats, attendance, showAtte
         </div>
       }
     >
-      <Table>
+      <Table className="[&_td:not(:first-child)]:px-2 [&_th:not(:first-child)]:px-2">
         <TableHeader>
           <TableRow className="hover:bg-transparent">
             <TH>Caller / date</TH>
