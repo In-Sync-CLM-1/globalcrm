@@ -19,12 +19,12 @@ import { useFeatureAccess } from "@/hooks/useFeatureAccess";
 import { usePagination } from "@/hooks/usePagination";
 import PaginationControls from "@/components/common/PaginationControls";
 import { BulkDeleteButton } from "@/components/common/BulkDeleteButton";
-import { exportToCSV } from "@/utils/exportUtils";
+import { requestExport } from "@/lib/exportJobs";
 import { FerventBulkUploadDialog } from "@/components/FerventRepository/FerventBulkUploadDialog";
 import { FerventActiveUploadProgress } from "@/components/FerventRepository/FerventActiveUploadProgress";
 import { useFerventActiveImportJob } from "@/hooks/useFerventActiveImportJob";
 import { FerventRecordActivity } from "@/components/FerventRepository/FerventRecordActivity";
-import { FerventExportHistory } from "@/components/FerventRepository/FerventExportHistory";
+import { ExportHistoryDialog } from "@/components/Exports/ExportHistoryDialog";
 import { FerventImportHistory } from "@/components/FerventRepository/FerventImportHistory";
 import { FerventEditRecordDialog } from "@/components/FerventRepository/FerventEditRecordDialog";
 import { FerventBulkEditDialog } from "@/components/FerventRepository/FerventBulkEditDialog";
@@ -199,37 +199,38 @@ function DisabledAction({ icon: Icon, label }: { icon: any; label: string }) {
   );
 }
 
-const EXPORT_COLUMNS: { key: string; label: string; format?: (v: any, row: RepositoryRecord) => string }[] = [
-  { key: "unique_id", label: "Unique ID" },
-  { key: "upload_status", label: "Status", format: (v: string | null) => (v === "existing" ? "Updated" : "Fresh") },
-  { key: "source_type", label: "Source", format: (v: string | null) => (v === "international" ? "International" : v === "domestic" ? "Domestic" : "") },
-  { key: "db_sourced_year", label: "DB Sourced Year" },
-  { key: "ucdb_status", label: "UCDB Status" },
-  { key: "company_name", label: "Company Name" },
-  { key: "first_name", label: "First Name" },
-  { key: "last_name", label: "Last Name" },
-  { key: "designation", label: "Designation" },
-  { key: "department", label: "Department" },
-  { key: "designation_level", label: "Designation Level" },
-  { key: "city", label: "City" },
-  { key: "state", label: "State" },
-  { key: "country", label: "Country" },
-  { key: "std_code", label: "STD Code" },
-  { key: "mobile_number_1", label: "Phone 1" },
-  { key: "mobile_number_2", label: "Phone 2" },
-  { key: "direct_number", label: "Phone 3" },
-  { key: "phone_number", label: "Phone 4" },
-  { key: "official_email", label: "Official Email ID" },
-  { key: "personal_email_1", label: "Personal Email ID 1" },
-  { key: "personal_email_2", label: "Personal Email ID 2" },
-  { key: "linkedin_url", label: "Contact LinkedIn ID" },
-  { key: "domain_name", label: "Domain Name" },
-  { key: "website", label: "Website" },
-  { key: "industry", label: "Industry" },
-  { key: "sub_industry", label: "SubIndustry" },
-  { key: "employee_size", label: "Employee Size" },
-  { key: "turnover", label: "Turnover", format: (v: string | null, row: RepositoryRecord) => row.turnover_usd_million != null ? formatTurnoverUsdMillion(row.turnover_usd_million) : (v || "") },
-  { key: "company_linkedin_url", label: "Company LinkedIn ID" },
+// The fields an export can hold, in file order. The database builds each one (export_build in the db_exports migration).
+const EXPORT_COLUMNS: { label: string }[] = [
+  { label: "Unique ID" },
+  { label: "Status" },
+  { label: "Source" },
+  { label: "DB Sourced Year" },
+  { label: "UCDB Status" },
+  { label: "Company Name" },
+  { label: "First Name" },
+  { label: "Last Name" },
+  { label: "Designation" },
+  { label: "Department" },
+  { label: "Designation Level" },
+  { label: "City" },
+  { label: "State" },
+  { label: "Country" },
+  { label: "STD Code" },
+  { label: "Phone 1" },
+  { label: "Phone 2" },
+  { label: "Phone 3" },
+  { label: "Phone 4" },
+  { label: "Official Email ID" },
+  { label: "Personal Email ID 1" },
+  { label: "Personal Email ID 2" },
+  { label: "Contact LinkedIn ID" },
+  { label: "Domain Name" },
+  { label: "Website" },
+  { label: "Industry" },
+  { label: "SubIndustry" },
+  { label: "Employee Size" },
+  { label: "Turnover" },
+  { label: "Company LinkedIn ID" },
 ];
 
 export default function FerventRepository() {
@@ -306,33 +307,18 @@ export default function FerventRepository() {
 
   const records = data || [];
 
-  // Distinct values for the searchable multi-select filters — fetched once
-  // (paginated past Supabase's 1000-row cap) and reused across renders.
+  // Distinct values for the searchable multi-select filters, worked out by the database.
   const { data: filterOptions } = useQuery({
     queryKey: ["fervent-filter-options", effectiveOrgId],
     queryFn: async () => {
-      const sets = Object.fromEntries(FILTER_OPTION_FIELDS.map((f) => [f, new Set<string>()])) as Record<FilterOptionField, Set<string>>;
-      const pageSize = 1000;
-      let from = 0;
-      while (true) {
-        const { data, error } = await supabase
-          .from("fervent_data_repository")
-          .select(FILTER_OPTION_FIELDS.join(","))
-          .eq("org_id", effectiveOrgId)
-          .range(from, from + pageSize - 1);
-        if (error) throw error;
-        (data || []).forEach((row: any) => {
-          FILTER_OPTION_FIELDS.forEach((f) => {
-            const v = row[f];
-            if (typeof v === "string" && v.trim()) sets[f].add(v.trim());
-          });
-        });
-        if (!data || data.length < pageSize) break;
-        from += pageSize;
-      }
-      return Object.fromEntries(
-        FILTER_OPTION_FIELDS.map((f) => [f, Array.from(sets[f]).sort((a, b) => a.localeCompare(b))])
-      ) as Record<FilterOptionField, string[]>;
+      const lists = await Promise.all(
+        FILTER_OPTION_FIELDS.map(async (field) => {
+          const { data, error } = await (supabase as any).rpc("fervent_filter_values", { _field: field });
+          if (error) throw error;
+          return [field, ((data || []) as string[]).sort((a, b) => a.localeCompare(b))] as const;
+        })
+      );
+      return Object.fromEntries(lists) as Record<FilterOptionField, string[]>;
     },
     enabled: !!effectiveOrgId && canAccessFeature("fervent_data_repository"),
     staleTime: 5 * 60 * 1000,
@@ -391,6 +377,7 @@ export default function FerventRepository() {
     setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   };
 
+  // The database makes the file (see lib/exportJobs), so leaving or refreshing this page does not stop it.
   const handleExport = async () => {
     const exportingSelection = selectedIds.length > 0;
     // Export reflects whatever is currently set in the Filters/Advanced
@@ -399,71 +386,25 @@ export default function FerventRepository() {
     // text input has on Enter, so gating export on the *applied* snapshot
     // let a picked-but-not-yet-applied filter silently export everything.
     const exportingAdvanced = searchMode === "advanced" && !isBooleanQueryEmpty(advancedQuery);
-    // Keep canonical column order regardless of the order fields were ticked.
-    const columns = EXPORT_COLUMNS.filter((c) => exportFields.includes(c.label));
-    if (columns.length === 0) {
+    const fields = EXPORT_COLUMNS.map((c) => c.label).filter((label) => exportFields.includes(label));
+    if (fields.length === 0) {
       notify.error("No fields selected", "Pick at least one field to export.");
       return;
     }
     setExporting(true);
     try {
-      const buildQuery = () => {
-        let query = supabase.from("fervent_data_repository").select("*").eq("org_id", effectiveOrgId);
-        if (exportingSelection) {
-          query = query.in("id", selectedIds);
-        } else if (exportingAdvanced) {
-          query = applyBooleanQuery(query, advancedQuery);
-        } else {
-          query = applyBasicFilters(query, filters);
-        }
-        query = query.order(sortField, { ascending: sortAscending, nullsFirst: false });
-        // Tiebreaker on the primary key so paginated .range() batches never
-        // reshuffle/skip rows when sortField has duplicate values across pages.
-        if (sortField !== "id") query = query.order("id", { ascending: true });
-        return query;
-      };
-
-      // Supabase caps a single request at 1000 rows — page through with
-      // .range() to pull the full result set, same pattern as RMPL's export.
-      const PAGE_SIZE = 1000;
-      const rows: RepositoryRecord[] = [];
-      let from = 0;
-      while (true) {
-        const { data, error } = await buildQuery().range(from, from + PAGE_SIZE - 1);
-        if (error) throw error;
-        rows.push(...((data || []) as RepositoryRecord[]));
-        if (!data || data.length < PAGE_SIZE) break;
-        from += PAGE_SIZE;
-      }
-
-      if (rows.length === 0) {
-        notify.error("Nothing to export", exportingSelection ? "No selected records found." : "No records match the current filters.");
-        return;
-      }
-
-      exportToCSV(rows, columns, `fervent-database-${exportingSelection ? "selected" : "filtered"}-${new Date().toISOString().slice(0, 10)}.csv`);
-
+      await requestExport(
+        "fervent_repository",
+        {
+          ...(exportingSelection ? { ids: selectedIds } : exportingAdvanced ? { advanced: advancedQuery } : { filters }),
+          ...(fields.length < EXPORT_COLUMNS.length ? { fields } : {}),
+          sort: { field: sortField, ascending: sortAscending },
+        },
+        `fervent-database-${exportingSelection ? "selected" : "filtered"}-${new Date().toISOString().slice(0, 10)}.csv`,
+      );
       setShowExportDialog(false);
-      notify.success("Export ready", `${rows.length} record(s) exported${exportingSelection ? " (selected rows)" : ""}.`);
-
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user && effectiveOrgId) {
-        const detailFilters: Record<string, any> = exportingSelection
-          ? { selection: `${rows.length} manually selected record(s)` }
-          : exportingAdvanced
-            ? { advanced: JSON.stringify(advancedQuery) }
-            : { ...filters };
-        if (columns.length < EXPORT_COLUMNS.length) {
-          detailFilters.fields = `${columns.length} of ${EXPORT_COLUMNS.length} selected (${columns.map((c) => c.label).join(", ")})`;
-        }
-        await supabase.from("fervent_activity_log").insert({
-          org_id: effectiveOrgId,
-          record_id: null,
-          actor_id: user.id,
-          action: "exported",
-          detail: { count: rows.length, filters: detailFilters },
-        });
-      }
+      queryClient.invalidateQueries({ queryKey: ["export-jobs"] });
+      notify.success("Preparing your export", "It will download by itself when ready. You can keep working, and it also stays in Export History for 7 days.");
     } catch (err: any) {
       notify.error("Export failed", err.message);
     } finally {
@@ -517,7 +458,7 @@ export default function FerventRepository() {
             </Button>
             <Button variant="outline" size="sm" onClick={() => setShowExportDialog(true)} disabled={exporting}>
               <Download className="h-4 w-4 mr-2" />
-              {exporting ? "Exporting..." : selectedIds.length > 0 ? `Export Selected (${selectedIds.length})` : "Export"}
+              {exporting ? "Starting..." : selectedIds.length > 0 ? `Export Selected (${selectedIds.length})` : "Export"}
             </Button>
             <Button size="sm" onClick={() => setShowUpload(true)} disabled={isImportRunning}>
               <Upload className="h-4 w-4 mr-2" />
@@ -862,17 +803,13 @@ export default function FerventRepository() {
             </Button>
             <Button onClick={handleExport} disabled={exporting || exportFields.length === 0}>
               <Download className="h-4 w-4 mr-2" />
-              {exporting ? "Exporting..." : "Export Data"}
+              {exporting ? "Starting..." : "Export Data"}
             </Button>
           </div>
         </DialogContent>
       </Dialog>
 
-      <FerventExportHistory
-        open={showExportHistory}
-        onOpenChange={setShowExportHistory}
-        orgId={effectiveOrgId || ""}
-      />
+      <ExportHistoryDialog open={showExportHistory} onOpenChange={setShowExportHistory} />
 
       <FerventImportHistory
         open={showImportHistory}

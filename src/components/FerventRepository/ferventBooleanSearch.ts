@@ -69,7 +69,7 @@ export function isBooleanQueryEmpty(q: BooleanQuery): boolean {
 // names and operators are never user input — always drawn from the fixed
 // BOOLEAN_SEARCH_FIELDS/BooleanOp vocabulary above.
 function escapeOrValue(value: string): string {
-  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
 // Applies a BooleanQuery to a Supabase query builder. Only ever called with
@@ -93,7 +93,8 @@ export function applyBooleanQuery(query: any, bq: BooleanQuery): any {
   const parts = active.map((c) => {
     const v = escapeOrValue(c.value.trim());
     const opStr = c.op === "contains" ? "ilike" : "not.ilike";
-    return `${c.field}.${opStr}.%${v}%`;
+    // The quotes must wrap the whole pattern, or PostgREST searches for literal quote marks and finds nothing.
+    return `${c.field}.${opStr}."%${v}%"`;
   });
   return query.or(parts.join(","));
 }

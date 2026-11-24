@@ -11,11 +11,15 @@ import { useRealtimeSync } from "@/hooks/useRealtimeSync";
 import { ArrowLeft, RefreshCw, Download, XCircle } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { useUrlState } from "@/hooks/useUrlState";
+import { requestExport } from "@/lib/exportJobs";
+import { useDbExports } from "@/hooks/useDbExports";
+import { ExportHistoryButton } from "@/components/Exports/ExportHistoryButton";
 
 export default function WhatsAppCampaignDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const notify = useNotification();
+  const dbExports = useDbExports();
   
   const [campaign, setCampaign] = useState<any>(null);
   const [recipients, setRecipients] = useState<any[]>([]);
@@ -102,7 +106,16 @@ export default function WhatsAppCampaignDetail() {
     }
   };
 
-  const handleExport = () => {
+  const handleExport = async () => {
+    if (dbExports.enabled) {
+      try {
+        await requestExport("whatsapp_recipients", { campaign_id: id, status: filter }, `campaign-${id}-recipients.csv`);
+        notify.success("Preparing your export", "It will download by itself when ready. You can keep working, and it also stays in Export History for 7 days.");
+      } catch (err) {
+        notify.error("Export failed", (err as Error).message);
+      }
+      return;
+    }
     const csv = [
       ["Name", "Phone", "Status", "Error", "Retry Count"].join(","),
       ...recipients.map(r => [
@@ -250,7 +263,8 @@ export default function WhatsAppCampaignDetail() {
           <div className="flex justify-between items-center">
             <CardTitle>Recipients</CardTitle>
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={handleExport}>
+              {dbExports.enabled && <ExportHistoryButton />}
+              <Button variant="outline" size="sm" onClick={handleExport} disabled={!dbExports.ready}>
                 <Download className="mr-2 h-4 w-4" />
                 Export CSV
               </Button>

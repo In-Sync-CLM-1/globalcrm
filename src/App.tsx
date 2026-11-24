@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 import { AuthProvider, useAuth } from "@/contexts/AuthProvider";
 import { OrgContextProvider } from "@/contexts/OrgContextProvider";
+import { ExportWatcher } from "@/components/Exports/ExportWatcher";
 
 // Retry wrapper for lazy imports - handles chunk hash changes after deployment
 function lazyRetry(fn: () => Promise<any>) {
@@ -121,6 +122,7 @@ const App = () => (
         <Sonner />
         <BrowserRouter>
           <LedgerAccessTrail />
+          <ExportWatcher />
           <Suspense fallback={<PageLoader />}>
             <Routes>
           {/* Public routes */}

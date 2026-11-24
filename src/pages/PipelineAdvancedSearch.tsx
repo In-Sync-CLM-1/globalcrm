@@ -13,6 +13,9 @@ import { Plus, Search, X } from "lucide-react";
 import { usePagination } from "@/hooks/usePagination";
 import { exportToCSV, ExportColumn, formatDateForExport } from "@/utils/exportUtils";
 import { useGamingAccess } from "@/hooks/useGamingAccess";
+import { requestExport } from "@/lib/exportJobs";
+import { useDbExports } from "@/hooks/useDbExports";
+import { ExportHistoryButton } from "@/components/Exports/ExportHistoryButton";
 
 export interface SearchableField {
   id: string;
@@ -44,6 +47,7 @@ const PipelineAdvancedSearch = () => {
   const [hasSearched, setHasSearched] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const gaming = useGamingAccess();
+  const dbExports = useDbExports();
   const isInitialMount = useRef(true);
   
   const pagination = usePagination({ defaultPageSize: 25 });
@@ -349,6 +353,23 @@ const PipelineAdvancedSearch = () => {
         f.operator === 'is_empty' || f.operator === 'is_not_empty' || f.value
       ));
 
+      if (dbExports.enabled) {
+        await requestExport(
+          "contact_search",
+          {
+            conditions: validFilters.map((f) => ({
+              field: f.fieldId,
+              operator: f.operator,
+              value: f.value,
+              label: fields.find((x) => x.id === f.fieldId)?.label ?? f.fieldId,
+            })),
+          },
+          `contacts-search-results-${new Date().toISOString().split("T")[0]}.csv`,
+        );
+        showSuccess("Preparing your export", "It will download by itself when ready. You can keep working, and it also stays in Export History for 7 days.");
+        return;
+      }
+
       // Build base query WITHOUT pagination to get ALL results
       const buildBaseQuery = () => {
         let q: any = supabase
@@ -614,10 +635,13 @@ const PipelineAdvancedSearch = () => {
             <h1 className="text-3xl font-bold text-foreground">Advanced Search</h1>
             <p className="text-muted-foreground mt-1">Build complex queries to find contacts</p>
           </div>
-          <Button variant="outline" onClick={() => navigate(-1)}>
-            <X className="h-4 w-4 mr-2" />
-            Close
-          </Button>
+          <div className="flex items-center gap-2">
+            {gaming.canExport && dbExports.enabled && <ExportHistoryButton />}
+            <Button variant="outline" onClick={() => navigate(-1)}>
+              <X className="h-4 w-4 mr-2" />
+              Close
+            </Button>
+          </div>
         </div>
 
         <Card>
@@ -687,7 +711,7 @@ const PipelineAdvancedSearch = () => {
                 onPageSizeChange={pagination.setPageSize}
                 isLoading={isSearching}
                 onExport={gaming.canExport ? handleExport : undefined}
-                isExporting={isExporting}
+                isExporting={isExporting || !dbExports.ready}
               />
             </CardContent>
           </Card>
