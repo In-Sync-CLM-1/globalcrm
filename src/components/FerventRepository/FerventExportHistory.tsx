@@ -6,7 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 interface ExportLogRow {
   id: string;
   created_at: string;
-  detail: { count?: number; filters?: Record<string, string> } | null;
+  detail: { count?: number; filters?: Record<string, unknown> | null } | null;
   profiles: { first_name: string | null; last_name: string | null } | null;
 }
 
@@ -15,11 +15,23 @@ function actorName(p: ExportLogRow["profiles"]): string {
   return [p.first_name, p.last_name].filter(Boolean).join(" ") || "—";
 }
 
-function describeFilters(filters?: Record<string, string>): string {
+// Saved filter values are text for single-value filters and arrays for the
+// multi-select ones (city, industry, ...), so nothing here may assume text.
+function filterText(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (Array.isArray(value)) return value.map(filterText).filter(Boolean).join("; ");
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value).trim();
+}
+
+function describeFilters(filters?: Record<string, unknown> | null): string {
   if (!filters) return "None";
-  const active = Object.entries(filters).filter(([, v]) => v && v.trim() !== "");
-  if (active.length === 0) return "None";
-  return active.map(([k, v]) => `${k}: ${v}`).join(", ");
+  const active = Object.entries(filters)
+    .map(([key, value]) => [key, filterText(value)] as const)
+    .filter(([, text]) => text !== "");
+  // matchMode is always saved, so on its own it does not mean a filter was used.
+  if (active.every(([key]) => key === "matchMode")) return "None";
+  return active.map(([key, text]) => `${key}: ${text}`).join(", ");
 }
 
 interface FerventExportHistoryProps {
