@@ -4,7 +4,7 @@ import { Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import MessageTip from "./MessageTip";
 import { useNotification } from "@/hooks/useNotification";
 
 export type MessageRow = { channel: string; template: string; sent: number; delivered: number | null; opened: number | null; failed: number | null; tracked: boolean };
@@ -102,14 +102,7 @@ export default function MessageTable({ rows, bodies, calls, from, to }: { rows: 
               <TableRow key={`${c[1]}-${c[0]}`} className={i >= boldFrom ? "bg-muted/40 font-semibold" : ""}>
                 {c.map((v, j) => (
                   <TableCell key={j} className={j > 1 ? "text-right tabular-nums" : j === 0 ? "max-w-[420px] truncate font-medium" : ""}>
-                    {j === 0 && i < boldFrom ? (
-                      <Tooltip>
-                        <TooltipTrigger asChild><span tabIndex={0} className="cursor-help">{v}</span></TooltipTrigger>
-                        <TooltipContent side="bottom" align="start" collisionPadding={12} className="max-h-[60vh] max-w-md overflow-y-auto whitespace-pre-wrap break-words text-left font-normal">
-                          <p className="mb-1 font-semibold">{v}</p>{bodyOf(c)}
-                        </TooltipContent>
-                      </Tooltip>
-                    ) : v}
+                    {j === 0 && i < boldFrom ? <MessageTip name={v} body={bodyOf(c)} /> : v}
                   </TableCell>
                 ))}
               </TableRow>
