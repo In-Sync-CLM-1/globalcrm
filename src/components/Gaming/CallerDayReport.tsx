@@ -61,7 +61,7 @@ export function CallerDayReport({ callers, outcomes, stats, attendance, showAtte
   return (
     <TableCard
       title="Day-wise calling report"
-      subtitle={`Counted from the outcomes callers saved. Connected = every outcome except Unreachable and Invalid Number. Registered = Registration Completed or ID Created. Activated = Deposit Completed.${showAttendance ? " Check-in, check-out and hours come from Attendance." : ""}`}
+      subtitle={`Counted from the outcomes callers saved. Connected = every outcome except Unreachable and Invalid Number. Registered = Registration Completed or ID Created. Activated = Deposit Completed.${showAttendance ? " Start, end and hours come from Attendance." : ""}`}
       action={
         <div className="flex flex-wrap items-center gap-2">
           <Select value={callerParam} onValueChange={setCallerParam}>
@@ -82,7 +82,7 @@ export function CallerDayReport({ callers, outcomes, stats, attendance, showAtte
         <TableHeader>
           <TableRow className="hover:bg-transparent">
             <TH>Caller / date</TH>
-            {showAttendance && <><TH>Check-in</TH><TH>Check-out</TH><TH right>Hours</TH></>}
+            {showAttendance && <><TH>Start</TH><TH>End</TH><TH right>Hours</TH></>}
             {MEASURES.map((m) => <TH key={m.key} right>{m.label}</TH>)}
           </TableRow>
         </TableHeader>

@@ -4,7 +4,6 @@ import { Link } from "react-router-dom";
 import { addDays, format, parseISO } from "date-fns";
 import { Phone } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
-import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table";
@@ -53,7 +52,7 @@ export function GamingCallerDashboard({ orgId }: { orgId: string }) {
   const attendance = useQuery({
     queryKey: ["gaming-my-attendance", userId, day],
     queryFn: async () => {
-      const { data } = await supabase.from("attendance_records").select("status, sign_in_time, sign_out_time, total_hours").eq("user_id", userId!).eq("date", day).maybeSingle();
+      const { data } = await supabase.from("attendance_records").select("sign_in_time, sign_out_time, total_hours").eq("user_id", userId!).eq("date", day).maybeSingle();
       return data;
     },
     enabled: !!userId,
@@ -97,9 +96,6 @@ export function GamingCallerDashboard({ orgId }: { orgId: string }) {
 
   if (latestLoading || !userId) return <LoadingState message="Loading your dashboard..." />;
 
-  const status = attendance.data?.status;
-  const attLabel = status === "present" ? "Present" : status === "half_day" ? "Half day" : status === "absent" ? "Absent" : "No record";
-
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -118,9 +114,8 @@ export function GamingCallerDashboard({ orgId }: { orgId: string }) {
 
       {showAttendance && (
         <Card className="flex flex-wrap items-center gap-x-8 gap-y-2 p-4">
-          <div><p className="text-xs text-muted-foreground">Attendance</p><Badge variant={status === "present" ? "default" : "secondary"}>{attLabel}</Badge></div>
-          <div><p className="text-xs text-muted-foreground">Check-in</p><p className="font-medium tabular-nums">{fmtClock(attendance.data?.sign_in_time ?? null)}</p></div>
-          <div><p className="text-xs text-muted-foreground">Check-out</p><p className="font-medium tabular-nums">{fmtClock(attendance.data?.sign_out_time ?? null)}</p></div>
+          <div><p className="text-xs text-muted-foreground">Start</p><p className="font-medium tabular-nums">{fmtClock(attendance.data?.sign_in_time ?? null)}</p></div>
+          <div><p className="text-xs text-muted-foreground">End</p><p className="font-medium tabular-nums">{fmtClock(attendance.data?.sign_out_time ?? null)}</p></div>
           <div><p className="text-xs text-muted-foreground">Hours</p><p className="font-medium tabular-nums">{attendance.data?.total_hours ? fmtHM(attendance.data.total_hours * 3600) : "—"}</p></div>
           <Link to="/attendance" className="ml-auto text-sm text-primary underline">My attendance</Link>
         </Card>
