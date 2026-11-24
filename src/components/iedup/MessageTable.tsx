@@ -4,9 +4,11 @@ import { Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useNotification } from "@/hooks/useNotification";
 
 export type MessageRow = { channel: string; template: string; sent: number; delivered: number | null; opened: number | null; failed: number | null; tracked: boolean };
+export type MessageBody = { channel: string; template: string; body: string };
 const HEAD = ["Template", "Channel", "Sent", "Delivered", "Delivered %", "Opened", "Opened %", "Failed"];
 const n = (v: number | null) => (v === null ? "–" : v.toLocaleString("en-IN"));
 const pct = (v: number | null, of: number) => (v === null || !of ? "–" : `${Math.round((v / of) * 100)}%`);
@@ -21,7 +23,7 @@ export function totalOf(rows: MessageRow[], channel: string): MessageRow {
 }
 
 type Calls = { placed: number; connected: number };
-export default function MessageTable({ rows, calls, from, to }: { rows: MessageRow[] | undefined; calls: Calls; from: Date; to: Date }) {
+export default function MessageTable({ rows, bodies, calls, from, to }: { rows: MessageRow[] | undefined; bodies: MessageBody[] | null | undefined; calls: Calls; from: Date; to: Date }) {
   const notify = useNotification();
   const [channel, setChannel] = useState("");
   const all = rows ?? [];
@@ -32,6 +34,7 @@ export default function MessageTable({ rows, calls, from, to }: { rows: MessageR
   const callRow = ["AI calls", "Call", n(calls.placed), n(calls.connected), pct(calls.connected, calls.placed), "–", "–", n(calls.placed - calls.connected)];
   const body = [...shown.map(cells), ...totals.map(cells), ...(channel ? [] : [callRow])];
   const boldFrom = shown.length;
+  const bodyOf = (c: string[]) => bodies?.find((b) => b.channel === c[1] && b.template === c[0])?.body ?? (bodies ? "The text of this message is no longer available." : bodies === null ? "The text could not be loaded. Please refresh the page." : "Loading…");
 
   async function excel() {
     try {
@@ -97,7 +100,18 @@ export default function MessageTable({ rows, calls, from, to }: { rows: MessageR
               <TableRow><TableCell colSpan={8} className="py-8 text-center text-muted-foreground">{rows ? "No messages in this period." : "Loading…"}</TableCell></TableRow>
             ) : body.map((c, i) => (
               <TableRow key={`${c[1]}-${c[0]}`} className={i >= boldFrom ? "bg-muted/40 font-semibold" : ""}>
-                {c.map((v, j) => <TableCell key={j} className={j > 1 ? "text-right tabular-nums" : j === 0 ? "max-w-[420px] truncate font-medium" : ""} title={j === 0 ? v : undefined}>{v}</TableCell>)}
+                {c.map((v, j) => (
+                  <TableCell key={j} className={j > 1 ? "text-right tabular-nums" : j === 0 ? "max-w-[420px] truncate font-medium" : ""}>
+                    {j === 0 && i < boldFrom ? (
+                      <Tooltip>
+                        <TooltipTrigger asChild><span tabIndex={0} className="cursor-help">{v}</span></TooltipTrigger>
+                        <TooltipContent side="bottom" align="start" collisionPadding={12} className="max-h-[60vh] max-w-md overflow-y-auto whitespace-pre-wrap break-words text-left font-normal">
+                          <p className="mb-1 font-semibold">{v}</p>{bodyOf(c)}
+                        </TooltipContent>
+                      </Tooltip>
+                    ) : v}
+                  </TableCell>
+                ))}
               </TableRow>
             ))}
           </TableBody>

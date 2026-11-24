@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { useIsIedup, IEDUP_ORG_ID } from "@/hooks/useIsIedup";
 import { useUrlDateRange } from "@/hooks/useUrlDateRange";
-import MessageTable, { totalOf, type MessageRow } from "@/components/iedup/MessageTable";
+import MessageTable, { totalOf, type MessageBody, type MessageRow } from "@/components/iedup/MessageTable";
 
 const REFRESH_MS = 30_000;
 
@@ -69,6 +69,17 @@ export default function IedupDashboard() {
       return data as any;
     },
     refetchInterval: REFRESH_MS,
+  });
+
+  // The text of each template, shown when it is hovered on
+  const { data: bodies, isError: bodiesFailed } = useQuery({
+    queryKey: ["iedup-message-bodies"],
+    staleTime: 10 * 60000,
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("get_iedup_message_bodies" as any, { p_org: IEDUP_ORG_ID });
+      if (error) throw error;
+      return data as unknown as MessageBody[];
+    },
   });
 
   // Every message by template and channel, however it was sent (RAMP login codes included)
@@ -247,7 +258,7 @@ export default function IedupDashboard() {
           </ChartCard>
         </div>
 
-        <MessageTable rows={messages} calls={calls} from={dateRange.from} to={dateRange.to} />
+        <MessageTable rows={messages} bodies={bodiesFailed ? null : bodies} calls={calls} from={dateRange.from} to={dateRange.to} />
 
         {/* By message type */}
         <ChartCard title="WhatsApp by message type" subtitle="Sent vs Opened">
