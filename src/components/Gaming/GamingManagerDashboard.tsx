@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { addDays, eachDayOfInterval, format, getDay, parseISO } from "date-fns";
+import { addDays, format, getDay, parseISO } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -9,18 +9,15 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { LoadingState } from "@/components/common/LoadingState";
 import { useUrlState } from "@/hooks/useUrlState";
 import { useFeatureAccess } from "@/hooks/useFeatureAccess";
-import { useUserRole } from "@/hooks/useUserRole";
 import { usePhoneAppStatus, useTeamPhones, type TeamPhone } from "@/hooks/usePhoneApp";
 import { PhoneCallTiles } from "@/components/PhoneApp/PhoneCallTiles";
-import { CallerDayReport } from "./CallerDayReport";
+import { CallerDayReport, type DayAttendance } from "./CallerDayReport";
 import { CallsByDateHour } from "./CallsByDateHour";
-import { CELL, DayChip, Fig, NUM, Person, ROW, StatusChip, TH, TableCard, type Tone } from "./GamingTable";
+import { CELL, Fig, NUM, Person, ROW, StatusChip, TH, TableCard, type Tone } from "./GamingTable";
 import { CallsOverTime } from "./CallsOverTime";
 import {
   pct, sumStats, useCallers, useDayOutcomes, useDayStats, useDispoCounts, useDispositionCatalog, useHourlyCounts, useLatestCallDay,
 } from "./gamingStats";
-
-const LATE_AFTER_MINUTES = 10 * 60 + 15; // 10:00 shift start + 15 min grace
 
 // Status colours live only on small chips and the group-row edge; they name a state, never a measure.
 const CATEGORY_TONE: Record<string, Tone> = { positive: "good", follow_up: "warn", negative: "bad", neutral: "neutral" };
@@ -39,12 +36,6 @@ function Tile({ label, value, hint }: { label: string; value: string | number; h
   );
 }
 
-function istMinutes(iso: string | null): number | null {
-  if (!iso) return null;
-  const [h, m] = new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" }).split(":").map(Number);
-  return h * 60 + m;
-}
-
 function isWorkingDay(d: Date): boolean {
   const dow = getDay(d);
   if (dow === 0) return false;
@@ -54,19 +45,6 @@ function isWorkingDay(d: Date): boolean {
   }
   return true;
 }
-
-interface AttendanceRow { user_id: string; date: string; status: string; sign_in_time: string | null; sign_out_time: string | null; total_hours: number | null }
-
-type AttCode = "P" | "L" | "H" | "A" | "-";
-function attendanceCode(row: AttendanceRow | undefined): AttCode {
-  if (!row) return "-";
-  if (row.status === "absent") return "A";
-  if (row.status === "half_day") return "H";
-  const m = istMinutes(row.sign_in_time);
-  return m !== null && m > LATE_AFTER_MINUTES ? "L" : "P";
-}
-const ATT_TONE: Record<AttCode, Tone> = { P: "good", L: "warn", H: "info", A: "bad", "-": "neutral" };
-const ATT_LABEL: Record<AttCode, string> = { P: "Present", L: "Late", H: "Half day", A: "Absent", "-": "No record" };
 
 /** A phone is silent when it has not checked in for at least one full working day. */
 function phoneState(p: TeamPhone | undefined): { tone: Tone; label: string; silent: boolean } {
@@ -84,7 +62,6 @@ function phoneState(p: TeamPhone | undefined): { tone: Tone; label: string; sile
 
 export function GamingManagerDashboard({ orgId }: { orgId: string }) {
   const { canAccessFeature } = useFeatureAccess();
-  const { isAdmin } = useUserRole();
   const showAttendance = canAccessFeature("attendance");
   const { data: phoneApp } = usePhoneAppStatus();
   const usesPhoneApp = !!phoneApp?.enabled;
@@ -107,12 +84,12 @@ export function GamingManagerDashboard({ orgId }: { orgId: string }) {
 
   const attendance = useQuery({
     queryKey: ["gaming-attendance", orgId, from, to],
-    queryFn: async (): Promise<AttendanceRow[]> => {
+    queryFn: async (): Promise<DayAttendance[]> => {
       const { data } = await supabase
         .from("attendance_records")
-        .select("user_id, date, status, sign_in_time, sign_out_time, total_hours")
+        .select("user_id, date, sign_in_time, sign_out_time, total_hours")
         .eq("org_id", orgId).gte("date", from).lte("date", to);
-      return (data ?? []) as AttendanceRow[];
+      return (data ?? []) as DayAttendance[];
     },
     enabled: !!orgId,
   });
@@ -130,7 +107,6 @@ export function GamingManagerDashboard({ orgId }: { orgId: string }) {
   });
 
   const rangeTotals = sumStats(rangeStats.data ?? []);
-  const attByKey = useMemo(() => new Map((attendance.data ?? []).map((a) => [`${a.user_id}|${a.date}`, a])), [attendance.data]);
 
   const { byDispo, bySub, byCaller } = useMemo(() => {
     const byDispo = new Map<string, number>(); const bySub = new Map<string, number>(); const byCaller = new Map<string, number>();
@@ -145,9 +121,6 @@ export function GamingManagerDashboard({ orgId }: { orgId: string }) {
   const dispositions = catalog.data?.dispositions ?? [];
   const subs = catalog.data?.subs ?? [];
   const totalCalls = [...byDispo.values()].reduce((s, n) => s + n, 0);
-
-  const rangeDays = eachDayOfInterval({ start: parseISO(from), end: parseISO(to) }).filter(isWorkingDay);
-  const attCodes = callers.map((c) => rangeDays.map((d) => attendanceCode(attByKey.get(`${c.id}|${format(d, "yyyy-MM-dd")}`))));
 
   if (latestLoading) return <LoadingState message="Loading dashboard..." />;
 
@@ -263,39 +236,6 @@ export function GamingManagerDashboard({ orgId }: { orgId: string }) {
             </TableBody>
           </Table>
         </TableCard>
-
-        {showAttendance && (
-        <TableCard
-          title="Attendance"
-          subtitle={<>Shift starts 10:00 with a 15 minute grace. Late = login after 10:15. Half day = under 8 hours logged in. Sundays and the 2nd and 4th Saturdays are off. {isAdmin && <Link to="/admin/attendance-report" className="text-primary underline">Full attendance report</Link>}</>}
-          action={<div className="flex items-center gap-1.5 text-xs text-muted-foreground">{(["P", "L", "H", "A"] as AttCode[]).map((k) => <span key={k} className="inline-flex items-center gap-1"><DayChip code={k} label={ATT_LABEL[k]} />{ATT_LABEL[k]}</span>)}</div>}
-        >
-          <Table>
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <TH>Caller</TH><TH right>Present</TH><TH right>Late</TH><TH right>Half day</TH><TH right>Absent</TH>
-                {rangeDays.map((d) => <TH key={d.toISOString()} className="px-1 text-center">{format(d, "d")}</TH>)}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {callers.map((c, i) => {
-                const codes = attCodes[i] ?? [];
-                const n = (k: AttCode) => codes.filter((x) => x === k).length;
-                return (
-                  <TableRow key={c.id} className={ROW}>
-                    <TableCell className={CELL}><Person name={c.name} /></TableCell>
-                    <TableCell className={NUM}><Fig v={n("P") + n("L")} bold /></TableCell>
-                    <TableCell className={NUM}><Fig v={n("L")} /></TableCell>
-                    <TableCell className={NUM}><Fig v={n("H")} /></TableCell>
-                    <TableCell className={NUM}><Fig v={n("A")} /></TableCell>
-                    {codes.map((k, j) => <TableCell key={j} className="px-1 py-2 text-center"><DayChip code={k} label={ATT_LABEL[k]} /></TableCell>)}
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </TableCard>
-        )}
     </div>
   );
 }

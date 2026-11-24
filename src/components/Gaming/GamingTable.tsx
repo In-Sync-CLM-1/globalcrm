@@ -68,9 +68,3 @@ export function StatusChip({ tone, children }: { tone: Tone; children: ReactNode
     </span>
   );
 }
-
-/** One day cell in the attendance grid. */
-export function DayChip({ code, label }: { code: string; label: string }) {
-  const tone: Record<string, string> = { P: "bg-emerald-500 text-white", L: "bg-amber-400 text-amber-950", H: "bg-orange-400 text-orange-950", A: "bg-rose-500 text-white", "-": "bg-muted text-muted-foreground" };
-  return <span title={label} className={cn("inline-flex h-6 w-6 items-center justify-center rounded-md text-[11px] font-bold", tone[code] ?? tone["-"])}>{code === "-" ? "" : code}</span>;
-}
