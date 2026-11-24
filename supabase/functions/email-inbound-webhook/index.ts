@@ -29,7 +29,8 @@ async function verifyWebhookSignature(
     
     // Convert secret to key
     const encoder = new TextEncoder();
-    const keyData = encoder.encode(secret.replace('whsec_', ''));
+    // the part after whsec_ is the key itself in base64; using its letters as the key made every check fail
+    const keyData = Uint8Array.from(atob(secret.replace('whsec_', '')), (ch) => ch.charCodeAt(0));
     const key = await crypto.subtle.importKey(
       'raw',
       keyData,

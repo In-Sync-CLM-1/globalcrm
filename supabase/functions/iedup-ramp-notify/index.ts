@@ -90,6 +90,20 @@ serve(async (req) => {
 
   const body = await req.json().catch(() => ({}));
 
+  // How many messages RAMP sent straight to WhatsApp (login codes), per day, for the dashboard's message table. Counts only, nothing is sent or charged.
+  if (body.kind === "direct_counts" && Array.isArray(body.items)) {
+    const rows = (body.items as Record<string, unknown>[]).slice(0, 2000).map((it) => ({
+      org_id: IEDUP_ORG_ID, source: "ramp", channel: "WhatsApp", day: String(it.day ?? ""), template: String(it.template ?? "").trim().slice(0, 100),
+      sent: Math.max(0, Math.floor(Number(it.sent) || 0)), updated_at: new Date().toISOString(),
+    })).filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.day) && r.template);
+    const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    if (rows.length) {
+      const { error } = await db.from("direct_message_counts").upsert(rows);
+      if (error) return json(500, { error: error.message });
+    }
+    return json(200, { saved: rows.length });
+  }
+
   // Email-only messages to trainers (for example "your trainer account is approved"): no WhatsApp, charged at the email rate.
   if (body.kind === "trainer_email" && Array.isArray(body.items)) {
     const items = (body.items as Record<string, unknown>[]).slice(0, 20);
