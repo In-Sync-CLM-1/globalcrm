@@ -97,6 +97,20 @@ export function PhoneCallDialog({ orgId, target, onClose, next, onAdvance }: Pho
     return () => window.clearTimeout(t);
   }, [countdown, queued, onAdvance]);
 
+  // Escape always stops the countdown, even when a message elsewhere on the page would take the key.
+  const counting = countdown !== null;
+  useEffect(() => {
+    if (!counting) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      setCountdown(null);
+      onClose();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [counting, onClose]);
+
   const close = async () => {
     if (requestId && (state?.status === "waiting" || state?.status === "dialling" || !state)) {
       await supabase.rpc("cancel_phone_call" as never, { _request_id: requestId } as never);
@@ -115,7 +129,8 @@ export function PhoneCallDialog({ orgId, target, onClose, next, onAdvance }: Pho
     } as never);
     setSaving(false);
     if (err) { notify.error("Outcome not saved", err); return; }
-    notify.success("Outcome saved", "");
+    // In Next-call mode the window itself says so; a message on top would also swallow the Escape key.
+    if (!(next && onAdvance)) notify.success("Outcome saved", "");
     for (const key of [
       "pipeline-latest-dispositions", "pipeline-latest-sub-dispositions", "pipeline-disposition-filter-ids",
       "pipeline-contacts", "gaming-day-stats", "gaming-dispo-counts", "gaming-hourly-counts",

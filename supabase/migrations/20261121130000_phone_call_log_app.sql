@@ -717,6 +717,53 @@ $function$;
 REVOKE ALL ON FUNCTION public.save_manual_call_outcome(uuid, uuid, uuid, text, timestamptz, uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.save_manual_call_outcome(uuid, uuid, uuid, text, timestamptz, uuid) TO authenticated;
 
+-- Pipeline outcome dropdowns: same as before, except that a missed incoming call the phone
+-- reported is never treated as the call to correct; the outcome becomes its own call.
+CREATE OR REPLACE FUNCTION public.set_pipeline_call_outcome(
+  _contact_id uuid,
+  _disposition_id uuid,
+  _sub_disposition_id uuid DEFAULT NULL
+) RETURNS uuid
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path TO 'public'
+AS $function$
+DECLARE
+  c_ajimos uuid := (SELECT id FROM public.organizations WHERE slug = 'ajimos');
+  v_user uuid := auth.uid();
+  v_last record;
+BEGIN
+  IF v_user IS NULL THEN RAISE EXCEPTION 'Not authenticated'; END IF;
+
+  SELECT id, agent_id, dialled_by_hand, created_at, activity_id INTO v_last
+  FROM call_logs
+  WHERE contact_id = _contact_id AND org_id = c_ajimos
+    -- A missed incoming call from the phone never takes an outcome.
+    AND NOT (phone_app_key IS NOT NULL AND direction = 'inbound' AND answered_at IS NULL)
+  ORDER BY created_at DESC
+  LIMIT 1;
+
+  IF FOUND AND v_last.dialled_by_hand AND v_last.agent_id = v_user
+     AND v_last.created_at > now() - interval '5 minutes' THEN
+    PERFORM public.check_manual_call_outcome(_contact_id, _disposition_id, _sub_disposition_id);
+    UPDATE call_logs
+       SET disposition_id = _disposition_id, sub_disposition_id = _sub_disposition_id
+     WHERE id = v_last.id;
+    IF v_last.activity_id IS NOT NULL THEN
+      UPDATE contact_activities
+         SET call_disposition_id = _disposition_id, call_sub_disposition_id = _sub_disposition_id
+       WHERE id = v_last.activity_id;
+    END IF;
+    PERFORM public.ajimos_apply_outcome_stage(_contact_id, _disposition_id, _sub_disposition_id);
+    RETURN v_last.id;
+  END IF;
+
+  RETURN public.save_manual_call_outcome(_contact_id, _disposition_id, _sub_disposition_id, NULL, NULL, NULL);
+END;
+$function$;
+REVOKE ALL ON FUNCTION public.set_pipeline_call_outcome(uuid, uuid, uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.set_pipeline_call_outcome(uuid, uuid, uuid) TO authenticated;
+
 -- ---------------------------------------------------------------------------
 -- Ajimos dashboards: outcomes saved stay the Calls figure; phone-reported calls add
 -- phone calls, connected calls, clean calls (1 minute or more) and talk time.
