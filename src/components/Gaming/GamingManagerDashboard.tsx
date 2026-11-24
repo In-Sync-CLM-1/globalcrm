@@ -75,7 +75,7 @@ export function GamingManagerDashboard({ orgId }: { orgId: string }) {
   // Dates picked the wrong way round are read as the same range.
   const [from, to] = firstDay <= lastDay ? [firstDay, lastDay] : [lastDay, firstDay];
 
-  const { data: callers = [] } = useCallers(orgId);
+  const { data: callers = [], isSuccess: callersLoaded } = useCallers(orgId);
   const rangeStats = useDayStats(orgId, from, to);
   const dayOutcomes = useDayOutcomes(orgId, from, to);
   const hourly = useHourlyCounts(orgId, from, to);
@@ -190,6 +190,7 @@ export function GamingManagerDashboard({ orgId }: { orgId: string }) {
           stats={rangeStats.data ?? []}
           attendance={attendance.data ?? []}
           showAttendance={showAttendance}
+          ready={callersLoaded && rangeStats.isSuccess && dayOutcomes.isSuccess && attendance.isSuccess}
           from={from}
           to={to}
           onFrom={setFromParam}
