@@ -581,7 +581,7 @@ function DashboardLayout({ children }: DashboardLayoutProps) {
                       <span>Designations</span>
                     </Link>
                   )}
-                  {canAccessFeature("hr_approvals") && (
+                  {canAccessFeature("hr_approvals") && (isAdmin || !isGaming) && (
                     <Link
                       to="/hr-approvals"
                       className="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-primary transition-colors"
@@ -591,7 +591,7 @@ function DashboardLayout({ children }: DashboardLayoutProps) {
                       <span>HR Approvals</span>
                     </Link>
                   )}
-                  {canAccessFeature("hr_approvals") && (
+                  {canAccessFeature("hr_approvals") && (isAdmin || !isGaming) && (
                     <Link
                       to="/admin/attendance-report"
                       className="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-primary transition-colors"
@@ -601,7 +601,7 @@ function DashboardLayout({ children }: DashboardLayoutProps) {
                       <span>Attendance Report</span>
                     </Link>
                   )}
-                  {canAccessFeature("hr_approvals") && (
+                  {canAccessFeature("hr_approvals") && !isGaming && (
                     <Link
                       to="/admin/sdr-test"
                       className="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-primary transition-colors"

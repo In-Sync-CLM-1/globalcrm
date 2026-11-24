@@ -18,7 +18,7 @@ export function PhoneCallTiles({ totals }: { totals: Totals }) {
     <div className="space-y-1">
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <Tile label="Phone calls" value={n(totals.phone_calls)} hint="logged by the phone app" />
-        <Tile label="Connected" value={n(totals.connected_calls)} hint="the player answered" />
+        <Tile label="Answered on phone" value={n(totals.connected_calls)} hint="the player answered" />
         <Tile label="Clean calls" value={n(totals.clean_calls)} hint="1 minute or longer" />
         <Tile label="Talk time" value={fmtHM(totals.talk_secs)} />
       </div>

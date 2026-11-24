@@ -131,6 +131,31 @@ export function useDispoCounts(orgId: string, from: string, to: string, agentId?
   });
 }
 
+/** One caller's one day, counted from saved outcomes. */
+export interface DayOutcomes {
+  agent_id: string;
+  day: string;
+  total: number;
+  connected: number;
+  interested: number;
+  follow_up: number;
+  registered: number;
+  activated: number;
+  not_interested: number;
+}
+
+export function useDayOutcomes(orgId: string, from: string, to: string) {
+  return useQuery({
+    queryKey: ["gaming-day-outcomes", orgId, from, to],
+    queryFn: async (): Promise<DayOutcomes[]> => {
+      const { data, error } = await supabase.rpc("gaming_caller_day_outcomes" as never, { _org: orgId, _from: from, _to: to } as never);
+      if (error) throw error;
+      return (data ?? []) as DayOutcomes[];
+    },
+    enabled: !!orgId && !!from && !!to,
+  });
+}
+
 export interface Dispo { id: string; name: string; category: string | null; description: string | null }
 export interface SubDispo { id: string; name: string; disposition_id: string }
 
