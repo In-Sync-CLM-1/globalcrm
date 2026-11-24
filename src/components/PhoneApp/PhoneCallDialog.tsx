@@ -49,6 +49,8 @@ export function PhoneCallDialog({ orgId, target, onClose, next, onAdvance }: Pho
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
+  // The next contact as it stood when the outcome was saved; saving refreshes and reorders the list.
+  const [queued, setQueued] = useState<PhoneCallTarget | null>(null);
   const attempt = useRef(0);
 
   const start = async () => {
@@ -56,7 +58,11 @@ export function PhoneCallDialog({ orgId, target, onClose, next, onAdvance }: Pho
     const mine = ++attempt.current;
     setRequestId(null); setState(null); setError(null); setDispo(""); setSub(""); setNotes(""); setCountdown(null);
     const { data, error: err } = await supabase.rpc("request_phone_call" as never, { _contact_id: target.id } as never);
-    if (mine !== attempt.current) return;
+    if (mine !== attempt.current) {
+      // Closed (or restarted) while the request was being sent: the phone must not dial it.
+      if (data) await supabase.rpc("cancel_phone_call" as never, { _request_id: data as unknown as string } as never);
+      return;
+    }
     if (err) { setError(err.message); return; }
     setRequestId(data as unknown as string);
   };
@@ -86,10 +92,10 @@ export function PhoneCallDialog({ orgId, target, onClose, next, onAdvance }: Pho
   // Next-call mode: count down, then move on unless the caller stops it.
   useEffect(() => {
     if (countdown === null) return;
-    if (countdown <= 0) { setCountdown(null); if (next && onAdvance) onAdvance(next); return; }
+    if (countdown <= 0) { setCountdown(null); if (queued && onAdvance) onAdvance(queued); return; }
     const t = window.setTimeout(() => setCountdown((c) => (c === null ? null : c - 1)), 1000);
     return () => window.clearTimeout(t);
-  }, [countdown, next, onAdvance]);
+  }, [countdown, queued, onAdvance]);
 
   const close = async () => {
     if (requestId && (state?.status === "waiting" || state?.status === "dialling" || !state)) {
@@ -114,7 +120,7 @@ export function PhoneCallDialog({ orgId, target, onClose, next, onAdvance }: Pho
       "pipeline-latest-dispositions", "pipeline-latest-sub-dispositions", "pipeline-disposition-filter-ids",
       "pipeline-contacts", "gaming-day-stats", "gaming-dispo-counts", "gaming-hourly-counts",
     ]) queryClient.invalidateQueries({ queryKey: [key] });
-    if (next && onAdvance) setCountdown(NEXT_DELAY);
+    if (next && onAdvance) { setQueued(next); setCountdown(NEXT_DELAY); }
     else onClose();
   };
 
@@ -134,10 +140,10 @@ export function PhoneCallDialog({ orgId, target, onClose, next, onAdvance }: Pho
             <PhoneOff className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
             <p>{error}</p>
           </div>
-        ) : countdown !== null && next ? (
+        ) : countdown !== null && queued ? (
           <div className="space-y-2 py-2 text-sm">
             <p className="flex items-center gap-2 font-medium"><CheckCircle2 className="h-4 w-4 text-emerald-600" /> Outcome saved.</p>
-            <p>Calling the next contact, <b>{next.name}</b>, in {countdown}…</p>
+            <p>Calling the next contact, <b>{queued.name}</b>, in {countdown}…</p>
           </div>
         ) : status === "done" ? (
           <div className="space-y-4 py-1">

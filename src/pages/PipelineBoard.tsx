@@ -42,7 +42,7 @@ import { InlineOutcomePicker } from "@/components/Pipeline/InlineOutcomePicker";
 import { useFullPhones } from "@/hooks/useFullPhoneView";
 import { ProtectedScreen } from "@/components/Security/ProtectedScreen";
 import { BulkUploadDialog } from "@/components/Contacts/BulkUpload/BulkUploadDialog";
-import { usePhoneAppStatus } from "@/hooks/usePhoneApp";
+import { usePhoneAppStatus, usePhoneCallAccess } from "@/hooks/usePhoneApp";
 import { PhoneAppBar } from "@/components/PhoneApp/PhoneAppBar";
 import { PhoneCallDialog, type PhoneCallTarget } from "@/components/PhoneApp/PhoneCallDialog";
 interface PipelineStage {
@@ -477,7 +477,11 @@ export default function PipelineBoard() {
   // In-Sync Phone app: Call buttons dial on the caller's own phone (organisations that have it switched on).
   const { data: phoneApp } = usePhoneAppStatus();
   const callViaPhone = !!phoneApp?.enabled;
+  const phoneAccess = usePhoneCallAccess(callViaPhone);
   const [phoneTarget, setPhoneTarget] = useState<PhoneCallTarget | null>(null);
+  // Contacts already dialled in this Next-call run. The list is ordered by last update, so a called
+  // contact moves to the top of it; without this it would be offered as the next one again.
+  const [dialledIds, setDialledIds] = useState<string[]>([]);
   const [nextCallMode, setNextCallMode] = useUrlState("nextcall", "");
   const [bulkUploadOpen, setBulkUploadOpen] = useState(false);
   const [aiQueueing, setAiQueueing] = useState(false);
@@ -547,7 +551,8 @@ export default function PipelineBoard() {
   const nextPhoneTarget: PhoneCallTarget | null = (() => {
     if (nextCallMode !== "1" || !phoneTarget) return null;
     const i = contacts.findIndex((c) => c.id === phoneTarget.id);
-    const n = contacts.slice(i + 1).find((c) => (c.primaryPhone || c.phone) && manualOutcome.canSaveFor(c.assigned_to));
+    const n = contacts.slice(i + 1).find((c) =>
+      (c.primaryPhone || c.phone) && !dialledIds.includes(c.id) && phoneAccess.canCall(c.assigned_to));
     return n ? { id: n.id, name: [n.first_name, n.last_name].filter(Boolean).join(" ") } : null;
   })();
   // Ajimos: full phone numbers come from the server for the contacts this user may see.
@@ -602,6 +607,7 @@ export default function PipelineBoard() {
     const phoneToCall = contact.primaryPhone || contact.phone;
 
     if (callViaPhone) {
+      setDialledIds([contact.id]);
       setPhoneTarget({ id: contact.id, name: [contact.first_name, contact.last_name].filter(Boolean).join(" ") });
       return;
     }
@@ -1029,7 +1035,7 @@ export default function PipelineBoard() {
           target={phoneTarget}
           onClose={() => setPhoneTarget(null)}
           next={nextPhoneTarget}
-          onAdvance={(n) => setPhoneTarget(n)}
+          onAdvance={(n) => { setDialledIds((ids) => [...ids, n.id]); setPhoneTarget(n); }}
         />
       )}
       <div className="space-y-4">

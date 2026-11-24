@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { useUserRole } from "@/hooks/useUserRole";
 
 /** Link to the Android app on this site (public/downloads). */
 export const PHONE_APP_DOWNLOAD_URL = "/downloads/insync-phone.apk";
@@ -27,6 +28,24 @@ export function usePhoneAppStatus() {
     refetchInterval: 30_000,
     staleTime: 15_000,
   });
+}
+
+/**
+ * Whose contacts this user may dial on their phone: callers their own assigned contacts,
+ * the calling manager and admins any contact. request_phone_call enforces the same rule.
+ */
+export function usePhoneCallAccess(enabled: boolean) {
+  const { isAdmin, isSuperAdmin, isSalesManager } = useUserRole();
+  const { data: userId } = useQuery({
+    queryKey: ["current-user-id"],
+    queryFn: async () => (await supabase.auth.getUser()).data.user?.id ?? null,
+    enabled,
+    staleTime: Infinity,
+  });
+  const privileged = isAdmin || isSuperAdmin || isSalesManager;
+  return {
+    canCall: (assignedTo?: string | null) => enabled && (privileged || (!!userId && assignedTo === userId)),
+  };
 }
 
 export interface TeamPhone {
