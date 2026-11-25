@@ -20,6 +20,7 @@ import { useUserRole } from "@/hooks/useUserRole";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { LoadingState } from "@/components/common/LoadingState";
 import { EmptyState } from "@/components/common/EmptyState";
+import { DialixaExtensionsButton } from "@/components/Dialixa/DialixaExtensionsButton";
 
 interface Profile {
   id: string;
@@ -478,6 +479,7 @@ export default function Users() {
           </div>
           {canManageUsers() && (
             <div className="flex gap-2">
+              <DialixaExtensionsButton />
               <Dialog open={isInviteDialogOpen} onOpenChange={setIsInviteDialogOpen}>
                 <DialogTrigger asChild>
                   <Button variant="outline">

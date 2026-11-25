@@ -216,3 +216,7 @@ verify_jwt = false
 # Website chatbot (TASK-0040): the browser calls it with no key.
 [functions.web-chat]
 verify_jwt = false
+
+# Ajimos click-to-call through Dialixa (signed-in users only).
+[functions.dialixa-call]
+verify_jwt = true

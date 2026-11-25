@@ -7,6 +7,7 @@ import { Loader2 } from "lucide-react";
 import { AuthProvider, useAuth } from "@/contexts/AuthProvider";
 import { OrgContextProvider } from "@/contexts/OrgContextProvider";
 import { ExportWatcher } from "@/components/Exports/ExportWatcher";
+import { DialixaProvider } from "@/components/Dialixa/DialixaProvider";
 
 // Retry wrapper for lazy imports - handles chunk hash changes after deployment
 function lazyRetry(fn: () => Promise<any>) {
@@ -124,6 +125,7 @@ const App = () => (
         <BrowserRouter>
           <LedgerAccessTrail />
           <ExportWatcher />
+          <DialixaProvider>
           <Suspense fallback={<PageLoader />}>
             <Routes>
           {/* Public routes */}
@@ -427,6 +429,7 @@ const App = () => (
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>
+          </DialixaProvider>
       </BrowserRouter>
     </TooltipProvider>
   </OrgContextProvider>

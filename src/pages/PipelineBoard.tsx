@@ -43,6 +43,10 @@ import { useFullPhones } from "@/hooks/useFullPhoneView";
 import { ProtectedScreen } from "@/components/Security/ProtectedScreen";
 import { BulkUploadDialog } from "@/components/Contacts/BulkUpload/BulkUploadDialog";
 import { usePhoneAppStatus, usePhoneCallAccess } from "@/hooks/usePhoneApp";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
+import { useDialixaStatus } from "@/hooks/useDialixa";
+import { DialixaCall } from "@/components/Dialixa/DialixaCall";
 import { PhoneAppBar } from "@/components/PhoneApp/PhoneAppBar";
 import { PhoneCallDialog, type PhoneCallTarget } from "@/components/PhoneApp/PhoneCallDialog";
 interface PipelineStage {
@@ -476,7 +480,10 @@ export default function PipelineBoard() {
   const manualOutcome = useManualOutcomeAccess();
   // In-Sync Phone app: Call buttons dial on the caller's own phone (organisations that have it switched on).
   const { data: phoneApp } = usePhoneAppStatus();
-  const callViaPhone = !!phoneApp?.enabled;
+  // Ajimos callers with a Dialixa extension call through the softphone instead.
+  const { data: dialixa } = useDialixaStatus();
+  const callViaDialixa = !!dialixa?.enabled && !!dialixa.extension;
+  const callViaPhone = !!phoneApp?.enabled || callViaDialixa;
   const phoneAccess = usePhoneCallAccess(callViaPhone);
   const [phoneTarget, setPhoneTarget] = useState<PhoneCallTarget | null>(null);
   // Contacts already dialled in this Next-call run. The list is ordered by last update, so a called
@@ -1029,7 +1036,15 @@ export default function PipelineBoard() {
   return (
     <DashboardLayout>
       <ProtectedScreen active={fullPhones.enabled}>
-      {callViaPhone && effectiveOrgId && (
+      {callViaDialixa && (
+        <DialixaCall
+          target={phoneTarget}
+          onClose={() => setPhoneTarget(null)}
+          next={nextPhoneTarget}
+          onAdvance={(n) => { setDialledIds((ids) => [...ids, n.id]); setPhoneTarget(n); }}
+        />
+      )}
+      {callViaPhone && !callViaDialixa && effectiveOrgId && (
         <PhoneCallDialog
           orgId={effectiveOrgId}
           target={phoneTarget}
@@ -1059,7 +1074,13 @@ export default function PipelineBoard() {
           </div>
         </div>
 
-        {callViaPhone && phoneApp && (
+        {callViaDialixa && (
+          <div className="flex items-center justify-end gap-2">
+            <Switch id="dialixa-next-call" checked={nextCallMode === "1"} onCheckedChange={(v) => setNextCallMode(v ? "1" : "")} />
+            <Label htmlFor="dialixa-next-call" className="text-sm">Next-call mode</Label>
+          </div>
+        )}
+        {callViaPhone && !callViaDialixa && phoneApp && (
           <PhoneAppBar status={phoneApp} nextCall={nextCallMode === "1"} onNextCallChange={(v) => setNextCallMode(v ? "1" : "")} />
         )}
 
