@@ -28,6 +28,7 @@ export interface PipelineFiltersState {
   whatsappOutreachStatus: string;
   assignedTo: string;
   dispositionId: string;
+  category: string;
   matchMode: "exact" | "contains";
 }
 
@@ -41,6 +42,8 @@ interface PipelineFiltersProps {
   stages: PipelineStage[];
   users?: PipelineUser[];
   dispositions?: PipelineDisposition[];
+  /** Empty for organisations without contact categories: the filter is then not shown. */
+  categories?: string[];
   onFiltersChange: (filters: PipelineFiltersState) => void;
   onSearch: () => void;
   onClear: () => void;
@@ -58,6 +61,7 @@ const emptyFilters: PipelineFiltersState = {
   whatsappOutreachStatus: "",
   assignedTo: "",
   dispositionId: "",
+  category: "",
   matchMode: "contains",
 };
 
@@ -85,6 +89,7 @@ export function PipelineFilters({
   stages,
   users = [],
   dispositions = [],
+  categories = [],
   onFiltersChange,
   onSearch,
   onClear,
@@ -267,6 +272,25 @@ export function PipelineFilters({
                 ))}
               </SelectContent>
             </Select>
+            {categories.length > 0 && (
+              <Select
+                value={filters.category}
+                onValueChange={(v) => handleChange("category", v === "all" ? "" : v)}
+              >
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue placeholder="Category" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Categories</SelectItem>
+                  <SelectItem value="none">No Category</SelectItem>
+                  {categories.map((c) => (
+                    <SelectItem key={c} value={c}>
+                      {c}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           </div>
           <div className={`flex gap-2 ${gaming.isGaming ? "ml-auto" : "justify-end"}`}>
             <Button

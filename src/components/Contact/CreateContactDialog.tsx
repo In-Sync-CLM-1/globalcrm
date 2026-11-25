@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { useNotification } from "@/hooks/useNotification";
+import { useContactCategories } from "@/hooks/useContactCategories";
 import { useOrgContext } from "@/hooks/useOrgContext";
 import { InlineEmailInput, EmailEntry, InlineEmailInputHandle } from "./InlineEmailInput";
 import { InlinePhoneInput, PhoneEntry, InlinePhoneInputHandle } from "./InlinePhoneInput";
@@ -37,6 +38,7 @@ export function CreateContactDialog({
 }: CreateContactDialogProps) {
   const notify = useNotification();
   const { effectiveOrgId } = useOrgContext();
+  const categories = useContactCategories(effectiveOrgId);
   const [loading, setLoading] = useState(false);
   const [pipelineStages, setPipelineStages] = useState<PipelineStage[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -55,6 +57,7 @@ export function CreateContactDialog({
     source: "",
     linkedin_url: "",
     pipeline_stage_id: "",
+    category: "",
     assigned_to: "",
     notes: "",
   });
@@ -118,6 +121,7 @@ export function CreateContactDialog({
       source: "",
       linkedin_url: "",
       pipeline_stage_id: "",
+      category: "",
       assigned_to: "",
       notes: "",
     });
@@ -165,6 +169,7 @@ export function CreateContactDialog({
         linkedin_url: formData.linkedin_url || null,
         pipeline_stage_id: formData.pipeline_stage_id || null,
         assigned_to: formData.assigned_to || null,
+        ...(categories.length > 0 ? { category: formData.category || null } : {}),
         notes: formData.notes || null,
         org_id: profile.org_id,
         created_by: user.id,
@@ -367,6 +372,23 @@ export function CreateContactDialog({
               />
             </div>
           </div>
+
+          {categories.length > 0 && (
+            <div className="space-y-1">
+              <Label htmlFor="category" className="text-xs">Category</Label>
+              <Select value={formData.category || "none"} onValueChange={(value) => setFormData({ ...formData, category: value === "none" ? "" : value })}>
+                <SelectTrigger id="category" className="h-9">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No Category</SelectItem>
+                  {categories.map((c) => (
+                    <SelectItem key={c} value={c}>{c}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           {/* Row 6: Assign To | LinkedIn Profile (2-column) */}
           <div className="grid grid-cols-2 gap-3">

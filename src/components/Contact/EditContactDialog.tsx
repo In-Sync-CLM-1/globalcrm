@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useContactCategories } from "@/hooks/useContactCategories";
 import { useNotification } from "@/hooks/useNotification";
 import { ContactEmails } from "./ContactEmails";
 import { ContactPhones } from "./ContactPhones";
@@ -34,6 +35,7 @@ interface Contact {
   linkedin_url: string | null;
   notes: string | null;
   pipeline_stage_id: string | null;
+  category?: string | null;
 }
 
 interface EditContactDialogProps {
@@ -50,6 +52,7 @@ export function EditContactDialog({
   onContactUpdated,
 }: EditContactDialogProps) {
   const notify = useNotification();
+  const categories = useContactCategories(contact?.org_id);
   const [loading, setLoading] = useState(false);
   const [pipelineStages, setPipelineStages] = useState<PipelineStage[]>([]);
   const [formData, setFormData] = useState({
@@ -64,6 +67,7 @@ export function EditContactDialog({
     linkedin_url: "",
     notes: "",
     pipeline_stage_id: "",
+    category: "",
   });
 
   useEffect(() => {
@@ -98,6 +102,7 @@ export function EditContactDialog({
         linkedin_url: contact.linkedin_url || "",
         notes: contact.notes || "",
         pipeline_stage_id: contact.pipeline_stage_id || "",
+        category: contact.category || "",
       });
     }
   }, [open, contact]);
@@ -121,6 +126,7 @@ export function EditContactDialog({
           linkedin_url: formData.linkedin_url || null,
           notes: formData.notes || null,
           pipeline_stage_id: formData.pipeline_stage_id || null,
+          ...(categories.length > 0 ? { category: formData.category || null } : {}),
         })
         .eq("id", contact.id);
 
@@ -286,6 +292,23 @@ export function EditContactDialog({
               />
             </div>
           </div>
+
+          {categories.length > 0 && (
+            <div className="space-y-1">
+              <Label htmlFor="category" className="text-xs">Category</Label>
+              <Select value={formData.category || "none"} onValueChange={(value) => setFormData({ ...formData, category: value === "none" ? "" : value })}>
+                <SelectTrigger id="category" className="h-9">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No Category</SelectItem>
+                  {categories.map((c) => (
+                    <SelectItem key={c} value={c}>{c}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
