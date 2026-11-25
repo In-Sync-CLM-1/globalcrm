@@ -36,6 +36,7 @@ import { PostCallDispositionDialog } from "@/components/Contact/PostCallDisposit
 import IedupPipeline from "@/pages/IedupPipeline";
 import { IEDUP_ORG_ID } from "@/hooks/useIsIedup";
 import { useUrlState } from "@/hooks/useUrlState";
+import { useContactCategories } from "@/hooks/useContactCategories";
 import { useGamingAccess } from "@/hooks/useGamingAccess";
 import { useManualOutcomeAccess } from "@/hooks/useManualOutcomeAccess";
 import { InlineOutcomePicker } from "@/components/Pipeline/InlineOutcomePicker";
@@ -81,6 +82,7 @@ interface Contact {
   assigned_to?: string | null;
   product?: string | null;
   whatsapp_outreach_status?: string | null;
+  category?: string | null;
   primaryPhone?: string | null;
 }
 
@@ -360,6 +362,8 @@ export default function PipelineBoard() {
     if (f.whatsappOutreachStatus) q = q.eq("whatsapp_outreach_status", f.whatsappOutreachStatus);
     if (f.assignedTo === "unassigned") q = q.is("assigned_to", null);
     else if (f.assignedTo) q = q.eq("assigned_to", f.assignedTo);
+    if (f.category === "none") q = q.is("category", null);
+    else if (f.category) q = q.eq("category", f.category);
     return q;
   }, []);
 
@@ -411,12 +415,15 @@ export default function PipelineBoard() {
     queryKey: ['pipeline-contacts', effectiveOrgId, activeTab, tablePagination.currentPage, tablePagination.pageSize, urlFilters, dispositionFilterIds?.mode, dispositionFilterIds?.ids?.length],
     queryFn: async () => {
       if (activeTab === "board") {
-        // Board view: load all contacts (client-side filtering for board)
-        const query = supabase
+        // Board view: load the latest contacts (client-side filtering for board, except category,
+        // which is applied here so the board shows more than the matches among the latest 500)
+        let query: any = supabase
           .from("contacts")
-          .select("id, first_name, last_name, email, phone, company, pipeline_stage_id, job_title, source, status, notes, website, address, city, state, country, created_at, updated_at, industry_type, nature_of_business, created_by, assigned_to, product, whatsapp_outreach_status")
+          .select("id, first_name, last_name, email, phone, company, pipeline_stage_id, job_title, source, status, notes, website, address, city, state, country, created_at, updated_at, industry_type, nature_of_business, created_by, assigned_to, product, whatsapp_outreach_status, category")
           .order("updated_at", { ascending: false })
           .limit(500);
+        if (urlFilters.category === "none") query = query.is("category", null);
+        else if (urlFilters.category) query = query.eq("category", urlFilters.category);
 
         const { data, error } = await query;
         if (error) throw error;
@@ -426,7 +433,7 @@ export default function PipelineBoard() {
         const offset = (tablePagination.currentPage - 1) * tablePagination.pageSize;
         let query: any = supabase
           .from("contacts")
-          .select("id, first_name, last_name, email, phone, company, pipeline_stage_id, job_title, source, status, notes, website, address, city, state, country, created_at, updated_at, industry_type, nature_of_business, created_by, assigned_to, product, whatsapp_outreach_status", { count: 'exact' })
+          .select("id, first_name, last_name, email, phone, company, pipeline_stage_id, job_title, source, status, notes, website, address, city, state, country, created_at, updated_at, industry_type, nature_of_business, created_by, assigned_to, product, whatsapp_outreach_status, category", { count: 'exact' })
           .order("updated_at", { ascending: false });
         query = applyServerFilters(query, urlFilters);
 
@@ -477,6 +484,9 @@ export default function PipelineBoard() {
 
   // Gaming CRM Demo shows the sub-disposition of each lead's latest call.
   const gaming = useGamingAccess();
+  // Redefine (RMPL): category on the list and cards, with a filter. Empty for every other organisation.
+  const categories = useContactCategories(effectiveOrgId);
+  const showCategory = categories.length > 0;
   const manualOutcome = useManualOutcomeAccess();
   // In-Sync Phone app: Call buttons dial on the caller's own phone (organisations that have it switched on).
   const { data: phoneApp } = usePhoneAppStatus();
@@ -935,6 +945,56 @@ export default function PipelineBoard() {
     }
   };
 
+  // Set or clear a contact's category from the list or a board card
+  const handleCategoryChange = async (contactId: string, category: string | null) => {
+    try {
+      const { data, error } = await supabase.from("contacts").update({ category } as any).eq("id", contactId).select("id");
+      if (error) throw error;
+      if (!data?.length) throw new Error("You can only change contacts assigned to you");
+      queryClient.invalidateQueries({ queryKey: ['pipeline-contacts'] });
+      queryClient.invalidateQueries({ queryKey: ['contacts-by-category'] });
+      notify.success("Category updated", category ?? "Category cleared");
+    } catch (error: any) {
+      notify.error("Error", error.message);
+    }
+  };
+
+  const renderCategoryPicker = (contact: Contact) => (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button onClick={(e) => e.stopPropagation()} className="cursor-pointer focus:outline-none" title="Change category">
+          <Badge
+            variant={contact.category ? "secondary" : "outline"}
+            className="text-[10px] px-1.5 py-0 hover:opacity-80 transition-opacity cursor-pointer"
+          >
+            {contact.category || "No Category"}
+          </Badge>
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-48">
+        {categories.map((c) => (
+          <DropdownMenuItem
+            key={c}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (c !== contact.category) handleCategoryChange(contact.id, c);
+            }}
+          >
+            <span className={c === contact.category ? "font-semibold" : ""}>{c}</span>
+          </DropdownMenuItem>
+        ))}
+        {contact.category && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleCategoryChange(contact.id, null); }}>
+              No Category
+            </DropdownMenuItem>
+          </>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+
   // Apply field-based filters to contacts
   const applyFilters = useCallback(() => {
     setIsSearching(true);
@@ -969,14 +1029,16 @@ export default function PipelineBoard() {
       if (filters.whatsappOutreachStatus && contact.whatsapp_outreach_status !== filters.whatsappOutreachStatus) return false;
       if (filters.assignedTo === "unassigned" && contact.assigned_to) return false;
       if (filters.assignedTo && filters.assignedTo !== "unassigned" && contact.assigned_to !== filters.assignedTo) return false;
+      if (filters.category && (contact.category ?? "none") !== filters.category) return false;
 
       return true;
     });
 
     setFilteredContacts(filtered);
     setIsSearching(false);
-    notify.success("Filters applied", `Found ${filtered.length} matching contacts`);
-  }, [baseContacts, filters, setUrlFilters, notify, activeTab, tablePagination]);
+    // A category change reloads the board from the server, so the count is not known yet.
+    notify.success("Filters applied", filters.category || urlFilters.category ? "" : `Found ${filtered.length} matching contacts`);
+  }, [baseContacts, filters, urlFilters.category, setUrlFilters, notify, activeTab, tablePagination]);
 
   // Auto-apply filters from URL when base contacts load and URL has filters (board view only;
   // table view uses server-side filtering driven by urlFilters in the query key)
@@ -1009,6 +1071,7 @@ export default function PipelineBoard() {
       if (urlFilters.whatsappOutreachStatus && contact.whatsapp_outreach_status !== urlFilters.whatsappOutreachStatus) return false;
       if (urlFilters.assignedTo === "unassigned" && contact.assigned_to) return false;
       if (urlFilters.assignedTo && urlFilters.assignedTo !== "unassigned" && contact.assigned_to !== urlFilters.assignedTo) return false;
+      if (urlFilters.category && (contact.category ?? "none") !== urlFilters.category) return false;
 
       return true;
     });
@@ -1090,6 +1153,7 @@ export default function PipelineBoard() {
           stages={stages}
           users={usersData ?? []}
           dispositions={dispositionsList ?? []}
+          categories={categories}
           onFiltersChange={setFilters}
           onSearch={applyFilters}
           onClear={handleClearFilters}
@@ -1153,6 +1217,7 @@ export default function PipelineBoard() {
                              {contact.company}
                            </div>
                          )}
+                         {showCategory && <div className="mt-1.5">{renderCategoryPicker(contact)}</div>}
                          {showEnhancedFields && (
                            <div className="space-y-0.5 mt-1">
                              {contact.city && (
@@ -1385,6 +1450,7 @@ export default function PipelineBoard() {
                       <TableHead className="py-2 text-xs h-8">Name / Title</TableHead>
                       <TableHead className="py-2 text-xs h-8">Quick Actions</TableHead>
                       {!gaming.isGaming && <TableHead className="py-2 text-xs h-8">Company</TableHead>}
+                      {showCategory && <TableHead className="py-2 text-xs h-8">Category</TableHead>}
                       {showEnhancedFields && <TableHead className="py-2 text-xs h-8">Industry</TableHead>}
                       {!gaming.isGaming && <TableHead className="py-2 text-xs h-8">Targeted Product</TableHead>}
                       <TableHead className="py-2 text-xs h-8">Assigned To</TableHead>
@@ -1482,6 +1548,7 @@ export default function PipelineBoard() {
                               {contact.company || '-'}
                             </TableCell>
                           )}
+                          {showCategory && <TableCell className="py-1.5">{renderCategoryPicker(contact)}</TableCell>}
                           {showEnhancedFields && (
                             <TableCell onClick={() => navigate(`/contacts/${contact.id}`)} className="py-1.5 cursor-pointer text-xs">
                               <span className="truncate max-w-[100px] block" title={contact.industry_type || ''}>
@@ -1744,6 +1811,7 @@ export default function PipelineBoard() {
               city: selectedContactForEdit.city ?? null,
               industry_type: selectedContactForEdit.industry_type ?? null,
               nature_of_business: selectedContactForEdit.nature_of_business ?? null,
+              category: selectedContactForEdit.category ?? null,
               status: selectedContactForEdit.status || "new",
               source: selectedContactForEdit.source ?? null,
               linkedin_url: null,
