@@ -18,13 +18,22 @@ const MESSAGES: Record<number, string> = {
   429: "Too many calls were started this minute. Wait a little and try again.",
 };
 
+/** The project's legacy keys are disabled; use the current ones when the platform provides them. */
+function key(list: string, legacy: string): string {
+  try {
+    const keys = JSON.parse(Deno.env.get(list) ?? "{}");
+    if (keys.default) return keys.default;
+  } catch { /* fall through */ }
+  return Deno.env.get(legacy)!;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: cors });
   const auth = req.headers.get("Authorization") ?? "";
-  const asUser = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, {
+  const asUser = createClient(Deno.env.get("SUPABASE_URL")!, key("SUPABASE_PUBLISHABLE_KEYS", "SUPABASE_ANON_KEY"), {
     global: { headers: { Authorization: auth } },
   });
-  const service = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+  const service = createClient(Deno.env.get("SUPABASE_URL")!, key("SUPABASE_SECRET_KEYS", "SUPABASE_SERVICE_ROLE_KEY"));
 
   let callId: string | null = null;
   const fail = async (error: string, http: number | null = null) => {
@@ -44,8 +53,8 @@ Deno.serve(async (req) => {
     callId = begun as string;
 
     const base = (Deno.env.get("DIALIXA_API_BASE_URL") ?? "").replace(/\/+$/, "");
-    const key = Deno.env.get("DIALIXA_CLICK_TO_CALL_API_KEY") ?? "";
-    if (!base || !key) return await fail("Dialixa is not connected yet. Tell your administrator.");
+    const apiKey = Deno.env.get("DIALIXA_CLICK_TO_CALL_API_KEY") ?? "";
+    if (!base || !apiKey) return await fail("Dialixa is not connected yet. Tell your administrator.");
 
     const { data: target, error: targetError } = await service.rpc("dialixa_call_target", { _call_id: callId, _user_id: user.id });
     if (targetError || !target) return await fail("The call could not be prepared");
@@ -55,7 +64,7 @@ Deno.serve(async (req) => {
     try {
       res = await fetch(`${base}/api/v1/public/click-to-call`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "X-API-Key": key },
+        headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
         body: JSON.stringify({ extension: target.extension, number: target.number, contactName: target.name || undefined }),
         signal: AbortSignal.timeout(15000),
       });

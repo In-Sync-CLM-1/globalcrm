@@ -12,6 +12,8 @@ import { useFeatureAccess } from "@/hooks/useFeatureAccess";
 import { usePhoneAppStatus, useTeamPhones, type TeamPhone } from "@/hooks/usePhoneApp";
 import { PhoneCallTiles } from "@/components/PhoneApp/PhoneCallTiles";
 import { CallerDayReport, type DayAttendance } from "./CallerDayReport";
+import { useDialixaStatus } from "@/hooks/useDialixa";
+import { DialixaCallReport } from "./DialixaCallReport";
 import { CallsByDateHour } from "./CallsByDateHour";
 import { CELL, Fig, NUM, Person, ROW, StatusChip, TH, TableCard, type Tone } from "./GamingTable";
 import { CallsOverTime } from "./CallsOverTime";
@@ -65,6 +67,7 @@ export function GamingManagerDashboard({ orgId }: { orgId: string }) {
   const showAttendance = canAccessFeature("attendance");
   const { data: phoneApp } = usePhoneAppStatus();
   const usesPhoneApp = !!phoneApp?.enabled;
+  const { data: dialixa } = useDialixaStatus();
   const teamPhones = useTeamPhones(usesPhoneApp);
   const { data: latest, isLoading: latestLoading } = useLatestCallDay(orgId);
   const [fromParam, setFromParam] = useUrlState("from", "");
@@ -149,7 +152,7 @@ export function GamingManagerDashboard({ orgId }: { orgId: string }) {
         <p className="text-xs text-muted-foreground">Leads by stage: {(stages.data ?? []).map((s) => `${s.name} ${s.count.toLocaleString("en-IN")}`).join(" · ")}</p>
       )}
 
-      {usesPhoneApp && <PhoneCallTiles totals={rangeTotals} />}
+      {usesPhoneApp && <PhoneCallTiles totals={rangeTotals} dialixa={!!dialixa?.reports} />}
 
       <CallsOverTime rows={rangeStats.data ?? []} />
 
@@ -183,6 +186,8 @@ export function GamingManagerDashboard({ orgId }: { orgId: string }) {
           </Table>
         </TableCard>
       )}
+
+        {dialixa?.reports && <DialixaCallReport from={from} to={to} />}
 
         <CallerDayReport
           callers={callers}

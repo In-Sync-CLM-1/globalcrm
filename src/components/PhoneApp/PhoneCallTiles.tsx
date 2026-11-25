@@ -12,17 +12,17 @@ function Tile({ label, value, hint }: { label: string; value: string | number; h
 }
 
 /** Figures from calls the In-Sync Phone app reported: only calls made with the app running count here. */
-export function PhoneCallTiles({ totals }: { totals: Totals }) {
+export function PhoneCallTiles({ totals, dialixa }: { totals: Totals; dialixa?: boolean }) {
   const n = (v: number) => v.toLocaleString("en-IN");
   return (
     <div className="space-y-1">
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Tile label="Phone calls" value={n(totals.phone_calls)} hint="logged by the phone app" />
+        <Tile label="Phone calls" value={n(totals.phone_calls)} hint={dialixa ? "from Dialixa or the phone app" : "logged by the phone app"} />
         <Tile label="Answered on phone" value={n(totals.connected_calls)} hint="the player answered" />
         <Tile label="Clean calls" value={n(totals.clean_calls)} hint="1 minute or longer" />
         <Tile label="Talk time" value={fmtHM(totals.talk_secs)} />
       </div>
-      <p className="text-xs text-muted-foreground">These four figures count only calls the In-Sync Phone app reported. Outcomes picked without the app still count under Calls.</p>
+      <p className="text-xs text-muted-foreground">{dialixa ? "These four figures count calls that Dialixa or the In-Sync Phone app reported. Outcomes picked without either still count under Calls." : "These four figures count only calls the In-Sync Phone app reported. Outcomes picked without the app still count under Calls."}</p>
     </div>
   );
 }

@@ -23,6 +23,7 @@ export class Softphone {
   private user: SimpleUser | null = null;
   private stopped = false;
   private retry: number | undefined;
+  private refusals = 0;
 
   constructor(private login: SoftphoneLogin, private audio: HTMLAudioElement, private events: SoftphoneEvents) {}
 
@@ -49,7 +50,7 @@ export class Softphone {
     user.delegate = {
       onServerConnect: () => { this.register(); },
       onServerDisconnect: () => { if (!this.stopped) { this.events.onLine("offline"); this.retryLater(); } },
-      onRegistered: () => this.events.onLine("ready"),
+      onRegistered: () => { this.refusals = 0; this.events.onLine("ready"); },
       onUnregistered: () => { if (!this.stopped) this.events.onLine("offline"); },
       onCallReceived: () => this.events.onRinging(this.remoteNumber()),
       onCallAnswered: () => this.events.onAnswered(),
@@ -69,6 +70,12 @@ export class Softphone {
       requestDelegate: {
         onReject: (r) => {
           const code = r.message.statusCode ?? 0;
+          // Dialixa refuses the first sign-in of an extension and takes the next one.
+          if (code === 403 && ++this.refusals < 4) {
+            this.events.onLine("connecting");
+            window.setTimeout(() => { if (!this.stopped) this.register(); }, 3000);
+            return;
+          }
           if (code === 401 || code === 403 || code === 404 || code === 407) this.events.onLine("refused");
           else this.events.onLine("offline");
         },

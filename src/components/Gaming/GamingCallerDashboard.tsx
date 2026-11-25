@@ -1,3 +1,4 @@
+import { useDialixaStatus } from "@/hooks/useDialixa";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
@@ -31,6 +32,7 @@ export function GamingCallerDashboard({ orgId }: { orgId: string }) {
   const { canAccessFeature } = useFeatureAccess();
   const showAttendance = canAccessFeature("attendance");
   const { data: phoneApp } = usePhoneAppStatus();
+  const { data: dialixa } = useDialixaStatus();
   const [userId, setUserId] = useState<string | null>(null);
   useEffect(() => { supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null)); }, []);
 
@@ -126,7 +128,7 @@ export function GamingCallerDashboard({ orgId }: { orgId: string }) {
         <Tile label="New dials" value={today.new_dials} hint="first-ever call to a lead" />
       </div>
 
-      {phoneApp?.enabled && <PhoneCallTiles totals={today} />}
+      {phoneApp?.enabled && <PhoneCallTiles totals={today} dialixa={!!dialixa?.reports} />}
 
       <CallsOverTime rows={myDays.data ?? []} note="Your calls, last 14 days." />
 
