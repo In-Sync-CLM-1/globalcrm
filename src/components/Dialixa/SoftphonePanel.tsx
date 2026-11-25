@@ -67,7 +67,7 @@ export function SoftphonePanel(p: Props) {
     return (
       <button
         type="button" onClick={() => setOpen(true)}
-        className="fixed bottom-4 right-4 z-40 flex items-center gap-2 rounded-full border bg-card px-4 py-2 text-sm shadow-lg"
+        className="fixed bottom-24 right-4 z-40 flex items-center sm:bottom-8 sm:right-24 gap-2 rounded-full border bg-card px-4 py-2 text-sm shadow-lg"
       >
         <span className={`h-2.5 w-2.5 rounded-full ${LINE[line].dot}`} />
         <Headphones className="h-4 w-4" /> {call ? name : "Softphone"}
@@ -76,7 +76,7 @@ export function SoftphonePanel(p: Props) {
   }
 
   return (
-    <Card className="fixed bottom-4 right-4 z-40 w-[min(340px,calc(100vw-2rem))] max-h-[calc(100vh-2rem)] overflow-y-auto p-4 shadow-xl">
+    <Card className="fixed bottom-24 right-4 z-40 max-h-[calc(100vh-8rem)] w-[min(340px,calc(100vw-2rem))] overflow-y-auto p-4 shadow-xl sm:bottom-6 sm:right-24 sm:max-h-[calc(100vh-3rem)]">
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${LINE[line].dot}`} />
         <span className="flex-1">{LINE[line].text} · Extension {p.extension}</span>
