@@ -1,0 +1,13 @@
+name = "globalcrm-dialixa-sync"
+main = "src/index.js"
+compatibility_date = "2026-05-01"
+workers_dev = false
+
+[triggers]
+crons = ["*/5 * * * *"]
+
+[vars]
+SUPABASE_URL = "https://ejzjrvazegaxrhqizgaa.supabase.co"
+
+# Secret (wrangler secret put): DIALIXA_SYNC_TOKEN, the same value as the Supabase secret.
+# Deployed by hand with: npx wrangler deploy

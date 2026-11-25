@@ -220,3 +220,7 @@ verify_jwt = false
 # Ajimos click-to-call through Dialixa (signed-in users only).
 [functions.dialixa-call]
 verify_jwt = true
+
+# Ajimos Dialixa call reports: called by dialixa-sync-worker with its own token, checked in the function.
+[functions.dialixa-sync]
+verify_jwt = false

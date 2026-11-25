@@ -10,6 +10,8 @@ export interface DialixaStatus {
   extension?: string | null;
   /** True when the softphone inside the CRM can connect for this user. */
   softphone?: boolean;
+  /** Dialixa call reports are on for the organisation. */
+  reports?: boolean;
 }
 
 /** Dialixa calling (Ajimos only). Every other organisation gets { enabled: false } without asking the server. */
