@@ -404,6 +404,17 @@ function DashboardLayout({ children }: DashboardLayoutProps) {
                 </Link>
               )}
 
+              {isGaming && (
+                <Link
+                  to="/reports"
+                  className="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-primary transition-colors"
+                  onClick={() => setSidebarOpen(false)}
+                >
+                  <BarChart3 size={16} className="shrink-0 text-sidebar-muted" />
+                  <span>Reports</span>
+                </Link>
+              )}
+
               {canAccessFeature("contacts") && (
                 <Link
                   to="/contacts"

@@ -18,6 +18,8 @@ import CallingDashboardTab from "@/components/Reports/CallingDashboard/CallingDa
 import { UrlTabs } from "@/components/UrlTabs";
 import { useUrlState } from "@/hooks/useUrlState";
 import { useGamingAccess } from "@/hooks/useGamingAccess";
+import GamingReports from "@/components/Gaming/GamingReports";
+import { GAMING_ORG_ID } from "@/components/Gaming/gamingStats";
 
 interface SalesReport {
   user_name: string;
@@ -35,7 +37,14 @@ interface PipelineReport {
   stage_color: string;
 }
 
+/** Ajimos has its own simple Reports page; every other organisation keeps the standard one. */
 export default function Reports() {
+  const { effectiveOrgId } = useOrgContext();
+  if (effectiveOrgId === GAMING_ORG_ID) return <GamingReports orgId={effectiveOrgId} />;
+  return <StandardReports />;
+}
+
+function StandardReports() {
   const navigate = useNavigate();
   const [dateRange, setDateRange] = useUrlState<"week" | "month" | "quarter">("range", "month");
   const [activeTab, setActiveTab] = useUrlState<string>("tab", "campaigns");

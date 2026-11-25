@@ -30,10 +30,11 @@ const sumLines = (lines: Line[]): Figures =>
 const attSecs = (lines: Line[]) => lines.reduce((t, l) => t + (l.att?.total_hours ?? 0) * 3600, 0);
 
 /** Each caller's days in the chosen dates: attendance, then calls by the outcome the caller saved. */
-export function CallerDayReport({ callers, outcomes, stats, attendance, showAttendance, ready, from, to, onFrom, onTo }: {
+export function CallerDayReport({ callers, outcomes, stats, attendance, showAttendance, ready, canExport = true, from, to, onFrom, onTo }: {
   callers: Caller[]; outcomes: DayOutcomes[]; stats: DayStat[]; attendance: DayAttendance[]; showAttendance: boolean;
   /** False until every figure for these dates has loaded, so a half-loaded report cannot be exported. */
   ready: boolean;
+  canExport?: boolean;
   from: string; to: string; onFrom: (v: string) => void; onTo: (v: string) => void;
 }) {
   const [callerParam, setCallerParam] = useUrlState("caller", "all");
@@ -100,9 +101,11 @@ export function CallerDayReport({ callers, outcomes, stats, attendance, showAtte
           <Input id="report-from" type="date" className="h-9 w-40" value={from} max={to} onChange={(e) => e.target.value && onFrom(e.target.value)} />
           <label htmlFor="report-to" className="text-sm text-muted-foreground">To</label>
           <Input id="report-to" type="date" className="h-9 w-40" value={to} min={from} max={format(new Date(), "yyyy-MM-dd")} onChange={(e) => e.target.value && onTo(e.target.value)} />
-          <Button variant="outline" size="sm" className="h-9" onClick={exportReport} disabled={!ready}>
+          {canExport && (
+            <Button variant="outline" size="sm" className="h-9" onClick={exportReport} disabled={!ready}>
             <Download className="mr-2 h-4 w-4" />Export
           </Button>
+          )}
         </div>
       }
     >

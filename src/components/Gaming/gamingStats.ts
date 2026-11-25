@@ -211,3 +211,31 @@ export function useLatestCallDay(orgId: string, agentId?: string | null) {
     enabled: !!orgId,
   });
 }
+
+export interface CallerWithHistory extends Caller { active: boolean }
+
+/** Every caller the organisation has had; people no longer active keep their past calls in the reports. */
+export function useCallersWithHistory(orgId: string) {
+  return useQuery({
+    queryKey: ["gaming-callers-history", orgId],
+    queryFn: async (): Promise<CallerWithHistory[]> => {
+      const { data: roles } = await supabase.from("user_roles").select("user_id, is_active").eq("org_id", orgId).eq("role", "sales_agent");
+      const active = new Map<string, boolean>();
+      for (const r of roles ?? []) active.set(r.user_id, (active.get(r.user_id) ?? false) || r.is_active === true);
+      if (!active.size) return [];
+      const { data } = await supabase.from("profiles").select("id, first_name, last_name").in("id", [...active.keys()]).order("first_name");
+      return (data ?? []).map((p) => {
+        const on = active.get(p.id) ?? false;
+        return { id: p.id, active: on, name: [p.first_name, p.last_name].filter(Boolean).join(" ") + (on ? "" : " (inactive)") };
+      });
+    },
+    enabled: !!orgId,
+  });
+}
+
+export type OutcomeTotals = Omit<DayOutcomes, "agent_id" | "day">;
+export const sumOutcomes = (rows: DayOutcomes[]): OutcomeTotals =>
+  rows.reduce<OutcomeTotals>((t, r) => ({
+    total: t.total + r.total, connected: t.connected + r.connected, interested: t.interested + r.interested, follow_up: t.follow_up + r.follow_up,
+    registered: t.registered + r.registered, activated: t.activated + r.activated, not_interested: t.not_interested + r.not_interested,
+  }), { total: 0, connected: 0, interested: 0, follow_up: 0, registered: 0, activated: 0, not_interested: 0 });
