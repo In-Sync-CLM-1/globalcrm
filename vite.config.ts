@@ -40,6 +40,10 @@ export default defineConfig(({ mode }) => ({
             if (id.includes('read-excel-file')) {
               return 'vendor-excel';
             }
+            // The Dialixa softphone (Ajimos only) loads when it is used.
+            if (id.includes('/sip.js/')) {
+              return 'vendor-softphone';
+            }
             return 'vendor';
           }
         },

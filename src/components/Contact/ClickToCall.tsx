@@ -11,6 +11,8 @@ import { DateTimePicker } from "@/components/ui/date-time-picker";
 import { format } from "date-fns";
 import { usePhoneAppStatus } from "@/hooks/usePhoneApp";
 import { useOrgContext } from "@/hooks/useOrgContext";
+import { useDialixaStatus } from "@/hooks/useDialixa";
+import { DialixaCall } from "@/components/Dialixa/DialixaCall";
 import { PhoneCallDialog, type PhoneCallTarget } from "@/components/PhoneApp/PhoneCallDialog";
 
 interface ClickToCallProps {
@@ -43,8 +45,20 @@ interface SubDisposition {
 export const ClickToCall = (props: ClickToCallProps) => {
   // Organisations with the In-Sync Phone app switched on dial through the caller's own phone.
   const { data: phoneApp } = usePhoneAppStatus();
+  const { data: dialixa } = useDialixaStatus();
   const { effectiveOrgId } = useOrgContext();
   const [phoneTarget, setPhoneTarget] = useState<PhoneCallTarget | null>(null);
+  // Ajimos callers with a Dialixa extension call through the softphone.
+  if (dialixa?.enabled && dialixa.extension) {
+    return (
+      <>
+        <Button size="icon" variant="default" onClick={() => setPhoneTarget({ id: props.contactId, name: props.contactName.trim() })} title="Call">
+          <Phone className="h-4 w-4" />
+        </Button>
+        <DialixaCall target={phoneTarget} onClose={() => setPhoneTarget(null)} />
+      </>
+    );
+  }
   if (phoneApp?.enabled && effectiveOrgId) {
     return (
       <>
