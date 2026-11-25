@@ -1,63 +1,38 @@
-import { useDialixaStatus } from "@/hooks/useDialixa";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { addDays, format, parseISO } from "date-fns";
-import { Phone } from "lucide-react";
+import { ArrowRight, BadgeCheck, Phone, PhoneCall, UserCheck } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table";
 import { LoadingState } from "@/components/common/LoadingState";
-import { useUrlState } from "@/hooks/useUrlState";
-import { CallsByDateHour } from "./CallsByDateHour";
-import { Fig, NUM, CELL, Person, ROW, TH, TableCard } from "./GamingTable";
-import { CallsOverTime } from "./CallsOverTime";
 import { useFeatureAccess } from "@/hooks/useFeatureAccess";
-import { usePhoneAppStatus } from "@/hooks/usePhoneApp";
-import { PhoneCallTiles } from "@/components/PhoneApp/PhoneCallTiles";
-import { DAILY_TARGETS, fmtClock, fmtHM, pct, sumStats, useCallers, useDayStats, useDispoCounts, useDispositionCatalog, useHourlyCounts, useLatestCallDay } from "./gamingStats";
+import { DAILY_TARGETS, fmtClock, fmtHM, sumOutcomes, useCallers, useDayOutcomes, useHourlyCounts } from "./gamingStats";
+import { PeriodSwitch, StatCard, VolumeCard, connectRate, usePeriod } from "./simpleDashboard";
 
-function Tile({ label, value, hint }: { label: string; value: string | number; hint?: string }) {
-  return (
-    <Card className="p-4">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="mt-1 text-2xl font-semibold tabular-nums text-foreground">{value}</p>
-      {hint && <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p>}
-    </Card>
-  );
-}
-
+/** Ajimos caller: their own figures, the day's target, callbacks and one chart. */
 export function GamingCallerDashboard({ orgId }: { orgId: string }) {
   const { canAccessFeature } = useFeatureAccess();
   const showAttendance = canAccessFeature("attendance");
-  const { data: phoneApp } = usePhoneAppStatus();
-  const { data: dialixa } = useDialixaStatus();
+  const { period, setPeriod, from, to, prevFrom, prevTo, versus } = usePeriod();
   const [userId, setUserId] = useState<string | null>(null);
   useEffect(() => { supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null)); }, []);
 
-  const { data: latest, isLoading: latestLoading } = useLatestCallDay(orgId, userId);
-  const [dayParam, setDayParam] = useUrlState("day", "");
-  const day = dayParam || latest || format(new Date(), "yyyy-MM-dd");
-  const weekFrom = format(addDays(parseISO(day), -13), "yyyy-MM-dd");
-
   const { data: callers = [] } = useCallers(orgId);
   const me = callers.find((c) => c.id === userId);
-
-  const dayStats = useDayStats(orgId, day, day, userId);
-  const teamWeek = useDayStats(orgId, format(addDays(parseISO(day), -6), "yyyy-MM-dd"), day);
-  const myDays = useDayStats(orgId, weekFrom, day, userId);
-  const hourly = useHourlyCounts(orgId, weekFrom, day, userId);
-  const dispoCounts = useDispoCounts(orgId, day, day, userId);
-  const catalog = useDispositionCatalog(orgId);
+  const now = useDayOutcomes(orgId, from, to);
+  const before = useDayOutcomes(orgId, prevFrom, prevTo);
+  const hourly = useHourlyCounts(orgId, from, to, userId ?? "00000000-0000-0000-0000-000000000000");
+  const mine = (now.data ?? []).filter((r) => r.agent_id === userId);
+  const t = sumOutcomes(mine);
+  const p = before.data ? sumOutcomes(before.data.filter((r) => r.agent_id === userId)) : undefined;
 
   const attendance = useQuery({
-    queryKey: ["gaming-my-attendance", userId, day],
+    queryKey: ["gaming-my-attendance", userId, to],
     queryFn: async () => {
-      const { data } = await supabase.from("attendance_records").select("sign_in_time, sign_out_time, total_hours").eq("user_id", userId!).eq("date", day).maybeSingle();
+      const { data } = await supabase.from("attendance_records").select("sign_in_time, sign_out_time, total_hours").eq("user_id", userId!).eq("date", to).maybeSingle();
       return data;
     },
-    enabled: !!userId,
+    enabled: !!userId && showAttendance,
   });
 
   const callbacks = useQuery({
@@ -72,123 +47,56 @@ export function GamingCallerDashboard({ orgId }: { orgId: string }) {
     enabled: !!userId,
   });
 
-  const today = sumStats(dayStats.data ?? []);
-
-  const ended = useMemo(() => {
-    const bySub = new Map<string, number>(); const byDispo = new Map<string, number>();
-    for (const r of dispoCounts.data ?? []) {
-      if (r.sub_disposition_id) bySub.set(r.sub_disposition_id, (bySub.get(r.sub_disposition_id) ?? 0) + r.calls);
-      if (r.disposition_id) byDispo.set(r.disposition_id, (byDispo.get(r.disposition_id) ?? 0) + r.calls);
-    }
-    return (catalog.data?.dispositions ?? []).map((d) => ({
-      id: d.id, name: d.name, total: byDispo.get(d.id) ?? 0,
-      subs: (catalog.data?.subs ?? []).filter((s) => s.disposition_id === d.id).map((s) => ({ name: s.name, n: bySub.get(s.id) ?? 0 })),
-    }));
-  }, [dispoCounts.data, catalog.data]);
-
-  const board = useMemo(() => {
-    const by = new Map<string, { id: string; calls: number }>();
-    for (const r of teamWeek.data ?? []) {
-      const e = by.get(r.agent_id) ?? { id: r.agent_id, calls: 0 };
-      e.calls += r.calls;
-      by.set(r.agent_id, e);
-    }
-    return [...by.values()].sort((a, b) => b.calls - a.calls);
-  }, [teamWeek.data]);
-
-  if (latestLoading || !userId) return <LoadingState message="Loading your dashboard..." />;
+  if (!userId) return <LoadingState message="Loading your dashboard..." />;
+  const left = DAILY_TARGETS.calls - t.total;
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold text-foreground">Hello{me ? `, ${me.name.split(" ")[0]}` : ""}</h1>
-          <p className="mt-1 max-w-3xl text-base text-foreground">
-            You saved {today.calls} call outcomes on {format(parseISO(day), "EEE d MMM")}.
-            {" "}{today.calls >= DAILY_TARGETS.calls ? "You met" : "You have not yet met"} the daily target of {DAILY_TARGETS.calls}.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <label htmlFor="caller-day" className="text-sm text-muted-foreground">Day</label>
-          <Input id="caller-day" type="date" className="w-44" value={day} max={format(new Date(), "yyyy-MM-dd")} onChange={(e) => e.target.value && setDayParam(e.target.value)} />
-        </div>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-xl font-semibold text-foreground">Hello{me ? `, ${me.name.split(" ")[0]}` : ""}</h1>
+        <PeriodSwitch value={period} onChange={setPeriod} />
       </div>
 
-      {showAttendance && (
-        <Card className="flex flex-wrap items-center gap-x-8 gap-y-2 p-4">
-          <div><p className="text-xs text-muted-foreground">Start</p><p className="font-medium tabular-nums">{fmtClock(attendance.data?.sign_in_time ?? null)}</p></div>
-          <div><p className="text-xs text-muted-foreground">End</p><p className="font-medium tabular-nums">{fmtClock(attendance.data?.sign_out_time ?? null)}</p></div>
-          <div><p className="text-xs text-muted-foreground">Hours</p><p className="font-medium tabular-nums">{attendance.data?.total_hours ? fmtHM(attendance.data.total_hours * 3600) : "—"}</p></div>
-          <Link to="/attendance" className="ml-auto text-sm text-primary underline">My attendance</Link>
-        </Card>
-      )}
-
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-2 xl:grid-cols-2">
-        <Tile label="Calls (outcomes saved)" value={`${today.calls} / ${DAILY_TARGETS.calls}`} hint={today.calls >= DAILY_TARGETS.calls ? "target met" : `${DAILY_TARGETS.calls - today.calls} to go`} />
-        <Tile label="New dials" value={today.new_dials} hint="first-ever call to a lead" />
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+        <StatCard label="Calls" value={t.total} prev={p?.total} versus={versus} icon={Phone}
+          hint={period === "today" ? (left > 0 ? `Target ${DAILY_TARGETS.calls}: ${left} to go` : `Target ${DAILY_TARGETS.calls} met`) : undefined} />
+        <StatCard label="Connected" value={t.connected} prev={p?.connected} versus={versus} icon={PhoneCall} hint={`${connectRate(t.connected, t.total)} of calls`} />
+        <StatCard label="Registered" value={t.registered} prev={p?.registered} versus={versus} icon={UserCheck} />
+        <StatCard label="Activated" value={t.activated} prev={p?.activated} versus={versus} icon={BadgeCheck} />
       </div>
-
-      {phoneApp?.enabled && <PhoneCallTiles totals={today} dialixa={!!dialixa?.reports} />}
-
-      <CallsOverTime rows={myDays.data ?? []} note="Your calls, last 14 days." />
-
-      <CallsByDateHour measures={phoneApp?.enabled ? ["calls", "new_dials", "phone_calls", "connected_calls"] : ["calls", "new_dials"]} rows={hourly.data ?? []} note="Your calls, last 14 days." />
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card className="p-4">
-          <h2 className="text-sm font-semibold text-foreground">Your call outcomes on {format(parseISO(day), "d MMM")}</h2>
-          {ended.length === 0 ? (
-            <p className="mt-2 text-sm text-muted-foreground">No outcomes saved on this day.</p>
-          ) : (
-            <div className="mt-3 space-y-3">
-              {ended.map((d) => (
-                <div key={d.id}>
-                  <div className="flex justify-between text-sm">
-                    <span className="font-medium text-foreground">{d.name}</span>
-                    <span className="tabular-nums text-foreground">{d.total} <span className="text-xs text-muted-foreground">({pct(d.total, today.calls)}%)</span></span>
-                  </div>
-                  {d.subs.length > 0 && <p className="text-xs text-muted-foreground">{d.subs.map((x) => `${x.name} ${x.n}`).join(" · ")}</p>}
-                </div>
-              ))}
+        {showAttendance && (
+          <Card className="rounded-xl p-4 shadow-sm">
+            <h2 className="text-sm font-semibold text-foreground">Your hours today</h2>
+            <div className="mt-3 flex flex-wrap gap-x-8 gap-y-2">
+              <div><p className="text-xs text-muted-foreground">Start</p><p className="font-medium tabular-nums">{fmtClock(attendance.data?.sign_in_time ?? null)}</p></div>
+              <div><p className="text-xs text-muted-foreground">End</p><p className="font-medium tabular-nums">{fmtClock(attendance.data?.sign_out_time ?? null)}</p></div>
+              <div><p className="text-xs text-muted-foreground">Hours</p><p className="font-medium tabular-nums">{attendance.data?.total_hours ? fmtHM(attendance.data.total_hours * 3600) : "—"}</p></div>
+              <Link to="/attendance" className="ml-auto self-end text-sm text-primary underline">My attendance</Link>
             </div>
+          </Card>
+        )}
+        <Card className="rounded-xl p-4 shadow-sm">
+          <h2 className="text-sm font-semibold text-foreground">Callbacks waiting for you</h2>
+          {(callbacks.data ?? []).length === 0 ? (
+            <p className="mt-2 text-sm text-muted-foreground">No callbacks scheduled.</p>
+          ) : (
+            <ul className="mt-3 space-y-2">
+              {(callbacks.data ?? []).map((cb) => (
+                <li key={cb.id} className="flex items-center justify-between gap-2 text-sm">
+                  <Link to={`/contacts/${cb.contact_id}`} className="flex items-center gap-2 text-foreground hover:underline"><Phone size={14} className="text-muted-foreground" />{(cb.subject ?? "").replace("Callback — ", "")}</Link>
+                  <span className="tabular-nums text-muted-foreground">{cb.scheduled_at ? new Date(cb.scheduled_at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" }) : ""}</span>
+                </li>
+              ))}
+            </ul>
           )}
         </Card>
-        <div className="space-y-4">
-          <Card className="p-4">
-            <h2 className="text-sm font-semibold text-foreground">Callbacks waiting for you</h2>
-            {(callbacks.data ?? []).length === 0 ? (
-              <p className="mt-2 text-sm text-muted-foreground">No callbacks scheduled.</p>
-            ) : (
-              <ul className="mt-3 space-y-2">
-                {(callbacks.data ?? []).map((cb) => (
-                  <li key={cb.id} className="flex items-center justify-between gap-2 text-sm">
-                    <Link to={`/contacts/${cb.contact_id}`} className="flex items-center gap-2 text-foreground hover:underline"><Phone size={14} className="text-muted-foreground" />{(cb.subject ?? "").replace("Callback — ", "")}</Link>
-                    <span className="tabular-nums text-muted-foreground">{cb.scheduled_at ? new Date(cb.scheduled_at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" }) : ""}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
-          <TableCard title="Team, last 7 days" subtitle="Calls (outcomes saved)">
-            <Table>
-              <TableHeader><TableRow className="hover:bg-transparent"><TH className="w-10">#</TH><TH>Caller</TH><TH right>Calls</TH></TableRow></TableHeader>
-              <TableBody>
-                {board.map((b, i) => {
-                  const name = callers.find((c) => c.id === b.id)?.name ?? "Caller";
-                  const you = b.id === userId;
-                  return (
-                    <TableRow key={b.id} className={`${ROW} ${you ? "bg-primary/5 hover:bg-primary/10" : ""}`}>
-                      <TableCell className={`${CELL} tabular-nums text-muted-foreground`}>{i + 1}</TableCell>
-                      <TableCell className={CELL}><Person name={name} sub={you ? "You" : undefined} /></TableCell>
-                      <TableCell className={NUM}><Fig v={b.calls} bold /></TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </TableCard>
-        </div>
       </div>
+
+      <VolumeCard period={period} from={from} to={to} hourly={hourly.data ?? []} days={mine} />
+
+      <Link to="/reports" className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline">View your reports <ArrowRight className="h-4 w-4" /></Link>
     </div>
   );
 }

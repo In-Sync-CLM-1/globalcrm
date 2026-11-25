@@ -78,3 +78,23 @@ export function dateHourHeatmapOption(rows: DateHourRow[], hours: number[], meas
     }],
   } as EChartsOption;
 }
+
+/** The simple dashboards' one chart: a single series of thin bars, with the exact figure on hover. */
+export function volumeOption(points: { label: string; calls: number }[]): EChartsOption {
+  return {
+    animation: false,
+    textStyle: TEXT,
+    tooltip: {
+      trigger: "axis", axisPointer: { type: "shadow" }, backgroundColor: "#fff", borderWidth: 0, padding: [8, 12], textStyle: { color: INK, fontSize: 12 },
+      extraCssText: "box-shadow: 0 4px 20px rgba(0,0,0,.12); border-radius: 10px;",
+      formatter: (ps: unknown) => {
+        const p = points[(ps as { dataIndex: number }[])[0].dataIndex];
+        return `<div style="font-weight:600;margin-bottom:4px">${p.label}</div><b>${num(p.calls)}</b> calls`;
+      },
+    },
+    grid: { left: 8, right: 8, top: 16, bottom: 8, containLabel: true },
+    xAxis: { type: "category", data: points.map((p) => p.label), axisLine: { lineStyle: { color: GRID } }, axisTick: { show: false }, axisLabel: { color: MUTED, fontSize: 11, hideOverlap: true } },
+    yAxis: { type: "value", min: 0, minInterval: 1, axisLine: { show: false }, axisTick: { show: false }, axisLabel: { color: MUTED, fontSize: 11 }, splitLine: { lineStyle: { color: GRID } } },
+    series: [{ name: "Calls", type: "bar", data: points.map((p) => p.calls), color: SERIES.dialled, barMaxWidth: 24, itemStyle: { borderRadius: [4, 4, 0, 0] } }],
+  } as EChartsOption;
+}
