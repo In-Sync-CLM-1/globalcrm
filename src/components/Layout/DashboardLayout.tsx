@@ -871,7 +871,8 @@ function DashboardLayout({ children }: DashboardLayoutProps) {
       {!isPlatformAdmin && <CallbackReminderAlert />}
 
        {/* Floating Chat Widget */}
-       {!isPlatformAdmin && canAccessFeature("communications") && <FloatingChatWidget />}
+       {/* Ajimos does not use the chat button. */}
+      {userData && !isGaming && !isPlatformAdmin && canAccessFeature("communications") && <FloatingChatWidget />}
     </div>
   );
 }
