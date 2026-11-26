@@ -11,6 +11,7 @@ import { useNotification } from "@/hooks/useNotification";
 import { AJIMOS_ORG_ID, useDispositionCatalog } from "@/components/Gaming/gamingStats";
 import type { PhoneCallTarget } from "@/components/PhoneApp/PhoneCallDialog";
 import type { DialixaCallState, PanelLine } from "./DialixaProvider";
+import { useDialixaStatus } from "@/hooks/useDialixa";
 
 const LINE: Record<PanelLine, { text: string; dot: string }> = {
   ready: { text: "Ready for calls", dot: "bg-emerald-500" },
@@ -21,7 +22,7 @@ const LINE: Record<PanelLine, { text: string; dot: string }> = {
   off: { text: "Calls ring in your Dialixa softphone", dot: "bg-sky-500" },
 };
 const KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "0", "#"];
-const NEXT_DELAY = 3;
+const NEXT_DELAY = 3; // used when the admin has not set a gap
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
 interface Props {
@@ -219,7 +220,8 @@ function Outcome({ callId, answeredElsewhere, next, onClose, onSaved }: {
 }
 
 function NextCall({ name, onAdvance, onStop }: { name: string; onAdvance: () => void; onStop: () => void }) {
-  const [left, setLeft] = useState(NEXT_DELAY);
+  const { data: status } = useDialixaStatus();
+  const [left, setLeft] = useState(status?.next_call_gap ?? NEXT_DELAY);
   useEffect(() => {
     if (left <= 0) { onAdvance(); return; }
     const t = window.setTimeout(() => setLeft((n) => n - 1), 1000);

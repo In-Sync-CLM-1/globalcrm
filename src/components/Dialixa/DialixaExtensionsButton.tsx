@@ -9,6 +9,7 @@ import { useNotification } from "@/hooks/useNotification";
 import { useOrgContext } from "@/hooks/useOrgContext";
 import { useUserRole } from "@/hooks/useUserRole";
 import { AJIMOS_ORG_ID } from "@/components/Gaming/gamingStats";
+import { useDialixaStatus } from "@/hooks/useDialixa";
 
 interface Row { user_id: string; name: string; extension: string | null; sip_username: string | null; has_password: boolean }
 
@@ -43,8 +44,38 @@ export function DialixaExtensionsButton() {
         {error ? <p className="text-sm text-destructive">The list could not be loaded.</p>
           : !rows ? <p className="text-sm text-muted-foreground">Loading…</p>
           : <div className="space-y-2">{rows.map((r) => <ExtensionRow key={r.user_id} row={r} />)}</div>}
+        <CallGapSetting />
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** The gap between calls when a caller calls one player after another. */
+function CallGapSetting() {
+  const notify = useNotification();
+  const queryClient = useQueryClient();
+  const { data: status } = useDialixaStatus();
+  const [value, setValue] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const shown = value ?? String(status?.next_call_gap ?? 3);
+  const save = async () => {
+    const seconds = Number(shown);
+    if (!Number.isInteger(seconds) || seconds < 0 || seconds > 600) { notify.error("Not saved", "Enter 0 to 600 seconds."); return; }
+    setSaving(true);
+    const { error } = await supabase.rpc("dialixa_set_call_gap" as never, { _seconds: seconds } as never);
+    setSaving(false);
+    if (error) { notify.error("Not saved", error); return; }
+    setValue(null);
+    notify.success("Saved", `Gap between calls: ${seconds} seconds`);
+    queryClient.invalidateQueries({ queryKey: ["my-dialixa-status"] });
+  };
+  return (
+    <div className="mt-4 flex flex-wrap items-center gap-2 border-t pt-4">
+      <span className="text-sm font-medium">Gap between calls</span>
+      <Input aria-label="Gap between calls in seconds" className="w-24" inputMode="numeric" value={shown} onChange={(e) => setValue(e.target.value.replace(/\D/g, ""))} />
+      <span className="text-sm text-muted-foreground">seconds, after the outcome is saved, before the next player is called.</span>
+      <Button size="sm" onClick={save} disabled={saving}>{saving ? "Saving…" : "Save"}</Button>
+    </div>
   );
 }
 
