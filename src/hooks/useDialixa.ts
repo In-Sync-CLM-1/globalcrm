@@ -12,6 +12,8 @@ export interface DialixaStatus {
   softphone?: boolean;
   /** Dialixa call reports are on for the organisation. */
   reports?: boolean;
+  /** Seconds between calls when calling one after another (set by the admin, default 3). */
+  next_call_gap?: number;
 }
 
 /** Dialixa calling (Ajimos only). Every other organisation gets { enabled: false } without asking the server. */
