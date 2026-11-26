@@ -36,6 +36,7 @@ import { PostCallDispositionDialog } from "@/components/Contact/PostCallDisposit
 import IedupPipeline from "@/pages/IedupPipeline";
 import { IEDUP_ORG_ID } from "@/hooks/useIsIedup";
 import { useUrlState } from "@/hooks/useUrlState";
+import { usePipelineIndustryFilter } from "@/hooks/usePipelineIndustryFilter";
 import { useContactCategories } from "@/hooks/useContactCategories";
 import { useGamingAccess } from "@/hooks/useGamingAccess";
 import { useManualOutcomeAccess } from "@/hooks/useManualOutcomeAccess";
@@ -364,6 +365,8 @@ export default function PipelineBoard() {
     else if (f.assignedTo) q = q.eq("assigned_to", f.assignedTo);
     if (f.category === "none") q = q.is("category", null);
     else if (f.category) q = q.eq("category", f.category);
+    if (f.industry === "none") q = q.or("industry_type.is.null,industry_type.eq.");
+    else if (f.industry) q = q.eq("industry_type", f.industry);
     return q;
   }, []);
 
@@ -487,6 +490,8 @@ export default function PipelineBoard() {
   // Redefine (RMPL): category on the list and cards, with a filter. Empty for every other organisation.
   const categories = useContactCategories(effectiveOrgId);
   const showCategory = categories.length > 0;
+  // Redefine (RMPL): Industry / Segment filter in place of Targeted Product and WhatsApp Outreach. Off for every other organisation.
+  const industryFilter = usePipelineIndustryFilter(effectiveOrgId);
   const manualOutcome = useManualOutcomeAccess();
   // In-Sync Phone app: Call buttons dial on the caller's own phone (organisations that have it switched on).
   const { data: phoneApp } = usePhoneAppStatus();
@@ -1030,6 +1035,7 @@ export default function PipelineBoard() {
       if (filters.assignedTo === "unassigned" && contact.assigned_to) return false;
       if (filters.assignedTo && filters.assignedTo !== "unassigned" && contact.assigned_to !== filters.assignedTo) return false;
       if (filters.category && (contact.category ?? "none") !== filters.category) return false;
+      if (filters.industry && ((contact.industry_type || "").trim() || "none") !== filters.industry) return false;
 
       return true;
     });
@@ -1072,6 +1078,7 @@ export default function PipelineBoard() {
       if (urlFilters.assignedTo === "unassigned" && contact.assigned_to) return false;
       if (urlFilters.assignedTo && urlFilters.assignedTo !== "unassigned" && contact.assigned_to !== urlFilters.assignedTo) return false;
       if (urlFilters.category && (contact.category ?? "none") !== urlFilters.category) return false;
+      if (urlFilters.industry && ((contact.industry_type || "").trim() || "none") !== urlFilters.industry) return false;
 
       return true;
     });
@@ -1154,6 +1161,7 @@ export default function PipelineBoard() {
           users={usersData ?? []}
           dispositions={dispositionsList ?? []}
           categories={categories}
+          industries={industryFilter.enabled ? industryFilter.options : null}
           onFiltersChange={setFilters}
           onSearch={applyFilters}
           onClear={handleClearFilters}

@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Search, X, ChevronDown, ChevronUp } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { industryLabel } from "@/hooks/usePipelineIndustryFilter";
 
 interface PipelineStage {
   id: string;
@@ -29,6 +30,7 @@ export interface PipelineFiltersState {
   assignedTo: string;
   dispositionId: string;
   category: string;
+  industry: string;
   matchMode: "exact" | "contains";
 }
 
@@ -44,6 +46,8 @@ interface PipelineFiltersProps {
   dispositions?: PipelineDisposition[];
   /** Empty for organisations without contact categories: the filter is then not shown. */
   categories?: string[];
+  /** Set for organisations that filter by Industry / Segment instead of Targeted Product and WhatsApp Outreach (Redefine). */
+  industries?: string[] | null;
   onFiltersChange: (filters: PipelineFiltersState) => void;
   onSearch: () => void;
   onClear: () => void;
@@ -62,6 +66,7 @@ const emptyFilters: PipelineFiltersState = {
   assignedTo: "",
   dispositionId: "",
   category: "",
+  industry: "",
   matchMode: "contains",
 };
 
@@ -90,6 +95,7 @@ export function PipelineFilters({
   users = [],
   dispositions = [],
   categories = [],
+  industries = null,
   onFiltersChange,
   onSearch,
   onClear,
@@ -146,7 +152,7 @@ export function PipelineFilters({
           {!gaming.isGaming && (
           <div className="flex items-center justify-between">
             <span className="text-xs text-muted-foreground">
-              {gaming.isGaming ? "Match mode for Name / Company" : "Match mode for Name / Company / Targeted Product"}
+              {gaming.isGaming || industries ? "Match mode for Name / Company" : "Match mode for Name / Company / Targeted Product"}
             </span>
             <ToggleGroup
               type="single"
@@ -190,7 +196,26 @@ export function PipelineFilters({
                 ))}
               </SelectContent>
             </Select>
-{!gaming.isGaming && (
+{industries && (
+              <Select
+                value={filters.industry}
+                onValueChange={(v) => handleChange("industry", v === "all" ? "" : v)}
+              >
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue placeholder="Industry / Segment" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Industries / Segments</SelectItem>
+                  <SelectItem value="none">No Industry</SelectItem>
+                  {industries.map((i) => (
+                    <SelectItem key={i} value={i}>
+                      {industryLabel(i)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+{!gaming.isGaming && !industries && (
               <Input
                 placeholder="Targeted Product"
                 value={filters.product}
@@ -217,7 +242,7 @@ export function PipelineFilters({
                 </SelectContent>
               </Select>
             )}
-{!gaming.isGaming && (
+{!gaming.isGaming && !industries && (
               <Select
                 value={filters.whatsappOutreachStatus}
                 onValueChange={(v) => handleChange("whatsappOutreachStatus", v === "all" ? "" : v)}
