@@ -504,6 +504,8 @@ export default function PipelineBoard() {
   // Contacts already dialled in this Next-call run. The list is ordered by last update, so a called
   // contact moves to the top of it; without this it would be offered as the next one again.
   const [dialledIds, setDialledIds] = useState<string[]>([]);
+  // Bulk call through Dialixa: the selected players, called one after another.
+  const [bulkQueue, setBulkQueue] = useState<PhoneCallTarget[] | null>(null);
   const [nextCallMode, setNextCallMode] = useUrlState("nextcall", "");
   const [bulkUploadOpen, setBulkUploadOpen] = useState(false);
   const [aiQueueing, setAiQueueing] = useState(false);
@@ -571,6 +573,10 @@ export default function PipelineBoard() {
   const contacts = activeTab === "table" ? baseContacts : (filteredContacts ?? baseContacts);
   // Next-call mode: the next contact down this list that the caller may call.
   const nextPhoneTarget: PhoneCallTarget | null = (() => {
+    if (bulkQueue && phoneTarget) {
+      const at = bulkQueue.findIndex((t) => t.id === phoneTarget.id);
+      return bulkQueue.slice(at + 1).find((t) => !dialledIds.includes(t.id)) ?? null;
+    }
     if (nextCallMode !== "1" || !phoneTarget) return null;
     const i = contacts.findIndex((c) => c.id === phoneTarget.id);
     const n = contacts.slice(i + 1).find((c) =>
@@ -835,7 +841,7 @@ export default function PipelineBoard() {
           const chunk = missingIds.slice(i, i + chunkSize);
           const { data, error } = await supabase
             .from("contacts")
-            .select("id, first_name, last_name, email, phone, company, pipeline_stage_id, job_title, source, status")
+            .select("id, first_name, last_name, email, phone, company, pipeline_stage_id, job_title, source, status, assigned_to")
             .in("id", chunk);
           if (error) throw error;
           extras = extras.concat((data ?? []) as Contact[]);
@@ -853,6 +859,18 @@ export default function PipelineBoard() {
         }
       }
       const onPageSelected = contacts.filter((c) => selectedIds.has(c.id));
+      if (callViaDialixa) {
+        const queue = [...onPageSelected, ...extras]
+          .filter((c) => phoneAccess.canCall(c.assigned_to))
+          .map((c) => ({ id: c.id, name: [c.first_name, c.last_name].filter(Boolean).join(" ") }));
+        if (queue.length === 0) { notify.error("Nothing to call", "You may not call any of the selected contacts."); return; }
+        const skipped = selectedIds.size - queue.length;
+        notify.success("Bulk call started", `Calling ${queue.length} one after another${skipped ? `, ${skipped} skipped (not yours)` : ""}. Save each outcome to go to the next.`);
+        setBulkQueue(queue);
+        setDialledIds([queue[0].id]);
+        setPhoneTarget(queue[0]);
+        return;
+      }
       setBulkCallContacts([...onPageSelected, ...extras]);
       setBulkCallOpen(true);
     } catch (error: any) {
@@ -1109,7 +1127,7 @@ export default function PipelineBoard() {
       {callViaDialixa && (
         <DialixaCall
           target={phoneTarget}
-          onClose={() => setPhoneTarget(null)}
+          onClose={() => { setPhoneTarget(null); setBulkQueue(null); }}
           next={nextPhoneTarget}
           onAdvance={(n) => { setDialledIds((ids) => [...ids, n.id]); setPhoneTarget(n); }}
         />
